@@ -123,3 +123,28 @@ Stage Summary:
 - Root cause: Missing allowedDevOrigins + category-grid data access bug + missing DB data
 - All 3 issues fixed, database reseeded, all endpoints returning 200
 - AI Virtual Try-On feature API route and dialog also fixed with better error handling
+---
+Task ID: 2
+Agent: main
+Task: Fix "Application error: a client-side exception has occurred" on boxes3.space.z.ai
+
+Work Log:
+- Investigated all client-side components systematically
+- Found product-detail.tsx had WRONG data access pattern: used `useQuery<ProductDetail>` but API returns `{ product: {...} }`
+- Found try-on-dialog.tsx was COMPLETELY MISSING (deleted during session) - product-detail still referenced it
+- Found order-history.tsx had wrong data access: `useQuery<Order[]>` but API returns `{ orders: [...] }`
+- Fixed product-detail.tsx: changed to `useQuery<{ product: ProductDetail }>` and `data?.product`
+- Fixed order-history.tsx: changed to `useQuery<{ orders: Order[] }>` and `data?.orders ?? []`
+- Recreated TryOnDialog inline within product-detail.tsx (to avoid file dependency issues)
+- Used plain `<img>` tag for base64 selfie preview instead of Next.js Image (avoids data: URL issues)
+- Added error.tsx to app directory for better error reporting
+- Added React ErrorBoundary class in page.tsx to catch and display errors
+- Verified all APIs return 200 and correct data format
+- Server running, 10 categories and 31 products confirmed in API responses
+
+Stage Summary:
+- Root cause: Multiple data access pattern bugs + missing try-on dialog file
+- product-detail was accessing `data.id` instead of `data.product.id` 
+- order-history was accessing data as array instead of `data.orders`
+- Try-on dialog file was missing, causing import crash
+- All issues fixed, error boundary added for better debugging

@@ -45,11 +45,13 @@ export function OrderHistory() {
   const [email, setEmail] = useState('');
   const [searchEmail, setSearchEmail] = useState('');
 
-  const { data: orders, isLoading } = useQuery<Order[]>({
+  const { data, isLoading } = useQuery<{ orders: Order[] }>({
     queryKey: ['orders', searchEmail],
     queryFn: () => fetch(`/api/orders?email=${encodeURIComponent(searchEmail)}`).then((r) => r.json()),
     enabled: !!searchEmail,
   });
+
+  const orders = data?.orders ?? [];
 
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
 
