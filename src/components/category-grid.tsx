@@ -3,7 +3,10 @@
 import { useStore } from '@/lib/store';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
-import { Gem, Watch, Briefcase, Flower2, Shirt, Home } from 'lucide-react';
+import {
+  Gem, Watch, Briefcase, Flower2, Shirt, Home,
+  Ribbon, ToyBrick, Heart, HeartHandshake,
+} from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface Category {
@@ -22,6 +25,10 @@ const categoryIcons: Record<string, React.ReactNode> = {
   fragrances: <Flower2 className="h-6 w-6" />,
   fashion: <Shirt className="h-6 w-6" />,
   'home-living': <Home className="h-6 w-6" />,
+  sarees: <Ribbon className="h-6 w-6" />,
+  toys: <ToyBrick className="h-6 w-6" />,
+  'romantic-gifts': <Heart className="h-6 w-6" />,
+  'couple-gifts': <HeartHandshake className="h-6 w-6" />,
 };
 
 const categoryColors: Record<string, string> = {
@@ -31,15 +38,21 @@ const categoryColors: Record<string, string> = {
   fragrances: 'from-purple-900/30 to-stone-900/60',
   fashion: 'from-emerald-900/30 to-stone-900/60',
   'home-living': 'from-orange-900/30 to-stone-900/60',
+  sarees: 'from-pink-900/30 to-stone-900/60',
+  toys: 'from-cyan-900/30 to-stone-900/60',
+  'romantic-gifts': 'from-red-900/30 to-stone-900/60',
+  'couple-gifts': 'from-fuchsia-900/30 to-stone-900/60',
 };
 
 export function CategoryGrid() {
   const { setCategory, setView } = useStore();
 
-  const { data: categories, isLoading } = useQuery<Category[]>({
+  const { data, isLoading } = useQuery<{ categories: Category[] }>({
     queryKey: ['categories'],
     queryFn: () => fetch('/api/categories').then((r) => r.json()),
   });
+
+  const categories = data?.categories ?? [];
 
   if (isLoading) {
     return (
@@ -47,8 +60,8 @@ export function CategoryGrid() {
         <h2 className="mb-8 text-center text-2xl font-bold text-amber-100 sm:text-3xl">
           Shop by Category
         </h2>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          {Array.from({ length: 10 }).map((_, i) => (
             <Skeleton key={i} className="h-40 rounded-lg bg-stone-900/50" />
           ))}
         </div>
@@ -61,8 +74,8 @@ export function CategoryGrid() {
       <h2 className="mb-8 text-center text-2xl font-bold text-amber-100 sm:text-3xl">
         Shop by Category
       </h2>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-        {categories?.map((cat, i) => (
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        {categories.map((cat, i) => (
           <motion.button
             key={cat.id}
             initial={{ opacity: 0, y: 20 }}
