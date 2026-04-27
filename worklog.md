@@ -181,3 +181,29 @@ Stage Summary:
 - For full clothing changes (sarees/outfits): 6/10 is the realistic limit - the entire image must change
 - This is a fundamental AI limitation - generating a completely new outfit while preserving exact facial features is extremely difficult
 - Frontend now clearly communicates this distinction to set proper expectations
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix AI try-on feature - output not coming
+
+Work Log:
+- Investigated the issue: found that try-on-dialog.tsx was missing (component was inlined in product-detail.tsx)
+- Found critical bugs in the TryOnDialog:
+  1. The dialog was NOT using async polling - it tried to get imageUrl directly from POST response, but the API returns jobId instead
+  2. The AI Try-On button only showed for 'sarees' category
+  3. The result image used Next.js `<Image>` component with a data URL which doesn't render properly
+  4. The `categorySlug` variable was undefined in the TryOnDialog scope
+- Rewrote product-detail.tsx with all fixes:
+  - TryOnDialog now implements proper async polling (POST returns jobId, then polls GET /api/try-on?jobId=xxx every 3s)
+  - AI Try-On button now shows for ALL categories with category-specific labels
+  - Result image uses regular `<img>` tag instead of Next.js `<Image>` for base64 data URLs
+  - Added `categorySlug` prop to TryOnDialog
+  - Added progress bar and dynamic progress messages during generation
+  - Added polling count display with elapsed time
+- Verified no lint errors and dev server compiles successfully
+
+Stage Summary:
+- Fixed the critical bug where try-on output was never displayed (async polling wasn't implemented)
+- AI Try-On is now available for all product categories
+- Improved UX with progress bar and dynamic status messages
