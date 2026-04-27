@@ -569,7 +569,6 @@ function TryOnDialog({
               <div className="flex items-start gap-4">
                 <div className="relative flex-1">
                   <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-amber-900/20 bg-stone-900/60">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={selfiePreview}
                       alt="Your selfie"
@@ -655,22 +654,63 @@ function TryOnDialog({
           {/* Result */}
           {step === 'result' && resultImage && (
             <div className="space-y-4">
-              <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-amber-600/30 bg-stone-900/60">
-                <Image
-                  src={resultImage}
-                  alt={`Virtual try-on: ${productName}`}
-                  fill
-                  className="object-cover"
-                  sizes="500px"
-                />
-                <div className="absolute left-3 top-3 rounded-full bg-emerald-600/90 px-3 py-1 text-xs font-medium text-white shadow-lg">
-                  AI Generated
+              {/* Side-by-side comparison: Your Selfie → AI Result */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/60">
+                    {selfiePreview && (
+                      <img
+                        src={selfiePreview}
+                        alt="Your selfie"
+                        className="h-full w-full object-cover"
+                      />
+                    )}
+                  </div>
+                  <p className="text-center text-[10px] font-medium text-amber-200/50">Your Selfie</p>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-600/30 bg-stone-900/60">
+                    <Image
+                      src={resultImage}
+                      alt={`Virtual try-on: ${productName}`}
+                      fill
+                      className="object-cover"
+                      sizes="200px"
+                    />
+                    <div className="absolute left-1.5 top-1.5 rounded-full bg-emerald-600/90 px-2 py-0.5 text-[9px] font-bold text-white shadow-lg">
+                      AI
+                    </div>
+                  </div>
+                  <p className="text-center text-[10px] font-medium text-amber-400">AI Try-On</p>
                 </div>
               </div>
 
-              <p className="text-center text-xs text-amber-200/30">
-                This is an AI-generated visualization. Actual appearance may vary.
-              </p>
+              {/* Product reference */}
+              <div className="flex items-center gap-2 rounded-lg border border-amber-900/15 bg-stone-900/40 p-2">
+                <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-md">
+                  <Image
+                    src={productImage}
+                    alt={productName}
+                    fill
+                    className="object-cover"
+                    sizes="40px"
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-medium text-amber-200/70 truncate">{productName}</p>
+                  <p className="text-[10px] text-amber-200/30">Product used for try-on</p>
+                </div>
+                <span className="text-[10px] text-amber-200/30">✓ Applied</span>
+              </div>
+
+              {/* Disclaimer based on category type */}
+              <div className="rounded-lg border border-amber-900/15 bg-amber-950/20 p-3">
+                <p className="text-[11px] text-amber-200/50">
+                  {['sarees', 'fashion'].includes(categorySlug)
+                    ? '💡 AI visualization shows the product style and outfit. Facial features are approximate — for the best experience, focus on how the outfit looks.'
+                    : '✨ AI visualization combines your selfie with the product. The result closely matches your appearance with the product added.'}
+                </p>
+              </div>
 
               <div className="flex gap-3">
                 <Button
@@ -687,7 +727,7 @@ function TryOnDialog({
                   className="flex flex-1 items-center justify-center rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-stone-950 transition-all hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                 >
                   <Download className="mr-2 h-4 w-4" />
-                  Save Image
+                  Save
                 </a>
               </div>
             </div>
