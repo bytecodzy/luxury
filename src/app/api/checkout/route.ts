@@ -34,7 +34,13 @@ export async function POST(request: NextRequest) {
 
     // Verify products and calculate subtotal
     let subtotal = 0
-    const orderItemsData = []
+    const orderItemsData: Array<{
+      productId: string;
+      name: string;
+      price: number;
+      quantity: number;
+      image: string | null;
+    }> = []
 
     for (const item of items) {
       const product = await db.product.findUnique({

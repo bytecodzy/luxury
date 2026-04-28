@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit
 
     // Build where clause
-    const where: Record<string, unknown> = {}
+    const where: any = {}
 
     if (category) {
       where.category = { slug: category }
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Build orderBy
-    let orderBy: Record<string, unknown> = { createdAt: 'desc' }
+    let orderBy: any = { createdAt: 'desc' }
     switch (sort) {
       case 'price-asc':
         orderBy = { price: 'asc' }

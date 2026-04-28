@@ -4,7 +4,8 @@ import ZAI from 'z-ai-web-dev-sdk'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
-// In-memory job store
+type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864' | '1440x720' | '720x1440'
+
 interface TryOnJob {
   status: 'processing' | 'completed' | 'failed'
   imageUrl?: string
@@ -16,7 +17,7 @@ interface TryOnJob {
 
 const jobs = new Map<string, TryOnJob>()
 
-// Clean up old jobs every 5 minutes
+// Clean up old jobs
 setInterval(() => {
   const now = Date.now()
   for (const [id, job] of jobs) {
@@ -26,7 +27,6 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000)
 
-// Read a local product image and convert to base64 data URL
 function getProductImageBase64(imagePath: string): string | null {
   try {
     const fullPath = join(process.cwd(), 'public', imagePath)
@@ -41,16 +41,14 @@ function getProductImageBase64(imagePath: string): string | null {
   }
 }
 
-// VLM prompts
 const VLM_PERSON_PROMPT = `Describe this person in precise visual detail. Include: exact skin tone shade, hair color and style, face shape, eye color, key facial features, body build, age range. Be very specific. 2 sentences max.`
 
 const VLM_PRODUCT_PROMPT = `Describe this product in precise visual detail. Include: exact colors, materials, textures, shapes, patterns, embellishments, key distinctive features. Be very specific. 2 sentences max.`
 
-// Category-specific edit settings optimized through testing
 interface EditSettings {
   strength: number
   guidanceScale: number
-  imageSize: string
+  imageSize: ImageSize
   promptTemplate: string
 }
 
@@ -230,6 +228,7 @@ async function processTryOnJob(
     let personDescription = ''
     try {
       const vlmPromise = zai.chat.completions.createVision({
+        model: 'glm-4v-flash',
         messages: [{
           role: 'user',
           content: [
@@ -253,6 +252,7 @@ async function processTryOnJob(
     let productDescription = ''
     try {
       const vlmPromise = zai.chat.completions.createVision({
+        model: 'glm-4v-flash',
         messages: [{
           role: 'user',
           content: [
@@ -281,16 +281,16 @@ async function processTryOnJob(
     console.log(`[try-on] Generating for ${jobId}, cat: ${categorySlug}, str: ${settings.strength}, gs: ${settings.guidanceScale}`)
 
     // Step 4: Image EDIT API with both reference images
-    const editResponse = await zai.images.generations.edit({
+    const editResponse = await zai.images.generations.edit(({
+      prompt: editPrompt,
+      size: settings.imageSize,
       images: [
         { url: selfieData },
         { url: productImageBase64 },
       ],
-      prompt: editPrompt,
-      size: settings.imageSize,
       strength: settings.strength,
       guidance_scale: settings.guidanceScale,
-    })
+    }) as any)
 
     const imageBase64 = editResponse.data[0]?.base64
     if (!imageBase64) throw new Error('No image generated')
