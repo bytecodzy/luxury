@@ -105,6 +105,69 @@ echo "  - 复制 start.sh 到 $BUILD_DIR"
 cp "$SCRIPT_DIR/start.sh" "$BUILD_DIR/start.sh"
 chmod +x "$BUILD_DIR/start.sh"
 
+# 🔧 优化构建产物 - 删除不必要的文件以减小部署包体积
+echo ""
+echo "🔧 优化构建产物，减小部署包体积..."
+
+NEXT_DIST="$BUILD_DIR/next-service-dist"
+
+if [ -d "$NEXT_DIST/node_modules" ]; then
+    echo "  - 删除 @img (sharp native binaries)..."
+    rm -rf "$NEXT_DIST/node_modules/@img"
+
+    echo "  - 删除 typescript (不需要在生产环境运行)..."
+    rm -rf "$NEXT_DIST/node_modules/typescript"
+
+    echo "  - 删除 Prisma 非 SQLite 的 WASM 引擎..."
+    # 只保留 sqlite 相关的 wasm 和 js 文件，删除 postgresql, mysql, cockroachdb, sqlserver
+    if [ -d "$NEXT_DIST/node_modules/@prisma/client/runtime" ]; then
+        cd "$NEXT_DIST/node_modules/@prisma/client/runtime"
+        rm -f query_engine_bg.postgresql.* 2>/dev/null
+        rm -f query_engine_bg.mysql.* 2>/dev/null
+        rm -f query_engine_bg.cockroachdb.* 2>/dev/null
+        rm -f query_engine_bg.sqlserver.* 2>/dev/null
+        rm -f query_compiler_bg.postgresql.* 2>/dev/null
+        rm -f query_compiler_bg.mysql.* 2>/dev/null
+        rm -f query_compiler_bg.cockroachdb.* 2>/dev/null
+        rm -f query_compiler_bg.sqlserver.* 2>/dev/null
+        cd - > /dev/null
+        echo "    已删除非 SQLite WASM 引擎"
+    fi
+
+    echo "  - 删除 sharp (由 @img 提供的原生图像处理)..."
+    rm -rf "$NEXT_DIST/node_modules/sharp"
+
+    echo "  - 删除 .d.ts 类型声明文件..."
+    find "$NEXT_DIST/node_modules" -name "*.d.ts" -delete 2>/dev/null
+    find "$NEXT_DIST/node_modules" -name "*.d.mts" -delete 2>/dev/null
+    find "$NEXT_DIST/node_modules" -name "*.d.cts" -delete 2>/dev/null
+
+    echo "  - 删除 .map 源映射文件..."
+    find "$NEXT_DIST/node_modules" -name "*.map" -delete 2>/dev/null
+
+    echo "  - 删除测试和文档文件..."
+    find "$NEXT_DIST/node_modules" -type d -name "test" -exec rm -rf {} + 2>/dev/null
+    find "$NEXT_DIST/node_modules" -type d -name "tests" -exec rm -rf {} + 2>/dev/null
+    find "$NEXT_DIST/node_modules" -type d -name "docs" -exec rm -rf {} + 2>/dev/null
+    find "$NEXT_DIST/node_modules" -type d -name "__tests__" -exec rm -rf {} + 2>/dev/null
+
+    echo "  - 删除 README 和 CHANGELOG..."
+    find "$NEXT_DIST/node_modules" -name "README*" -delete 2>/dev/null
+    find "$NEXT_DIST/node_modules" -name "CHANGELOG*" -delete 2>/dev/null
+    find "$NEXT_DIST/node_modules" -name "HISTORY*" -delete 2>/dev/null
+    find "$NEXT_DIST/node_modules" -name "LICENSE*" -delete 2>/dev/null
+fi
+
+# 删除 .next/server 中的 .map 文件
+if [ -d "$NEXT_DIST/.next/server" ]; then
+    echo "  - 删除 .next/server 中的源映射文件..."
+    find "$NEXT_DIST/.next/server" -name "*.map" -delete 2>/dev/null
+fi
+
+echo "✅ 优化完成！"
+echo "📊 优化后目录大小:"
+du -sh "$NEXT_DIST" 2>/dev/null
+
 # 打包到 $BUILD_DIR.tar.gz
 PACKAGE_FILE="${BUILD_DIR}.tar.gz"
 echo ""
