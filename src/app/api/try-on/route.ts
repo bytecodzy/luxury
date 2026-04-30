@@ -106,6 +106,25 @@ function getProductTypeContext(categorySlug: string, productName: string): strin
     return 'PLACEMENT: Saree draped in traditional Indian style with pallu over shoulder. '
   }
 
+  if (categorySlug === 'mens-shirts') {
+    if (nameLower.includes('dress shirt') || nameLower.includes('formal') || nameLower.includes('evening') || nameLower.includes('silk')) {
+      return 'PLACEMENT: Formal dress shirt worn on the torso, buttoned up, tucked into trousers. '
+    }
+    if (nameLower.includes('oxford') || nameLower.includes('button-down') || nameLower.includes('check') || nameLower.includes('linen')) {
+      return 'PLACEMENT: Casual button-up shirt worn on the torso, can be worn tucked or untucked. '
+    }
+    if (nameLower.includes('polo')) {
+      return 'PLACEMENT: Polo shirt worn on the torso, collared, casual smart look. '
+    }
+    if (nameLower.includes('henley')) {
+      return 'PLACEMENT: Henley shirt worn on the torso, partial button placket, relaxed style. '
+    }
+    if (nameLower.includes('t-shirt') || nameLower.includes('tee') || nameLower.includes('v-neck') || nameLower.includes('crew')) {
+      return 'PLACEMENT: T-shirt worn on the torso, casual relaxed fit. '
+    }
+    return 'PLACEMENT: Shirt worn on the torso. '
+  }
+
   return ''
 }
 
@@ -250,6 +269,47 @@ function getEditSettings(categorySlug: string, productName: string): EditSetting
         promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current outfit with the exact outfit from the second reference image. The outfit must match precisely - same color, fabric, cut, pattern, and all design details. Professional fashion photography, studio lighting.',
         numAttempts: 3,
       }
+
+    case 'mens-shirts': {
+      // Formal dress shirts and evening shirts
+      if (nameLower.includes('dress shirt') || nameLower.includes('evening') || nameLower.includes('silk')) {
+        return {
+          strength: 0.38,
+          guidanceScale: 20,
+          imageSize: '768x1344',
+          promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current top with the exact formal dress shirt from the second reference image. The shirt must match precisely - same color, collar style, cuff style, fabric texture, and fit. The shirt should be buttoned appropriately and worn tucked into trousers. Professional fashion photography, studio lighting.',
+          numAttempts: 3,
+        }
+      }
+      // T-shirts and casual tees
+      if (nameLower.includes('t-shirt') || nameLower.includes('tee') || nameLower.includes('v-neck') || nameLower.includes('crew')) {
+        return {
+          strength: 0.35,
+          guidanceScale: 18,
+          imageSize: '768x1344',
+          promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current top with the exact t-shirt from the second reference image. The t-shirt must match precisely - same color, neckline style (crew or V-neck), fabric weight, and fit. Casual relaxed look. Professional fashion photography, natural lighting.',
+          numAttempts: 3,
+        }
+      }
+      // Polo shirts
+      if (nameLower.includes('polo')) {
+        return {
+          strength: 0.36,
+          guidanceScale: 19,
+          imageSize: '768x1344',
+          promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current top with the exact polo shirt from the second reference image. The polo must match precisely - same color, stripe pattern, collar style, and piqué texture. Smart casual look. Professional fashion photography, natural lighting.',
+          numAttempts: 3,
+        }
+      }
+      // Default shirts (Oxford, linen, henley, etc.)
+      return {
+        strength: 0.38,
+        guidanceScale: 19,
+        imageSize: '768x1344',
+        promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current top with the exact shirt from the second reference image. The shirt must match precisely - same color, pattern, collar style, fabric, and fit. Professional fashion photography, studio lighting.',
+        numAttempts: 3,
+      }
+    }
 
     case 'romantic-gifts':
     case 'couple-gifts':
