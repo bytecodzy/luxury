@@ -1,5 +1,7 @@
 'use client';
 
+import Image from 'next/image';
+
 export function Footer() {
   return (
     <footer className="mt-auto border-t border-amber-900/30 bg-stone-950">
@@ -7,9 +9,18 @@ export function Footer() {
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
           {/* Brand */}
           <div>
-            <h3 className="gold-shimmer text-lg font-bold tracking-widest">
-              3 BOXES LUXURY
-            </h3>
+            <div className="flex items-center gap-2">
+              <Image
+                src="/images/logo.png"
+                alt="3 Boxes Luxury Logo"
+                width={36}
+                height={36}
+                className="h-9 w-auto"
+              />
+              <h3 className="gold-shimmer text-lg font-bold tracking-widest">
+                3 BOXES LUXURY
+              </h3>
+            </div>
             <p className="mt-2 text-sm text-amber-200/50">
               Discover timeless elegance. Curated luxury goods from the world&apos;s finest makers.
             </p>
@@ -21,7 +32,7 @@ export function Footer() {
               Shop
             </h4>
             <ul className="mt-3 space-y-2">
-              {['Watches', 'Jewelry', 'Leather Goods', 'Fragrances', 'Fashion', 'Home & Living'].map((item) => (
+              {['Watches', 'Jewelry', 'Leather Goods', 'Fragrances', 'Fashion', 'Home & Living', 'Sarees', "Men's Shirts & T-Shirts"].map((item) => (
                 <li key={item}>
                   <span className="text-sm text-amber-200/50 transition-colors hover:text-amber-400 cursor-pointer">
                     {item}

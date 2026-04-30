@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/s
 import { Search, ShoppingCart, Package, Menu, X } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Image from 'next/image';
 
 export function Header() {
   const { searchQuery, setSearch, setView, cartItems, setCategory } = useStore();
@@ -40,9 +41,17 @@ export function Header() {
               setLocalSearch('');
               setCategory(null);
             }}
-            className="flex-shrink-0"
+            className="flex-shrink-0 flex items-center gap-2"
           >
-            <h1 className="gold-shimmer text-xl font-bold tracking-widest sm:text-2xl">
+            <Image
+              src="/images/logo.png"
+              alt="3 Boxes Luxury Logo"
+              width={40}
+              height={40}
+              className="h-10 w-auto"
+              priority
+            />
+            <h1 className="gold-shimmer text-xl font-bold tracking-widest sm:text-2xl hidden sm:block">
               3 BOXES LUXURY
             </h1>
           </button>
@@ -121,8 +130,17 @@ export function Header() {
                 </Button>
               </SheetTrigger>
               <SheetContent side="right" className="border-amber-900/30 bg-stone-950">
-                <SheetTitle className="gold-shimmer text-lg font-bold tracking-widest">
-                  3 BOXES LUXURY
+                <SheetTitle className="flex items-center gap-2">
+                  <Image
+                    src="/images/logo.png"
+                    alt="3 Boxes Luxury Logo"
+                    width={32}
+                    height={32}
+                    className="h-8 w-auto"
+                  />
+                  <span className="gold-shimmer text-lg font-bold tracking-widest">
+                    3 BOXES LUXURY
+                  </span>
                 </SheetTitle>
                 <div className="mt-8 flex flex-col gap-4">
                   <form onSubmit={handleSearch} className="md:hidden">

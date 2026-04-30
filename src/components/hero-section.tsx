@@ -31,6 +31,22 @@ export function HeroSection() {
           transition={{ duration: 0.8, ease: 'easeOut' }}
           className="max-w-2xl"
         >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.1, duration: 0.6 }}
+            className="mb-6"
+          >
+            <Image
+              src="/images/logo.png"
+              alt="3 Boxes Luxury Logo"
+              width={80}
+              height={80}
+              className="h-16 w-auto sm:h-20 drop-shadow-[0_0_20px_rgba(217,165,80,0.4)]"
+              priority
+            />
+          </motion.div>
+
           <motion.p
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
@@ -65,7 +81,7 @@ export function HeroSection() {
             transition={{ delay: 0.6, duration: 0.8 }}
             className="mt-3 max-w-lg text-sm text-amber-200/50 sm:text-base"
           >
-            Experience the finest selection of watches, jewelry, leather goods, and more from the world&apos;s most prestigious makers.
+            Experience the finest selection of watches, jewelry, sarees, men&apos;s shirts &amp; t-shirts, leather goods, and more from the world&apos;s most prestigious makers.
           </motion.p>
 
           <motion.div
