@@ -36,7 +36,7 @@ interface ProductDetail {
 }
 
 // ── Image Compression ──────────────────────────────────────────
-function compressImage(file: File, maxSize = 1024, quality = 0.8): Promise<string> {
+function compressImage(file: File, maxSize = 1280, quality = 0.85): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -44,6 +44,7 @@ function compressImage(file: File, maxSize = 1024, quality = 0.8): Promise<strin
       img.onload = () => {
         const canvas = document.createElement('canvas');
         let { width, height } = img;
+        // Higher resolution for better AI results, but cap at maxSize
         if (width > maxSize || height > maxSize) {
           if (width > height) {
             height = Math.round((height * maxSize) / width);
@@ -57,6 +58,9 @@ function compressImage(file: File, maxSize = 1024, quality = 0.8): Promise<strin
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('Canvas error')); return; }
+        // Use higher quality interpolation
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
@@ -129,7 +133,7 @@ function TryOnDialog({
       }
       setError(null);
       try {
-        const compressed = await compressImage(file, 1024, 0.8);
+        const compressed = await compressImage(file, 1280, 0.85);
         setSelfiePreview(compressed);
         setSelfieData(compressed);
         setStep('preview');
@@ -324,14 +328,38 @@ function TryOnDialog({
 
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className="group flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-amber-900/30 bg-stone-900/30 px-6 py-10 transition-all hover:border-amber-600/40 hover:bg-stone-900/50"
+                className="group flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-amber-900/30 bg-stone-900/30 px-6 py-8 transition-all hover:border-amber-600/40 hover:bg-stone-900/50"
               >
-                <div className="mb-4 rounded-full bg-amber-900/20 p-4 transition-colors group-hover:bg-amber-900/30">
+                <div className="mb-3 rounded-full bg-amber-900/20 p-4 transition-colors group-hover:bg-amber-900/30">
                   <Camera className="h-8 w-8 text-amber-400/60 transition-colors group-hover:text-amber-400" />
                 </div>
                 <p className="text-sm font-medium text-amber-200/70">Upload your selfie</p>
-                <p className="mt-1 text-xs text-amber-200/30">Drag & drop or click to browse</p>
+                <p className="mt-1 text-xs text-amber-200/30">Click to browse or drag & drop</p>
                 <p className="mt-2 text-[10px] text-amber-200/20">JPG, PNG, or WebP · Max 10MB</p>
+                {/* Photo tips */}
+                <div className="mt-4 rounded-lg border border-amber-900/15 bg-amber-950/20 px-3 py-2 text-left">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/60 mb-1.5">Tips for best results</p>
+                  <ul className="space-y-1">
+                    <li className="flex items-start gap-1.5 text-[10px] text-amber-200/40">
+                      <span className="text-emerald-500/60 mt-0.5">✓</span>
+                      Face the camera directly, good lighting
+                    </li>
+                    <li className="flex items-start gap-1.5 text-[10px] text-amber-200/40">
+                      <span className="text-emerald-500/60 mt-0.5">✓</span>
+                      {['sarees', 'fashion'].includes(categorySlug)
+                        ? 'Full body or waist-up photo'
+                        : categorySlug === 'jewelry'
+                        ? 'Clear face and neck visible'
+                        : categorySlug === 'watches'
+                        ? 'Show your wrist or full upper body'
+                        : 'Upper body photo works best'}
+                    </li>
+                    <li className="flex items-start gap-1.5 text-[10px] text-amber-200/40">
+                      <span className="text-red-500/60 mt-0.5">✗</span>
+                      Avoid dark, blurry, or heavily filtered photos
+                    </li>
+                  </ul>
+                </div>
               </div>
 
               <input
@@ -506,8 +534,10 @@ function TryOnDialog({
               <div className="rounded-lg border border-amber-900/15 bg-amber-950/20 p-3">
                 <p className="text-[11px] text-amber-200/50">
                   {['sarees', 'fashion'].includes(categorySlug)
-                    ? 'AI visualization shows the product style and outfit. Facial features are approximate — for the best experience, focus on how the outfit looks.'
-                    : 'AI visualization combines your selfie with the product. The result shows an approximation of how the product would look with you.'}
+                    ? '💡 AI shows the outfit style and drape. Facial features may vary — focus on how the outfit looks on you. For better results, use a well-lit full-body photo.'
+                    : ['jewelry', 'watches'].includes(categorySlug)
+                    ? '💡 AI adds the product to your photo. For best results, ensure your face/neck/wrist is clearly visible. The product color and design will match closely.'
+                    : '💡 AI visualization combines your selfie with the product. For best results, use a clear, well-lit photo with the relevant body part visible.'}
                 </p>
               </div>
 
