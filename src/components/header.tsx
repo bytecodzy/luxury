@@ -32,7 +32,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-amber-900/30 bg-stone-950/95 backdrop-blur-md">
       <div className="container mx-auto px-4">
-        <div className="flex h-16 items-center justify-between gap-4">
+        <div className="flex h-20 items-center justify-between gap-4">
           {/* Logo */}
           <button
             onClick={() => {
@@ -41,17 +41,19 @@ export function Header() {
               setLocalSearch('');
               setCategory(null);
             }}
-            className="flex-shrink-0 flex items-center gap-2"
+            className="flex-shrink-0 flex items-center gap-3 group"
           >
-            <Image
-              src="/images/logo.png"
-              alt="3 Boxes Luxury Logo"
-              width={40}
-              height={40}
-              className="h-10 w-auto"
-              priority
-            />
-            <h1 className="gold-shimmer text-xl font-bold tracking-widest sm:text-2xl hidden sm:block">
+            <div className="logo-flashy">
+              <Image
+                src="/images/logo.png"
+                alt="3 Boxes Luxury Logo"
+                width={56}
+                height={56}
+                className="h-14 w-auto sm:h-16"
+                priority
+              />
+            </div>
+            <h1 className="gold-shimmer text-2xl font-bold tracking-widest sm:text-3xl hidden sm:block">
               3 BOXES LUXURY
             </h1>
           </button>
@@ -131,13 +133,15 @@ export function Header() {
               </SheetTrigger>
               <SheetContent side="right" className="border-amber-900/30 bg-stone-950">
                 <SheetTitle className="flex items-center gap-2">
-                  <Image
-                    src="/images/logo.png"
-                    alt="3 Boxes Luxury Logo"
-                    width={32}
-                    height={32}
-                    className="h-8 w-auto"
-                  />
+                  <div className="logo-flashy">
+                    <Image
+                      src="/images/logo.png"
+                      alt="3 Boxes Luxury Logo"
+                      width={40}
+                      height={40}
+                      className="h-10 w-auto"
+                    />
+                  </div>
                   <span className="gold-shimmer text-lg font-bold tracking-widest">
                     3 BOXES LUXURY
                   </span>

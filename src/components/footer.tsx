@@ -10,13 +10,15 @@ export function Footer() {
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2">
-              <Image
-                src="/images/logo.png"
-                alt="3 Boxes Luxury Logo"
-                width={36}
-                height={36}
-                className="h-9 w-auto"
-              />
+              <div className="logo-flashy">
+                <Image
+                  src="/images/logo.png"
+                  alt="3 Boxes Luxury Logo"
+                  width={44}
+                  height={44}
+                  className="h-11 w-auto"
+                />
+              </div>
               <h3 className="gold-shimmer text-lg font-bold tracking-widest">
                 3 BOXES LUXURY
               </h3>
