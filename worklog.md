@@ -80,3 +80,23 @@ Stage Summary:
 - 10 products with AI-generated images available
 - AI Virtual Try-On supports the new category with tailored prompts
 - Total catalog: 11 categories, 55 products
+
+---
+Task ID: 2
+Agent: Main
+Task: Fix 401 "missing X-Token header" error in try-on API
+
+Work Log:
+- Investigated the z-ai-web-dev-sdk authentication mechanism
+- Found the SDK reads auth from `.z-ai-config` file in 3 locations (project dir, home dir, /etc)
+- The config at `/etc/.z-ai-config` had the token, but the SDK wasn't finding it reliably
+- Root cause: No `.z-ai-config` in project directory (highest priority), and the system-level one may not be accessible by the Next.js process
+- Fix: Copied `/etc/.z-ai-config` to `/home/z/my-project/.z-ai-config`
+- Verified the SDK loads the config correctly with token (hasToken: true, tokenLength: 243)
+- Tested all 3 APIs used in try-on pipeline: edit(), create(), createVision() — all return 200 OK
+- Full end-to-end pipeline test confirmed working: VLM product analysis → edit() with selfie → image generated
+
+Stage Summary:
+- Created `/home/z/my-project/.z-ai-config` with token from system config
+- 401 "missing X-Token header" error is now resolved
+- All SDK APIs (VLM, image edit, image create) confirmed working
