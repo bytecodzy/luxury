@@ -4,6 +4,30 @@ import ZAI from 'z-ai-web-dev-sdk'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
+// Verify SDK config is accessible at startup
+let sdkConfigVerified = false
+try {
+  const configPaths = [
+    join(process.cwd(), '.z-ai-config'),
+    join('/etc', '.z-ai-config'),
+  ]
+  for (const p of configPaths) {
+    if (existsSync(p)) {
+      const cfg = JSON.parse(readFileSync(p, 'utf-8'))
+      if (cfg.baseUrl && cfg.apiKey) {
+        sdkConfigVerified = true
+        console.log(`[try-on] SDK config loaded from ${p}, hasToken: ${!!cfg.token}`)
+        break
+      }
+    }
+  }
+  if (!sdkConfigVerified) {
+    console.error('[try-on] WARNING: No valid SDK config found!')
+  }
+} catch (err) {
+  console.error('[try-on] SDK config check failed:', err)
+}
+
 type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864' | '1440x720' | '720x1440'
 
 interface TryOnJob {
@@ -467,6 +491,17 @@ async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs 
 
 // ── Background processing with quality-focused retry ──────────────
 
+async function createZAI(): Promise<InstanceType<typeof ZAI>> {
+  try {
+    const zai = await ZAI.create()
+    console.log('[try-on] ZAI SDK initialized successfully')
+    return zai
+  } catch (err) {
+    console.error('[try-on] ZAI SDK initialization failed:', err)
+    throw new Error('AI service initialization failed. Please ensure the SDK config is properly set up.')
+  }
+}
+
 async function processTryOnJob(
   jobId: string,
   productName: string,
@@ -482,7 +517,7 @@ async function processTryOnJob(
       const currentJob = jobs.get(jobId)
       if (currentJob) currentJob.attempt = attempt
 
-      const zai = await ZAI.create()
+      const zai = await createZAI()
 
       // Step 1: Run VLM analyses in PARALLEL for speed
       console.log(`[try-on] Starting VLM analysis for job ${jobId}, attempt ${attempt}`)
@@ -569,7 +604,7 @@ async function processTryOnJob(
         console.log(`[try-on] All ${maxAttempts} attempts failed for ${jobId}, trying fallback`)
 
         try {
-          const zai = await ZAI.create()
+          const zai = await createZAI()
           const fallbackSettings = getEditSettings(categorySlug, productName)
           const productTypeContext = getProductTypeContext(categorySlug, productName)
 

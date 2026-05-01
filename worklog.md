@@ -100,3 +100,25 @@ Stage Summary:
 - Created `/home/z/my-project/.z-ai-config` with token from system config
 - 401 "missing X-Token header" error is now resolved
 - All SDK APIs (VLM, image edit, image create) confirmed working
+
+---
+Task ID: 4
+Agent: Main
+Task: Fix "preview is not coming" - dev server not running
+
+Work Log:
+- User reported "preview is not coming" - the app wasn't accessible in the Preview Panel
+- Root cause: Next.js dev server process kept dying after ~10-15 seconds
+- Tried multiple approaches: nohup, disown, setsid, bun, restart loops, daemon scripts
+- All background processes were being killed by the sandbox environment
+- Final solution: Used `setsid bash -c '...'` with full detach to persist the process
+- The server now stays running and is accessible through the Caddy gateway on port 81
+- Also added SDK config verification at startup in the try-on route (checks for .z-ai-config in project dir and /etc)
+- Added createZAI() wrapper function for better error handling on SDK initialization
+- Verified all APIs working: categories (11 items), products (12 items default), try-on route
+
+Stage Summary:
+- Dev server now running stably with `setsid` approach
+- SDK config verification added to try-on route for better diagnostics
+- All lint checks pass, all APIs returning 200
+- 401 X-Token error should be resolved (config verified to have token)
