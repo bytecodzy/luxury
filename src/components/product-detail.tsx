@@ -191,6 +191,9 @@ function TryOnDialog({
   productName,
   productImage,
   categorySlug,
+  productImages,
+  onBackgroundJob,
+  onResetBackground,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -198,6 +201,9 @@ function TryOnDialog({
   productName: string;
   productImage: string;
   categorySlug: string;
+  productImages: string[];
+  onBackgroundJob: (step: 'generating' | 'result') => void;
+  onResetBackground: () => void;
 }) {
   const [step, setStep] = useState<Step>('upload');
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
@@ -212,6 +218,7 @@ function TryOnDialog({
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [tipIndex, setTipIndex] = useState(0);
   const [progressMsg, setProgressMsg] = useState('Analyzing your photo & product...');
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const tipTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -249,6 +256,7 @@ function TryOnDialog({
     setSuggestions([]);
     setTipIndex(0);
     setProgressMsg('Analyzing your photo & product...');
+    setAddedIds(new Set());
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
@@ -257,7 +265,8 @@ function TryOnDialog({
       clearInterval(tipTimerRef.current);
       tipTimerRef.current = null;
     }
-  }, []);
+    onResetBackground();
+  }, [onResetBackground]);
 
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -284,11 +293,19 @@ function TryOnDialog({
     []
   );
 
+  const handleAddToCartSuggestion = useCallback((s: SuggestionItem) => {
+    const store = useStore.getState();
+    store.addItem({ productId: s.id, name: s.name, price: s.price, image: s.image });
+    setAddedIds(prev => new Set(prev).add(s.id));
+    setTimeout(() => setAddedIds(prev => { const n = new Set(prev); n.delete(s.id); return n; }), 1500);
+  }, []);
+
   const handleGenerate = useCallback(async () => {
     if (!selfieData) return;
     setStep('generating');
     setError(null);
     setPollCount(0);
+    onBackgroundJob('generating');
 
     try {
       // Step 1: Start the job
@@ -345,6 +362,7 @@ function TryOnDialog({
             setStrategy(pollData.strategy || null);
             if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
             setStep('result');
+            onBackgroundJob('result');
             if (pollingRef.current) {
               clearInterval(pollingRef.current);
               pollingRef.current = null;
@@ -355,6 +373,7 @@ function TryOnDialog({
           if (pollData.status === 'failed') {
             setError(pollData.error || 'AI generation failed. Please try again.');
             setStep('preview');
+            onResetBackground();
             if (pollingRef.current) {
               clearInterval(pollingRef.current);
               pollingRef.current = null;
@@ -373,6 +392,7 @@ function TryOnDialog({
           if (attempts >= maxAttempts) {
             setError('Generation timed out. The AI service may be busy — please try again.');
             setStep('preview');
+            onResetBackground();
             if (pollingRef.current) {
               clearInterval(pollingRef.current);
               pollingRef.current = null;
@@ -384,6 +404,7 @@ function TryOnDialog({
           if (attempts >= maxAttempts) {
             setError('Connection lost during generation. Please try again.');
             setStep('preview');
+            onResetBackground();
             if (pollingRef.current) {
               clearInterval(pollingRef.current);
               pollingRef.current = null;
@@ -403,8 +424,9 @@ function TryOnDialog({
         setError(err instanceof Error ? err.message : 'Something went wrong');
       }
       setStep('preview');
+      onResetBackground();
     }
-  }, [selfieData, productId, productImage, suggestions.length]);
+  }, [selfieData, productId, productImage, suggestions.length, onBackgroundJob, onResetBackground]);
 
   // Get category-specific label
   const getCategoryLabel = () => {
@@ -435,7 +457,14 @@ function TryOnDialog({
     <Dialog
       open={open}
       onOpenChange={(isOpen) => {
-        if (!isOpen) reset();
+        if (!isOpen) {
+          if (step === 'generating') {
+            // Close dialog visually but keep generation running in background
+            onOpenChange(false);
+            return;
+          }
+          reset();
+        }
         onOpenChange(isOpen);
       }}
     >
@@ -633,6 +662,34 @@ function TryOnDialog({
                 </p>
               </div>
 
+              {/* Product Gallery - How {productName} looks */}
+              {productImages.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <ImageIcon className="h-3.5 w-3.5 text-amber-400/70" />
+                    <p className="text-[11px] font-semibold text-amber-200/60">
+                      How {productName} looks — Product Gallery
+                    </p>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-2">
+                    {productImages.map((img, i) => (
+                      <div
+                        key={i}
+                        className="relative flex-shrink-0 h-20 w-20 overflow-hidden rounded-lg border border-amber-900/15 bg-stone-900/60"
+                      >
+                        <Image
+                          src={img}
+                          alt={`${productName} view ${i + 1}`}
+                          fill
+                          className="object-cover"
+                          sizes="80px"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* AI Style Suggestions - shown while generating */}
               {suggestions.length > 0 && (
                 <div className="space-y-3">
@@ -669,6 +726,15 @@ function TryOnDialog({
                           <p className="text-[10px] font-bold text-amber-400">${s.price.toLocaleString()}</p>
                           <p className="text-[8px] text-amber-200/25">{s.category}</p>
                         </div>
+                        <button
+                          className="mt-1 w-full rounded bg-amber-600/80 text-[8px] font-bold text-stone-950 py-0.5 hover:bg-amber-500 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddToCartSuggestion(s);
+                          }}
+                        >
+                          {addedIds.has(s.id) ? 'Added!' : '+ Cart'}
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -842,7 +908,18 @@ function TryOnDialog({
                           />
                         </div>
                         <p className="text-[8px] font-medium text-amber-200/60 truncate">{s.name}</p>
-                        <p className="text-[8px] font-bold text-amber-400">${s.price.toLocaleString()}</p>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <p className="text-[8px] font-bold text-amber-400">${s.price.toLocaleString()}</p>
+                        </div>
+                        <button
+                          className="mt-1 w-full rounded bg-amber-600/80 text-[8px] font-bold text-stone-950 py-0.5 hover:bg-amber-500 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddToCartSuggestion(s);
+                          }}
+                        >
+                          {addedIds.has(s.id) ? 'Added!' : '+ Cart'}
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -883,6 +960,7 @@ export function ProductDetail() {
   const [isAdding, setIsAdding] = useState(false);
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [tryOnOpen, setTryOnOpen] = useState(false);
+  const [backgroundJobStep, setBackgroundJobStep] = useState<'generating' | 'result' | null>(null);
 
   const { data, isLoading } = useQuery<{ product: ProductDetail }>({
     queryKey: ['product', selectedProductId],
@@ -905,6 +983,14 @@ export function ProductDetail() {
     }
     setTimeout(() => setIsAdding(false), 800);
   };
+
+  const handleBackgroundJob = useCallback((step: 'generating' | 'result') => {
+    setBackgroundJobStep(step);
+  }, []);
+
+  const handleResetBackground = useCallback(() => {
+    setBackgroundJobStep(null);
+  }, []);
 
   if (isLoading) {
     return (
@@ -1174,8 +1260,8 @@ export function ProductDetail() {
         </div>
       </div>
 
-      {/* AI Try-On Dialog */}
-      {tryOnOpen && product && (
+      {/* AI Try-On Dialog - always mounted when open or background job active */}
+      {(tryOnOpen || backgroundJobStep !== null) && product && (
         <TryOnDialog
           open={tryOnOpen}
           onOpenChange={setTryOnOpen}
@@ -1183,7 +1269,42 @@ export function ProductDetail() {
           productName={product.name}
           productImage={product.images[0] || '/images/hero.png'}
           categorySlug={product.categorySlug}
+          productImages={product.images}
+          onBackgroundJob={handleBackgroundJob}
+          onResetBackground={handleResetBackground}
         />
+      )}
+
+      {/* Floating Pill — shown when dialog is closed but a background job is running */}
+      {backgroundJobStep && !tryOnOpen && (
+        <motion.div
+          initial={{ y: 100, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 100, opacity: 0 }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 cursor-pointer"
+          onClick={() => setTryOnOpen(true)}
+        >
+          {backgroundJobStep === 'generating' ? (
+            <div className="flex items-center gap-3 rounded-full border border-amber-600/40 bg-stone-900/95 px-5 py-3 shadow-2xl shadow-amber-900/30 backdrop-blur-sm">
+              <div className="relative">
+                <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-semibold text-amber-200">AI Generating...</span>
+                <div className="h-1 w-24 rounded-full bg-stone-700 overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 animate-pulse" style={{ width: '60%' }} />
+                </div>
+              </div>
+              <Crown className="h-4 w-4 text-amber-400/60" />
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-full border border-amber-500/60 bg-stone-900/95 px-5 py-3 shadow-2xl shadow-amber-500/20 backdrop-blur-sm animate-[glow_2s_ease-in-out_infinite]">
+              <Crown className="h-4 w-4 text-amber-400" />
+              <span className="text-xs font-bold text-amber-300">AI Ready! Click to view</span>
+              <Sparkles className="h-4 w-4 text-amber-400 animate-pulse" />
+            </div>
+          )}
+        </motion.div>
       )}
     </motion.div>
   );

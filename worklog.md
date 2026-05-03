@@ -246,3 +246,25 @@ Stage Summary:
 - 3 BOXES gold logo watermark rendered on all AI-generated images
 - AI suggestions with skeleton loading shown during buffering
 - 4 strategies try different approaches and pick the best result
+
+---
+Task ID: 2
+Agent: Main
+Task: Add background browsing, add-to-cart on suggestions, product gallery during generation, and verify 3 BOXES logo download
+
+Work Log:
+- Added background generation: closing dialog during "generating" step keeps polling running
+- Added floating pill at bottom of screen: "AI Generating..." during generation, "AI Ready! Click to view" when done
+- Added "Add to Cart" button to all AI suggestion cards (both generating and result steps)
+- Added product images carousel during generation: "How {productName} looks — Product Gallery"
+- Dialog stays mounted when `tryOnOpen || backgroundJobStep !== null` so polling continues
+- `addLogoWatermark()` applies 3 BOXES GIFTS gold logo on download
+- Verified download uses `watermarkedResult` with the logo watermark
+
+Stage Summary:
+- Users can now close the dialog and browse other products while AI generates
+- Floating pill shows generation status and allows reopening when ready
+- All suggestion cards have "+ Cart" button with "Added!" feedback
+- Product gallery shown during generation for browsing while waiting
+- 3 BOXES gold logo watermark on all downloaded images
+- edit-both strategy showing improved scores (Face=7/10, Product=5/10)
