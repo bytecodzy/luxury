@@ -16,7 +16,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle } from 'lucide-react';
+import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown } from 'lucide-react';
 
 interface ProductDetail {
   id: string;
@@ -44,7 +44,6 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
       img.onload = () => {
         const canvas = document.createElement('canvas');
         let { width, height } = img;
-        // Higher resolution for better AI face preservation (1536px max)
         if (width > maxSize || height > maxSize) {
           if (width > height) {
             height = Math.round((height * maxSize) / width);
@@ -58,11 +57,9 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('Canvas error')); return; }
-        // Use highest quality interpolation for better face detail
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
-        // Higher JPEG quality (0.92) to preserve face details
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = () => reject(new Error('Failed to load image'));
@@ -73,15 +70,76 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
   });
 }
 
+// ── Logo Watermark Utility ─────────────────────────────────────
+function addLogoWatermark(imageDataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = document.createElement('img');
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(imageDataUrl); return; }
+
+      // Draw the original image
+      ctx.drawImage(img, 0, 0);
+
+      // Draw the 3 BOXES logo watermark in gold
+      const logoSize = Math.max(40, Math.min(canvas.width, canvas.height) * 0.12);
+      const padding = logoSize * 0.3;
+      const x = canvas.width - logoSize - padding;
+      const y = canvas.height - logoSize - padding;
+
+      // Semi-transparent gold background circle
+      ctx.save();
+      ctx.globalAlpha = 0.75;
+      ctx.beginPath();
+      ctx.arc(x + logoSize / 2, y + logoSize / 2, logoSize / 2, 0, Math.PI * 2);
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fill();
+      ctx.strokeStyle = '#D4A843';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Gold text
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = '#D4A843';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // "3" at top
+      const fontSize1 = logoSize * 0.28;
+      ctx.font = `bold ${fontSize1}px Georgia, serif`;
+      ctx.fillText('3', x + logoSize / 2, y + logoSize * 0.3);
+
+      // "BOXES" in middle
+      const fontSize2 = logoSize * 0.18;
+      ctx.font = `bold ${fontSize2}px Georgia, serif`;
+      ctx.fillText('BOXES', x + logoSize / 2, y + logoSize * 0.52);
+
+      // "GIFTS" at bottom
+      const fontSize3 = logoSize * 0.13;
+      ctx.font = `${fontSize3}px Georgia, serif`;
+      ctx.fillText('GIFTS', x + logoSize / 2, y + logoSize * 0.72);
+
+      ctx.restore();
+
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(imageDataUrl);
+    img.src = imageDataUrl;
+  });
+}
+
 // ── Try-On Dialog ──────────────────────────────────────────────
 type Step = 'upload' | 'preview' | 'generating' | 'result';
 
-// Match quality label
-function getScoreLabel(score: number, type: 'face' | 'product'): { label: string; color: string; emoji: string } {
-  if (score >= 9) return { label: type === 'face' ? 'Excellent Face Match' : 'Exact Product Match', color: 'text-emerald-400', emoji: '✨' };
-  if (score >= 7) return { label: type === 'face' ? 'Good Face Match' : 'Close Product Match', color: 'text-emerald-400', emoji: '👍' };
-  if (score >= 5) return { label: type === 'face' ? 'Partial Face Match' : 'Similar Product', color: 'text-amber-400', emoji: '⚡' };
-  return { label: type === 'face' ? 'Low Face Match' : 'Different Product', color: 'text-red-400', emoji: '⚠️' };
+function getScoreLabel(score: number, type: 'face' | 'product'): { label: string; color: string } {
+  if (score >= 9) return { label: type === 'face' ? 'Excellent Face Match' : 'Exact Product Match', color: 'text-emerald-400' };
+  if (score >= 7) return { label: type === 'face' ? 'Good Face Match' : 'Close Product Match', color: 'text-emerald-400' };
+  if (score >= 5) return { label: type === 'face' ? 'Partial Face Match' : 'Similar Product', color: 'text-amber-400' };
+  return { label: type === 'face' ? 'Low Face Match' : 'Different Product', color: 'text-red-400' };
 }
 
 function ScoreDots({ score, max = 10 }: { score: number; max?: number }) {
@@ -114,6 +172,18 @@ interface SuggestionItem {
   categorySlug: string;
 }
 
+// Rotating tips shown during generation
+const GENERATION_TIPS = [
+  '💡 For best face match, use a clear front-facing selfie with good lighting',
+  '✨ AI try-on works best with simple backgrounds and no filters',
+  '💎 Jewelry looks most accurate when your neck/wrists are clearly visible',
+  '👗 Sarees and outfits look best with full-body or waist-up photos',
+  '⌚ Watches are most accurate with a clear wrist shot',
+  '📸 Natural lighting gives the most realistic try-on results',
+  '🎨 AI generates multiple versions and picks the best match for you',
+  '🌟 The 3 BOXES AI uses advanced face-preservation technology',
+];
+
 function TryOnDialog({
   open,
   onOpenChange,
@@ -133,14 +203,30 @@ function TryOnDialog({
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const [selfieData, setSelfieData] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
+  const [watermarkedResult, setWatermarkedResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
   const [faceScore, setFaceScore] = useState<number | null>(null);
   const [productScore, setProductScore] = useState<number | null>(null);
   const [strategy, setStrategy] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
+  const [tipIndex, setTipIndex] = useState(0);
+  const [progressMsg, setProgressMsg] = useState('Analyzing your photo & product...');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const tipTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Rotating tips
+  useEffect(() => {
+    if (step === 'generating') {
+      tipTimerRef.current = setInterval(() => {
+        setTipIndex((prev) => (prev + 1) % GENERATION_TIPS.length);
+      }, 5000);
+    }
+    return () => {
+      if (tipTimerRef.current) clearInterval(tipTimerRef.current);
+    };
+  }, [step]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -154,15 +240,22 @@ function TryOnDialog({
     setSelfiePreview(null);
     setSelfieData(null);
     setResultImage(null);
+    setWatermarkedResult(null);
     setError(null);
     setPollCount(0);
     setFaceScore(null);
     setProductScore(null);
     setStrategy(null);
     setSuggestions([]);
+    setTipIndex(0);
+    setProgressMsg('Analyzing your photo & product...');
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
+    }
+    if (tipTimerRef.current) {
+      clearInterval(tipTimerRef.current);
+      tipTimerRef.current = null;
     }
   }, []);
 
@@ -231,7 +324,7 @@ function TryOnDialog({
       }
 
       // Step 2: Poll for completion
-      const maxAttempts = 80; // 80 * 3s = 4 minutes max (multiple strategies need more time)
+      const maxAttempts = 80;
       let attempts = 0;
 
       const poll = async () => {
@@ -239,8 +332,14 @@ function TryOnDialog({
           const pollRes = await fetch(`/api/try-on?jobId=${jobId}`);
           const pollData = await pollRes.json();
 
+          // Update progress message from server
+          if (pollData.progress) setProgressMsg(pollData.progress);
+
           if (pollData.status === 'completed' && pollData.imageUrl) {
+            // Add logo watermark to the result
+            const watermarked = await addLogoWatermark(pollData.imageUrl);
             setResultImage(pollData.imageUrl);
+            setWatermarkedResult(watermarked);
             setFaceScore(pollData.faceScore || null);
             setProductScore(pollData.productScore || null);
             setStrategy(pollData.strategy || null);
@@ -305,9 +404,9 @@ function TryOnDialog({
       }
       setStep('preview');
     }
-  }, [selfieData, productId, productImage]);
+  }, [selfieData, productId, productImage, suggestions.length]);
 
-  // Get category-specific label for the try-on button
+  // Get category-specific label
   const getCategoryLabel = () => {
     switch (categorySlug) {
       case 'sarees':
@@ -332,15 +431,6 @@ function TryOnDialog({
     }
   };
 
-  // Get progress message
-  const getProgressMessage = () => {
-    if (pollCount < 4) return 'Analyzing your face & product details...';
-    if (pollCount < 8) return 'Generating try-on with multiple AI strategies...';
-    if (pollCount < 14) return 'Comparing results & selecting best match...';
-    if (pollCount < 20) return 'Verifying face & product accuracy...';
-    return 'Almost done, finalizing the best result...';
-  };
-
   return (
     <Dialog
       open={open}
@@ -349,11 +439,11 @@ function TryOnDialog({
         onOpenChange(isOpen);
       }}
     >
-      <DialogContent className="max-w-lg border-amber-900/30 bg-stone-950 p-0 overflow-hidden sm:max-w-xl">
+      <DialogContent className="max-w-lg border-amber-900/30 bg-stone-950 p-0 overflow-hidden sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <div className="relative bg-gradient-to-r from-amber-900/40 via-rose-900/30 to-amber-900/40 px-6 pt-6 pb-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl font-bold text-amber-100">
-              <Sparkles className="h-5 w-5 text-amber-400" />
+              <Crown className="h-5 w-5 text-amber-400" />
               AI Virtual Try-On
             </DialogTitle>
             <DialogDescription className="text-amber-200/50">
@@ -393,7 +483,6 @@ function TryOnDialog({
                 <p className="text-sm font-medium text-amber-200/70">Upload your selfie</p>
                 <p className="mt-1 text-xs text-amber-200/30">Click to browse or drag & drop</p>
                 <p className="mt-2 text-[10px] text-amber-200/20">JPG, PNG, or WebP · Max 10MB</p>
-                {/* Photo tips */}
                 <div className="mt-4 rounded-lg border border-amber-900/15 bg-amber-950/20 px-3 py-2 text-left">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/60 mb-1.5">Tips for best results</p>
                   <ul className="space-y-1">
@@ -455,7 +544,7 @@ function TryOnDialog({
                 </div>
 
                 <div className="flex flex-col items-center justify-center gap-2 pt-8">
-                  <Sparkles className="h-6 w-6 text-amber-400/40" />
+                  <Crown className="h-6 w-6 text-amber-400/40" />
                   <span className="text-[10px] text-amber-200/30">+</span>
                   <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-amber-900/20">
                     <Image
@@ -497,7 +586,7 @@ function TryOnDialog({
                   onClick={handleGenerate}
                   className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                 >
-                  <Sparkles className="mr-2 h-4 w-4" />
+                  <Crown className="mr-2 h-4 w-4" />
                   Generate Try-On
                 </Button>
               </div>
@@ -512,14 +601,14 @@ function TryOnDialog({
                 <div className="relative">
                   <div className="absolute inset-0 animate-ping rounded-full bg-amber-400/20" />
                   <div className="relative rounded-full bg-amber-900/20 p-5">
-                    <Sparkles className="h-8 w-8 animate-pulse text-amber-400" />
+                    <Crown className="h-8 w-8 animate-pulse text-amber-400" />
                   </div>
                 </div>
                 <h3 className="mt-4 text-base font-semibold text-amber-100">
                   Creating Your Look
                 </h3>
                 <p className="mt-1 text-center text-xs text-amber-200/40">
-                  {getProgressMessage()}
+                  {progressMsg}
                 </p>
                 <div className="mt-3 flex items-center gap-1">
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400/60" />
@@ -527,14 +616,21 @@ function TryOnDialog({
                     {pollCount > 0 ? `Processing... (${pollCount * 3}s)` : 'Starting AI...'}
                   </span>
                 </div>
-                <div className="mt-2 w-40">
-                  <div className="h-1 rounded-full bg-stone-800 overflow-hidden">
+                <div className="mt-2 w-48">
+                  <div className="h-1.5 rounded-full bg-stone-800 overflow-hidden">
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-1000"
-                      style={{ width: `${Math.min(85, pollCount * 4 + 10)}%` }}
+                      style={{ width: `${Math.min(90, pollCount * 3.5 + 5)}%` }}
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Rotating tip */}
+              <div className="rounded-lg border border-amber-900/15 bg-amber-950/20 p-3 min-h-[40px]">
+                <p className="text-[11px] text-amber-200/50 transition-opacity duration-500">
+                  {GENERATION_TIPS[tipIndex]}
+                </p>
               </div>
 
               {/* AI Style Suggestions - shown while generating */}
@@ -552,7 +648,6 @@ function TryOnDialog({
                         key={s.id}
                         className="group cursor-pointer rounded-lg border border-amber-900/15 bg-stone-900/40 p-2 transition-all hover:border-amber-600/30 hover:bg-stone-900/60"
                         onClick={() => {
-                          // Navigate to the suggested product
                           const store = useStore.getState();
                           store.setSelectedProductId(s.id);
                           store.setCategory(s.categorySlug);
@@ -580,11 +675,32 @@ function TryOnDialog({
                   <p className="text-[9px] text-amber-200/20 text-center">Tap a suggestion to view it while you wait</p>
                 </div>
               )}
+
+              {/* Loading placeholders for suggestions if not yet loaded */}
+              {suggestions.length === 0 && pollCount > 1 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-400/40 animate-pulse" />
+                    <p className="text-[11px] font-semibold text-amber-200/40">
+                      Loading AI style suggestions...
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {[1, 2, 3, 4].map((i) => (
+                      <div key={i} className="rounded-lg border border-amber-900/10 bg-stone-900/30 p-2">
+                        <Skeleton className="aspect-square rounded-md bg-stone-800 mb-2" />
+                        <Skeleton className="h-3 w-3/4 bg-stone-800 mb-1" />
+                        <Skeleton className="h-3 w-1/2 bg-stone-800" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* Result Step */}
-          {step === 'result' && resultImage && (
+          {step === 'result' && watermarkedResult && (
             <div className="space-y-4">
               {/* Side-by-side comparison */}
               <div className="grid grid-cols-2 gap-3">
@@ -603,12 +719,14 @@ function TryOnDialog({
                 <div className="space-y-1.5">
                   <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-600/30 bg-stone-900/60">
                     <img
-                      src={resultImage}
+                      src={watermarkedResult}
                       alt={`Virtual try-on: ${productName}`}
                       className="h-full w-full object-cover"
                     />
-                    <div className="absolute left-1.5 top-1.5 rounded-full bg-emerald-600/90 px-2 py-0.5 text-[9px] font-bold text-white shadow-lg">
-                      AI
+                    {/* 3 BOXES watermark badge */}
+                    <div className="absolute left-1.5 top-1.5 rounded-full bg-stone-900/80 border border-amber-500/40 px-2 py-0.5 flex items-center gap-1 shadow-lg">
+                      <Crown className="h-2.5 w-2.5 text-amber-400" />
+                      <span className="text-[8px] font-bold text-amber-400">3 BOXES AI</span>
                     </div>
                   </div>
                   <p className="text-center text-[10px] font-medium text-amber-400">AI Try-On</p>
@@ -618,7 +736,6 @@ function TryOnDialog({
               {/* Dual Match Quality Indicators */}
               {(faceScore !== null || productScore !== null) && (
                 <div className="space-y-2">
-                  {/* Face Match */}
                   {faceScore !== null && (
                     <div className="rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
                       <div className="flex items-center justify-between">
@@ -640,7 +757,6 @@ function TryOnDialog({
                       </div>
                     </div>
                   )}
-                  {/* Product Match */}
                   {productScore !== null && (
                     <div className="rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
                       <div className="flex items-center justify-between">
@@ -683,10 +799,14 @@ function TryOnDialog({
                 <span className="text-[10px] text-amber-200/30">&#10003; Applied</span>
               </div>
 
-              {/* Info */}
-              <div className="rounded-lg border border-amber-900/15 bg-amber-950/20 p-3">
-                <p className="text-[11px] text-amber-200/50">
-                  💡 AI uses multiple strategies (face-priority, product-priority, text-detailed) and picks the best result. For best accuracy, use a clear, well-lit, front-facing selfie.
+              {/* Info about 3 BOXES branding */}
+              <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-950/30 to-stone-900/40 p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Crown className="h-3.5 w-3.5 text-amber-400" />
+                  <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS</p>
+                </div>
+                <p className="text-[10px] text-amber-200/40">
+                  AI uses multiple strategies and picks the best match. For best accuracy, use a clear, well-lit, front-facing selfie.
                 </p>
               </div>
 
@@ -739,8 +859,8 @@ function TryOnDialog({
                   Try Again
                 </Button>
                 <a
-                  href={resultImage}
-                  download={`tryon-${productName.toLowerCase().replace(/\s+/g, '-')}.png`}
+                  href={watermarkedResult}
+                  download={`3boxes-tryon-${productName.toLowerCase().replace(/\s+/g, '-')}.png`}
                   className="flex flex-1 items-center justify-center rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-stone-950 transition-all hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                 >
                   <Download className="mr-2 h-4 w-4" />
@@ -1001,29 +1121,19 @@ export function ProductDetail() {
               className="group flex w-full items-center gap-3 rounded-xl border border-amber-600/30 bg-gradient-to-r from-amber-900/20 via-rose-900/20 to-amber-900/20 p-4 transition-all hover:border-amber-500/50 hover:from-amber-900/30 hover:via-rose-900/30 hover:to-amber-900/30 hover:shadow-lg hover:shadow-amber-900/20"
             >
               <div className="rounded-lg bg-amber-600/20 p-2.5 transition-colors group-hover:bg-amber-600/30">
-                <Sparkles className="h-5 w-5 text-amber-400" />
+                <Crown className="h-5 w-5 text-amber-400" />
               </div>
               <div className="flex-1 text-left">
-                <p className="text-sm font-semibold text-amber-100">
-                  AI Virtual Try-On
-                </p>
-                <p className="text-xs text-amber-200/40">
-                  Upload a selfie &amp; {product.categorySlug === 'sarees' || product.categorySlug === 'fashion'
-                    ? 'see how this outfit looks on you'
-                    : product.categorySlug === 'jewelry' || product.categorySlug === 'watches'
-                    ? 'see how this accessory looks on you'
-                    : 'see how this product looks on you'}
-                </p>
+                <p className="text-sm font-semibold text-amber-100">AI Virtual Try-On</p>
+                <p className="text-xs text-amber-200/40">See how it looks on you with 3 BOXES AI</p>
               </div>
-              <span className="rounded-full bg-amber-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-stone-950">
-                AI
-              </span>
+              <Sparkles className="h-4 w-4 text-amber-400/50 transition-colors group-hover:text-amber-400" />
             </button>
           </motion.div>
 
-          {/* Quantity + Add to Cart */}
+          {/* Quantity & Add to Cart */}
           <div className="flex items-center gap-4">
-            <div className="flex items-center rounded-lg border border-amber-900/30 bg-stone-900/50">
+            <div className="flex items-center rounded-lg border border-amber-900/30 bg-stone-900/60">
               <button
                 onClick={() => setQuantity(Math.max(1, quantity - 1))}
                 className="flex h-10 w-10 items-center justify-center text-amber-200/60 hover:text-amber-400 transition-colors"
@@ -1040,7 +1150,6 @@ export function ProductDetail() {
                 <Plus className="h-4 w-4" />
               </button>
             </div>
-
             <Button
               onClick={handleAddToCart}
               disabled={product.stock === 0}
@@ -1049,14 +1158,17 @@ export function ProductDetail() {
                   ? 'bg-emerald-600 text-white scale-95'
                   : 'bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25'
               }`}
-              size="lg"
             >
-              <ShoppingCart className="mr-2 h-4 w-4" />
-              {isAdding
-                ? 'Added to Cart!'
-                : product.stock === 0
-                ? 'Out of Stock'
-                : `Add to Cart - $${(product.price * quantity).toLocaleString()}`}
+              {isAdding ? (
+                <>
+                  <ShoppingCart className="mr-2 h-4 w-4" />
+                  Added!
+                </>
+              ) : product.stock === 0 ? (
+                'Out of Stock'
+              ) : (
+                `Add to Cart - $${(product.price * quantity).toLocaleString()}`
+              )}
             </Button>
           </div>
         </div>

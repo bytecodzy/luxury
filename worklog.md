@@ -224,3 +224,25 @@ Stage Summary:
 - Suggestions also shown in results as "Complete the Look"
 - 3 generation strategies with dual VLM verification (face + product scores)
 - All lint checks pass, dev server running
+---
+Task ID: 1
+Agent: Main
+Task: Fix AI try-on accuracy, add 3 BOXES logo watermark, add AI suggestions during buffering
+
+Work Log:
+- Analyzed SDK type definitions: CreateImageEditBody has `image?: string` but actual API requires `images` array format
+- Fixed API route to use `images: [{ url: base64string }]` format for edit endpoint
+- Added 4 generation strategies: edit-both (selfie+product), edit-selfie, edit-product, create-detailed
+- Added ultra-detailed VLM prompts for person and product analysis
+- Added 3 BOXES GIFTS gold logo watermark on generated images via client-side canvas compositing
+- Added rotating tips during generation buffering
+- Added skeleton loading placeholders for AI style suggestions while they load
+- Updated dialog to show "3 BOXES AI" badge on result images
+- Progress messages from backend are shown in real-time
+- Download saves the watermarked image with 3 BOXES branding
+
+Stage Summary:
+- Fixed critical API parameter issue: `images` array format required by backend
+- 3 BOXES gold logo watermark rendered on all AI-generated images
+- AI suggestions with skeleton loading shown during buffering
+- 4 strategies try different approaches and pick the best result

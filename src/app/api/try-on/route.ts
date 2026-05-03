@@ -4,25 +4,6 @@ import ZAI from 'z-ai-web-dev-sdk'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
-// Verify SDK config at startup
-try {
-  const configPaths = [
-    join(process.cwd(), '.z-ai-config'),
-    join('/etc', '.z-ai-config'),
-  ]
-  for (const p of configPaths) {
-    if (existsSync(p)) {
-      const cfg = JSON.parse(readFileSync(p, 'utf-8'))
-      if (cfg.baseUrl && cfg.apiKey) {
-        console.log(`[try-on] SDK config loaded from ${p}, hasToken: ${!!cfg.token}`)
-        break
-      }
-    }
-  }
-} catch (err) {
-  console.error('[try-on] SDK config check failed:', err)
-}
-
 type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864' | '1440x720' | '720x1440'
 
 interface TryOnJob {
@@ -37,6 +18,7 @@ interface TryOnJob {
   faceScore?: number
   productScore?: number
   suggestions?: any[]
+  progress?: string
 }
 
 const jobs = new Map<string, TryOnJob>()
@@ -67,41 +49,47 @@ function getProductImageBase64(imagePath: string): string | null {
 
 // ── VLM Prompts ────────────────────────────────────────────────────
 
-const VLM_PERSON_PROMPT = `Describe this person's appearance in precise detail for an AI virtual try-on:
-1. Face shape, skin tone (exact shade), and distinctive features
-2. Eye shape and color, eyebrow shape
-3. Hair color, texture, length, and style
-4. Body type and build
-5. Current outfit (color, type, neckline)
-6. Expression and pose (front-facing? smiling?)
-Be very specific about skin tone, hair, and face. 3 sentences max.`
+const VLM_PERSON_PROMPT = `Analyze this person's face and appearance in EXACT detail for a virtual try-on. Describe:
+1. Face shape (round/oval/square/heart/oblong), skin tone (light/fair/medium/olive/brown/dark, with warm/cool/neutral undertone)
+2. Eyes: shape (almond/round/hooded), color, eyelashes
+3. Eyebrows: thickness, shape, color
+4. Nose: shape, size relative to face
+5. Lips: fullness, color, shape
+6. Hair: color, texture (straight/wavy/curly), length, style
+7. Chin and jawline shape
+8. Any distinctive features (moles, dimples, freckles)
+9. Body type and build
+10. Current expression and pose
+Be extremely specific about skin tone, eye color, hair, and face shape. 4-5 sentences.`
 
-const VLM_PRODUCT_PROMPT = `Describe this product precisely for an AI virtual try-on:
-1. Exact type and name (saree, necklace, shirt, etc.)
-2. Primary color (exact shade like "deep maroon", "rose gold")
-3. Pattern and design (floral, geometric, solid, etc.)
-4. Material and texture (silk sheen, matte cotton, shiny gold)
-5. Key details (embroidery, gemstones, collar style, border design)
-6. Size relative to body (how much does it cover?)
-Be very specific about color and pattern. 3 sentences max.`
+const VLM_PRODUCT_PROMPT = `Describe this fashion/luxury product in EXACT detail for a virtual try-on. Describe:
+1. Type and name (saree, necklace, shirt, watch, etc.)
+2. EXACT primary color (not just "red" - say "deep maroon red" or "rose pink")
+3. Secondary colors and accents
+4. Pattern: floral/geometric/solid/striped/paisley/embroidered - describe the pattern precisely
+5. Material and texture: silk sheen/matte cotton/shiny gold/satin/mesh - be specific
+6. Key design details: borders, embellishments, gemstones, stitching, collar style
+7. How it would be worn on the body (draped, fitted, layered, etc.)
+8. Size/coverage: how much of the body does it cover
+Be extremely specific about color, material, and pattern. 4-5 sentences.`
 
 // ── Product placement helpers ──────────────────────────────────────
 
 function getProductPlacement(categorySlug: string, productName: string): string {
   const n = productName.toLowerCase()
   if (categorySlug === 'jewelry') {
-    if (n.includes('earring') || n.includes('jhumka') || n.includes('stud')) return 'earrings on both earlobes'
-    if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple')) return 'necklace around the neck'
-    if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle')) return 'bracelet on the wrist'
-    if (n.includes('ring')) return 'ring on the finger'
-    if (n.includes('set') || n.includes('bridal')) return 'jewelry set - necklace and earrings'
-    return 'jewelry on the body'
+    if (n.includes('earring') || n.includes('jhumka') || n.includes('stud')) return 'wearing earrings on both earlobes'
+    if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple')) return 'wearing a necklace around the neck'
+    if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle')) return 'wearing a bracelet on the wrist'
+    if (n.includes('ring')) return 'wearing a ring on the finger'
+    if (n.includes('set') || n.includes('bridal')) return 'wearing a matching jewelry set of necklace and earrings'
+    return 'wearing the jewelry piece'
   }
-  if (categorySlug === 'sarees') return 'saree draped in Indian style with pallu over shoulder'
-  if (categorySlug === 'mens-shirts') return 'shirt on the torso'
-  if (categorySlug === 'watches') return 'watch on the wrist'
-  if (categorySlug === 'fashion') return 'outfit worn on the body'
-  return 'product on the person'
+  if (categorySlug === 'sarees') return 'draped in the saree in traditional Indian style with pallu over shoulder'
+  if (categorySlug === 'mens-shirts') return 'wearing the shirt on the torso'
+  if (categorySlug === 'watches') return 'wearing the watch on the wrist'
+  if (categorySlug === 'fashion') return 'wearing the outfit'
+  return 'wearing the product'
 }
 
 function getImageSize(categorySlug: string): ImageSize {
@@ -175,10 +163,11 @@ export async function POST(request: NextRequest) {
       createdAt: Date.now(),
       categorySlug: product.category.slug,
       attempt: 1,
+      progress: 'Analyzing your photo and product...',
     })
 
-    // Start suggestions fetch and background processing in parallel
-    suggestionAndProcess(jobId, product.name, product.category.slug, selfieData, productImageBase64, suggestionsPromise)
+    // Start background processing
+    backgroundProcess(jobId, product.name, product.category.slug, selfieData, productImageBase64, suggestionsPromise)
       .catch((err) => console.error('[try-on] Background job failed:', err))
 
     return NextResponse.json({
@@ -218,6 +207,7 @@ export async function GET(request: NextRequest) {
     faceScore: job.faceScore,
     productScore: job.productScore,
     suggestions: job.suggestions,
+    progress: job.progress,
   })
 }
 
@@ -227,7 +217,7 @@ async function createZAI(): Promise<InstanceType<typeof ZAI>> {
   return await ZAI.create()
 }
 
-async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs = 30000): Promise<string> {
+async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs = 45000): Promise<string> {
   try {
     const result = await Promise.race([
       zai.chat.completions.createVision({
@@ -252,7 +242,7 @@ async function vlmVerify(
       zai.chat.completions.createVision({
         model: 'glm-4v-flash',
         messages: [{ role: 'user', content: [
-          { type: 'text', text: `Rate how well the FACE in the SECOND image matches the FIRST image (original selfie). 1=different person, 5=similar, 7=same person minor diff, 9-10=near perfect. Reply: SCORE|REASON` },
+          { type: 'text', text: `Compare the FACE in these two images. The FIRST is the original selfie, the SECOND is the AI-generated result. Rate how similar the FACE is from 1 to 10: 1=completely different person, 5=similar ethnicity/gender but different person, 7=same person with changes, 9=same person minor lighting differences, 10=identical. Reply ONLY with: SCORE|BRIEF_REASON` },
           { type: 'image_url', image_url: { url: selfieData } },
           { type: 'image_url', image_url: { url: resultImageUrl } },
         ]}],
@@ -261,7 +251,7 @@ async function vlmVerify(
       zai.chat.completions.createVision({
         model: 'glm-4v-flash',
         messages: [{ role: 'user', content: [
-          { type: 'text', text: `Rate how well the PRODUCT in the SECOND image matches the FIRST image (original "${productName}" photo). 1=different product, 5=similar type, 7=same product minor diff, 9-10=near perfect. Reply: SCORE|REASON` },
+          { type: 'text', text: `Compare the PRODUCT in these two images. The FIRST is the original "${productName}" photo, the SECOND is the AI-generated result. Rate how similar the PRODUCT is from 1 to 10: 1=completely different product, 5=similar type/color, 7=same product minor differences, 9=same product nearly exact, 10=identical. Reply ONLY with: SCORE|BRIEF_REASON` },
           { type: 'image_url', image_url: { url: productImageBase64 } },
           { type: 'image_url', image_url: { url: resultImageUrl } },
         ]}],
@@ -281,9 +271,12 @@ async function vlmVerify(
   }
 }
 
-// ── Generation with correct `images` array ─────────────────────────
+// ── Generation strategies ──────────────────────────────────────────
+// The API edit endpoint requires `images` array (NOT `image` string)
+// Format: { prompt, images: [{ url: base64string }], size }
+// SDK CreateImageGenerationBody: { model?, prompt, size? }
 
-async function generateWithBothImages(
+async function strategyEditSelfie(
   zai: any, selfieData: string, productImageBase64: string,
   productName: string, categorySlug: string, personDesc: string, productDesc: string,
 ): Promise<string | null> {
@@ -291,59 +284,27 @@ async function generateWithBothImages(
     const placement = getProductPlacement(categorySlug, productName)
     const size = getImageSize(categorySlug)
 
-    // KEY FIX: API requires `images` array, not `image` string
-    // Selfie first = primary reference for person, Product second = reference for product
-    const prompt = `Photo of this person wearing ${productName} (${placement}). ${productDesc ? `The product is: ${productDesc}.` : ''} Keep the person's face, hair, skin tone exactly the same. Professional fashion photography, studio lighting.`
+    // Selfie as primary image reference - AI should preserve the face
+    const prompt = `Professional fashion photograph of the person in this image, now ${placement}. The product is: ${productDesc}. Keep the exact same face, skin tone, hair, eye color, and body type. ${personDesc ? `The person has ${personDesc}.` : ''} Studio lighting, photorealistic, 8K quality.`
 
-    console.log(`[try-on] Strategy: edit-both-images, prompt: ${prompt.substring(0, 120)}...`)
-
-    const response = await zai.images.generations.edit({
-      prompt,
-      size,
-      images: [
-        { url: selfieData },
-        { url: productImageBase64 },
-      ],
-    } as any)
-
-    const b64 = response.data[0]?.base64
-    if (!b64) return null
-    return `data:image/png;base64,${b64}`
-  } catch (err) {
-    console.error('[try-on] Strategy edit-both-images failed:', (err as Error).message?.substring(0, 200))
-    return null
-  }
-}
-
-async function generateWithSelfieOnly(
-  zai: any, selfieData: string,
-  productName: string, categorySlug: string, productDesc: string,
-): Promise<string | null> {
-  try {
-    const placement = getProductPlacement(categorySlug, productName)
-    const size = getImageSize(categorySlug)
-
-    // Simple prompt: just tell it what to add, don't describe the face
-    const prompt = `This person is now wearing ${productName} (${placement}). ${productDesc ? `Product details: ${productDesc}.` : ''} Keep the exact same face, hair, skin, and expression. Professional fashion photography.`
-
-    console.log(`[try-on] Strategy: edit-selfie-only, prompt: ${prompt.substring(0, 120)}...`)
+    console.log(`[try-on] Strategy: edit-selfie, prompt: ${prompt.substring(0, 150)}...`)
 
     const response = await zai.images.generations.edit({
       prompt,
-      size,
       images: [{ url: selfieData }],
+      size,
     } as any)
 
-    const b64 = response.data[0]?.base64
+    const b64 = response.data?.[0]?.base64
     if (!b64) return null
     return `data:image/png;base64,${b64}`
   } catch (err) {
-    console.error('[try-on] Strategy edit-selfie-only failed:', (err as Error).message?.substring(0, 200))
+    console.error('[try-on] Strategy edit-selfie failed:', (err as Error).message?.substring(0, 200))
     return null
   }
 }
 
-async function generateWithCreate(
+async function strategyCreateDetailed(
   zai: any, productName: string, categorySlug: string, personDesc: string, productDesc: string,
 ): Promise<string | null> {
   try {
@@ -353,19 +314,75 @@ async function generateWithCreate(
     const bodyType = categorySlug === 'sarees' || categorySlug === 'fashion'
       ? 'Full-body professional fashion photograph'
       : categorySlug === 'jewelry' || categorySlug === 'watches'
-      ? 'Close-up professional beauty photograph'
+      ? 'Close-up professional beauty photograph from chest up'
       : 'Professional fashion photograph'
 
-    const prompt = `${bodyType} of a person ${personDesc ? `with: ${personDesc}. ` : ''}They are wearing ${productName} (${placement}). ${productDesc ? `Product: ${productDesc}.` : ''} Photorealistic, studio lighting, 8K, high detail.`
+    const prompt = `${bodyType} of a person ${placement}. Person: ${personDesc}. Product: ${productDesc}. The person is ${placement}. Photorealistic, studio lighting, 8K, high detail, professional fashion photography.`
 
-    console.log(`[try-on] Strategy: create-detailed, prompt: ${prompt.substring(0, 120)}...`)
+    console.log(`[try-on] Strategy: create-detailed, prompt: ${prompt.substring(0, 150)}...`)
 
     const response = await zai.images.generations.create({ prompt, size })
-    const b64 = response.data[0]?.base64
+    const b64 = response.data?.[0]?.base64
     if (!b64) return null
     return `data:image/png;base64,${b64}`
   } catch (err) {
     console.error('[try-on] Strategy create-detailed failed:', (err as Error).message?.substring(0, 200))
+    return null
+  }
+}
+
+async function strategyEditBoth(
+  zai: any, selfieData: string, productImageBase64: string,
+  productName: string, categorySlug: string, personDesc: string, productDesc: string,
+): Promise<string | null> {
+  try {
+    const placement = getProductPlacement(categorySlug, productName)
+    const size = getImageSize(categorySlug)
+
+    // BOTH images: selfie first (for face), product second (for product) 
+    const prompt = `Professional fashion photograph. The FIRST image is the person, the SECOND image is the ${productName}. Combine them: show this person ${placement}. Keep the exact same face, hair, skin tone from the first image. Apply the exact product from the second image. Studio lighting, photorealistic, 8K quality.`
+
+    console.log(`[try-on] Strategy: edit-both, prompt: ${prompt.substring(0, 150)}...`)
+
+    const response = await zai.images.generations.edit({
+      prompt,
+      images: [{ url: selfieData }, { url: productImageBase64 }],
+      size,
+    } as any)
+
+    const b64 = response.data?.[0]?.base64
+    if (!b64) return null
+    return `data:image/png;base64,${b64}`
+  } catch (err) {
+    console.error('[try-on] Strategy edit-both failed:', (err as Error).message?.substring(0, 200))
+    return null
+  }
+}
+
+async function strategyEditProduct(
+  zai: any, selfieData: string, productImageBase64: string,
+  productName: string, categorySlug: string, personDesc: string, productDesc: string,
+): Promise<string | null> {
+  try {
+    const placement = getProductPlacement(categorySlug, productName)
+    const size = getImageSize(categorySlug)
+
+    // Product image as primary reference - better for product accuracy
+    const prompt = `Professional fashion photograph of a person ${placement}. The person has: ${personDesc}. Keep the exact product shown in the image on this person. Studio lighting, photorealistic, 8K quality.`
+
+    console.log(`[try-on] Strategy: edit-product, prompt: ${prompt.substring(0, 150)}...`)
+
+    const response = await zai.images.generations.edit({
+      prompt,
+      images: [{ url: productImageBase64 }],
+      size,
+    } as any)
+
+    const b64 = response.data?.[0]?.base64
+    if (!b64) return null
+    return `data:image/png;base64,${b64}`
+  } catch (err) {
+    console.error('[try-on] Strategy edit-product failed:', (err as Error).message?.substring(0, 200))
     return null
   }
 }
@@ -379,7 +396,7 @@ interface GenResult {
   productScore: number
 }
 
-async function suggestionAndProcess(
+async function backgroundProcess(
   jobId: string, productName: string, categorySlug: string,
   selfieData: string, productImageBase64: string,
   suggestionsPromise: Promise<any>,
@@ -388,7 +405,7 @@ async function suggestionAndProcess(
   if (!job) return
 
   try {
-    // Fetch suggestions early and store them
+    // Step 1: Fetch suggestions early and store them
     const suggestions = await suggestionsPromise
     const formattedSuggestions = suggestions.map((s: any) => ({
       id: s.id,
@@ -400,55 +417,74 @@ async function suggestionAndProcess(
     }))
     if (job) job.suggestions = formattedSuggestions
 
-    // Now start the generation pipeline
-    const zai = await createZAI()
-
-    // Step 1: VLM analysis (parallel)
+    // Step 2: VLM analysis (parallel)
+    if (job) job.progress = 'AI is analyzing your face and product details...'
     console.log(`[try-on] Starting VLM analysis for job ${jobId}`)
+
+    const zai = await createZAI()
     const [personDesc, productDesc] = await Promise.all([
       vlmAnalyze(zai, VLM_PERSON_PROMPT, selfieData),
       vlmAnalyze(zai, VLM_PRODUCT_PROMPT, productImageBase64),
     ])
-    console.log(`[try-on] Person: ${personDesc.substring(0, 120)}...`)
-    console.log(`[try-on] Product: ${productDesc.substring(0, 120)}...`)
+    console.log(`[try-on] Person: ${personDesc.substring(0, 150)}...`)
+    console.log(`[try-on] Product: ${productDesc.substring(0, 150)}...`)
 
-    // Step 2: Try multiple strategies
+    // Step 3: Try generation strategies
     const results: GenResult[] = []
 
-    // Strategy A: Edit with BOTH images (selfie + product) — best chance for both face+product match
-    if (job) job.attempt = 1
-    const aResult = await generateWithBothImages(zai, selfieData, productImageBase64, productName, categorySlug, personDesc, productDesc)
+    // Strategy A: Edit with BOTH images (selfie + product) — best chance for combined accuracy
+    if (job) { job.attempt = 1; job.progress = 'Generating your try-on look (Strategy 1/4)...' }
+    const aResult = await strategyEditBoth(zai, selfieData, productImageBase64, productName, categorySlug, personDesc, productDesc)
     if (aResult) {
       const v = await vlmVerify(zai, selfieData, productImageBase64, aResult, productName)
-      console.log(`[try-on] Strategy A (both-images): Face=${v.faceScore}, Product=${v.productScore}`)
-      results.push({ imageUrl: aResult, strategy: 'edit-both-images', faceScore: v.faceScore, productScore: v.productScore })
+      console.log(`[try-on] Strategy A (edit-both): Face=${v.faceScore}, Product=${v.productScore}`)
+      results.push({ imageUrl: aResult, strategy: 'edit-both', faceScore: v.faceScore, productScore: v.productScore })
       // Early exit if excellent
       if (v.faceScore >= 8 && v.productScore >= 7) {
         console.log(`[try-on] Excellent result from Strategy A, skipping others`)
+        if (job) {
+          job.status = 'completed'
+          job.imageUrl = aResult
+          job.productName = productName
+          job.strategy = 'edit-both'
+          job.faceScore = v.faceScore
+          job.productScore = v.productScore
+          job.progress = 'Complete!'
+        }
+        return
       }
     }
 
-    // Strategy B: Edit with selfie only + product description — best for face preservation
-    if (job) job.attempt = 2
-    const bResult = await generateWithSelfieOnly(zai, selfieData, productName, categorySlug, productDesc)
+    // Strategy B: Edit with selfie only — best for face preservation
+    if (job) { job.attempt = 2; job.progress = 'Preserving your face details (Strategy 2/4)...' }
+    const bResult = await strategyEditSelfie(zai, selfieData, productImageBase64, productName, categorySlug, personDesc, productDesc)
     if (bResult) {
       const v = await vlmVerify(zai, selfieData, productImageBase64, bResult, productName)
-      console.log(`[try-on] Strategy B (selfie-only): Face=${v.faceScore}, Product=${v.productScore}`)
-      results.push({ imageUrl: bResult, strategy: 'edit-selfie-only', faceScore: v.faceScore, productScore: v.productScore })
+      console.log(`[try-on] Strategy B (edit-selfie): Face=${v.faceScore}, Product=${v.productScore}`)
+      results.push({ imageUrl: bResult, strategy: 'edit-selfie', faceScore: v.faceScore, productScore: v.productScore })
     }
 
-    // Strategy C: Create from detailed description — fallback
-    if (job) job.attempt = 3
-    const cResult = await generateWithCreate(zai, productName, categorySlug, personDesc, productDesc)
+    // Strategy C: Edit with product only — best for product accuracy
+    if (job) { job.attempt = 3; job.progress = 'Optimizing product accuracy (Strategy 3/4)...' }
+    const cResult = await strategyEditProduct(zai, selfieData, productImageBase64, productName, categorySlug, personDesc, productDesc)
     if (cResult) {
       const v = await vlmVerify(zai, selfieData, productImageBase64, cResult, productName)
-      console.log(`[try-on] Strategy C (create): Face=${v.faceScore}, Product=${v.productScore}`)
-      results.push({ imageUrl: cResult, strategy: 'create-detailed', faceScore: v.faceScore, productScore: v.productScore })
+      console.log(`[try-on] Strategy C (edit-product): Face=${v.faceScore}, Product=${v.productScore}`)
+      results.push({ imageUrl: cResult, strategy: 'edit-product', faceScore: v.faceScore, productScore: v.productScore })
+    }
+
+    // Strategy D: Create from detailed description — fallback
+    if (job) { job.attempt = 4; job.progress = 'Generating from detailed descriptions (Strategy 4/4)...' }
+    const dResult = await strategyCreateDetailed(zai, productName, categorySlug, personDesc, productDesc)
+    if (dResult) {
+      const v = await vlmVerify(zai, selfieData, productImageBase64, dResult, productName)
+      console.log(`[try-on] Strategy D (create-detailed): Face=${v.faceScore}, Product=${v.productScore}`)
+      results.push({ imageUrl: dResult, strategy: 'create-detailed', faceScore: v.faceScore, productScore: v.productScore })
     }
 
     if (results.length === 0) throw new Error('All strategies failed')
 
-    // Step 3: Pick best result (60% face weight, 40% product weight)
+    // Step 4: Pick best result (60% face weight, 40% product weight)
     const best = results.reduce((a, b) => {
       const sa = a.faceScore * 0.6 + a.productScore * 0.4
       const sb = b.faceScore * 0.6 + b.productScore * 0.4
@@ -464,6 +500,7 @@ async function suggestionAndProcess(
       job.strategy = best.strategy
       job.faceScore = best.faceScore
       job.productScore = best.productScore
+      job.progress = 'Complete!'
     }
   } catch (error) {
     console.error(`[try-on] Job ${jobId} failed:`, error)
