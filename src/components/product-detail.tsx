@@ -105,6 +105,15 @@ function ScoreDots({ score, max = 10 }: { score: number; max?: number }) {
   );
 }
 
+interface SuggestionItem {
+  id: string;
+  name: string;
+  price: number;
+  image: string;
+  category: string;
+  categorySlug: string;
+}
+
 function TryOnDialog({
   open,
   onOpenChange,
@@ -129,6 +138,7 @@ function TryOnDialog({
   const [faceScore, setFaceScore] = useState<number | null>(null);
   const [productScore, setProductScore] = useState<number | null>(null);
   const [strategy, setStrategy] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -149,6 +159,7 @@ function TryOnDialog({
     setFaceScore(null);
     setProductScore(null);
     setStrategy(null);
+    setSuggestions([]);
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
@@ -233,6 +244,7 @@ function TryOnDialog({
             setFaceScore(pollData.faceScore || null);
             setProductScore(pollData.productScore || null);
             setStrategy(pollData.strategy || null);
+            if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
             setStep('result');
             if (pollingRef.current) {
               clearInterval(pollingRef.current);
@@ -253,6 +265,11 @@ function TryOnDialog({
 
           attempts++;
           setPollCount(attempts);
+
+          // Capture suggestions as soon as they're available
+          if (pollData.suggestions?.length && suggestions.length === 0) {
+            setSuggestions(pollData.suggestions);
+          }
 
           if (attempts >= maxAttempts) {
             setError('Generation timed out. The AI service may be busy — please try again.');
@@ -489,33 +506,80 @@ function TryOnDialog({
 
           {/* Generating Step */}
           {step === 'generating' && (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="relative">
-                <div className="absolute inset-0 animate-ping rounded-full bg-amber-400/20" />
-                <div className="relative rounded-full bg-amber-900/20 p-6">
-                  <Sparkles className="h-10 w-10 animate-pulse text-amber-400" />
+            <div className="space-y-5">
+              {/* Progress indicator */}
+              <div className="flex flex-col items-center py-4">
+                <div className="relative">
+                  <div className="absolute inset-0 animate-ping rounded-full bg-amber-400/20" />
+                  <div className="relative rounded-full bg-amber-900/20 p-5">
+                    <Sparkles className="h-8 w-8 animate-pulse text-amber-400" />
+                  </div>
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-amber-100">
+                  Creating Your Look
+                </h3>
+                <p className="mt-1 text-center text-xs text-amber-200/40">
+                  {getProgressMessage()}
+                </p>
+                <div className="mt-3 flex items-center gap-1">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400/60" />
+                  <span className="text-[10px] text-amber-200/30">
+                    {pollCount > 0 ? `Processing... (${pollCount * 3}s)` : 'Starting AI...'}
+                  </span>
+                </div>
+                <div className="mt-2 w-40">
+                  <div className="h-1 rounded-full bg-stone-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-1000"
+                      style={{ width: `${Math.min(85, pollCount * 4 + 10)}%` }}
+                    />
+                  </div>
                 </div>
               </div>
-              <h3 className="mt-6 text-lg font-semibold text-amber-100">
-                Creating Your Look
-              </h3>
-              <p className="mt-2 text-center text-sm text-amber-200/40">
-                {getProgressMessage()}
-              </p>
-              <div className="mt-4 flex items-center gap-1">
-                <Loader2 className="h-4 w-4 animate-spin text-amber-400/60" />
-                <span className="text-xs text-amber-200/30">
-                  {pollCount > 0 ? `Waiting for AI... (${pollCount * 3}s)` : 'Starting AI process...'}
-                </span>
-              </div>
-              <div className="mt-3 w-48">
-                <div className="h-1.5 rounded-full bg-stone-800 overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-1000"
-                    style={{ width: `${Math.min(90, pollCount * 5 + 10)}%` }}
-                  />
+
+              {/* AI Style Suggestions - shown while generating */}
+              {suggestions.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-400/70" />
+                    <p className="text-[11px] font-semibold text-amber-200/60">
+                      AI Style Suggestions — Pairs well with {productName}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {suggestions.slice(0, 4).map((s) => (
+                      <div
+                        key={s.id}
+                        className="group cursor-pointer rounded-lg border border-amber-900/15 bg-stone-900/40 p-2 transition-all hover:border-amber-600/30 hover:bg-stone-900/60"
+                        onClick={() => {
+                          // Navigate to the suggested product
+                          const store = useStore.getState();
+                          store.setSelectedProductId(s.id);
+                          store.setCategory(s.categorySlug);
+                          store.setView('detail');
+                          reset();
+                        }}
+                      >
+                        <div className="relative aspect-square overflow-hidden rounded-md bg-stone-800 mb-2">
+                          <Image
+                            src={s.image}
+                            alt={s.name}
+                            fill
+                            className="object-cover transition-transform group-hover:scale-105"
+                            sizes="120px"
+                          />
+                        </div>
+                        <p className="text-[10px] font-medium text-amber-200/70 truncate">{s.name}</p>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <p className="text-[10px] font-bold text-amber-400">${s.price.toLocaleString()}</p>
+                          <p className="text-[8px] text-amber-200/25">{s.category}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[9px] text-amber-200/20 text-center">Tap a suggestion to view it while you wait</p>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -625,6 +689,45 @@ function TryOnDialog({
                   💡 AI uses multiple strategies (face-priority, product-priority, text-detailed) and picks the best result. For best accuracy, use a clear, well-lit, front-facing selfie.
                 </p>
               </div>
+
+              {/* AI Style Suggestions in result too */}
+              {suggestions.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-3 w-3 text-amber-400/70" />
+                    <p className="text-[10px] font-semibold text-amber-200/60">
+                      Complete the Look — AI Style Suggestions
+                    </p>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {suggestions.slice(0, 4).map((s) => (
+                      <div
+                        key={s.id}
+                        className="group flex-shrink-0 cursor-pointer rounded-lg border border-amber-900/15 bg-stone-900/40 p-1.5 transition-all hover:border-amber-600/30 hover:bg-stone-900/60 w-24"
+                        onClick={() => {
+                          const store = useStore.getState();
+                          store.setSelectedProductId(s.id);
+                          store.setCategory(s.categorySlug);
+                          store.setView('detail');
+                          reset();
+                        }}
+                      >
+                        <div className="relative aspect-square overflow-hidden rounded-md bg-stone-800 mb-1">
+                          <Image
+                            src={s.image}
+                            alt={s.name}
+                            fill
+                            className="object-cover"
+                            sizes="80px"
+                          />
+                        </div>
+                        <p className="text-[8px] font-medium text-amber-200/60 truncate">{s.name}</p>
+                        <p className="text-[8px] font-bold text-amber-400">${s.price.toLocaleString()}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex gap-3">
                 <Button

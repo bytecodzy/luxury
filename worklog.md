@@ -193,3 +193,34 @@ Stage Summary:
 - Best of 3-4 results selected automatically based on composite scoring
 - No more reliance on unsupported API parameters (strength, guidance_scale, images array)
 - App compiled, lint passes, accessible at localhost:3000
+
+---
+Task ID: 7
+Agent: Main
+Task: Fix complete mismatch of face+product in AI try-on, add AI suggestions during buffering
+
+Work Log:
+- Found ROOT CAUSE: Dev logs showed `API request failed with status 400: "image_to_image task must provide images"` 
+- The edit API requires `images` (array format), NOT `image` (string field) as defined in the SDK type
+- Previous code sent `image: selfieData` which was completely ignored → API generated from prompt only → no face preservation
+- Also previous Strategy C (edit-product-base) also failed with same error
+- Only Strategy B (create-detailed) worked but gave Face=3/10, Product=6/10
+- Rewrote try-on route with CORRECT API format:
+  - Strategy A: `edit({ images: [selfie, product], prompt })` — BOTH images as array
+  - Strategy B: `edit({ images: [selfie], prompt })` — selfie only for face preservation
+  - Strategy C: `create({ prompt })` — fallback with detailed descriptions
+- Added AI Style Suggestions feature:
+  - Fetches paired products from complementary categories (sarees→jewelry, watches→shirts, etc.)
+  - Shows 4 suggestions in a 2x2 grid during the generating/buffering step
+  - Users can tap suggestions to browse while waiting for their try-on
+  - Suggestions also shown in result step as "Complete the Look"
+- Simplified prompts: Instead of describing the person's face in the prompt (which conflicts with the image),
+  now just tells the model what to ADD/CHANGE while the image provides the face reference
+- Category pairing logic built into the try-on route (no separate API needed)
+
+Stage Summary:
+- CRITICAL FIX: edit API now uses `images` array instead of `image` string
+- AI Style Suggestions shown during buffering (keeps users engaged)
+- Suggestions also shown in results as "Complete the Look"
+- 3 generation strategies with dual VLM verification (face + product scores)
+- All lint checks pass, dev server running
