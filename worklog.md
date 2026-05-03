@@ -122,3 +122,40 @@ Stage Summary:
 - SDK config verification added to try-on route for better diagnostics
 - All lint checks pass, all APIs returning 200
 - 401 X-Token error should be resolved (config verified to have token)
+
+---
+Task ID: 5
+Agent: Main
+Task: Improve AI try-on face preservation accuracy to 90-100%
+
+Work Log:
+- Analyzed current try-on route and SDK type definitions in detail
+- Identified critical issues with face preservation:
+  1. `images` array approach (2 images as references) doesn't guarantee selfie is the BASE image to edit
+  2. Strength values too high (0.35-0.40 for clothing) giving AI too much freedom to modify face
+  3. Guidance_scale too low (16-22) - insufficient prompt adherence
+  4. No face verification after generation - no way to know if face was preserved
+  5. Image compression quality too low (0.85 JPEG, 1280px) losing face details
+- Rewrote try-on route with key improvements:
+  1. **`image: selfieData` as PRIMARY base image** - tells API to EDIT the selfie (strongest face preservation)
+  2. **Product as `images` reference** - product image provided as visual reference
+  3. **Lower strength values**: Jewelry 0.12-0.16 (was 0.15-0.20), Clothing 0.25-0.30 (was 0.35-0.40)
+  4. **Higher guidance_scale**: 22-28 (was 16-22) - much stronger prompt adherence
+  5. **VLM face verification** - After generating, compares result face with original selfie (1-10 score)
+  6. **Smart retry with face check** - If face score < 7/10, retries with more conservative settings
+  7. **Progressive retry**: Attempt 2 reduces strength by 0.04, adds +3 guidance. Attempt 3 reduces by 0.06, adds +6
+  8. **Better prompts**: "ABSOLUTE PRIORITY" and "CRITICAL" prefixes, explicit "100% identical" instructions
+  9. **Higher quality selfie upload**: 1536px max, 0.92 JPEG quality (was 1280px, 0.85)
+- Updated product-detail.tsx UI:
+  1. Face Match Score indicator (1-10) with visual dots
+  2. Score badge overlay on result image
+  3. Quality labels: Excellent (9-10), Good (7-8), Partial (5-6), Low (<5)
+  4. Updated progress messages to mention face verification step
+  5. Better disclaimer text emphasizing face preservation
+
+Stage Summary:
+- Try-on now uses `image` parameter for selfie (primary edit base) + `images` for product reference
+- Face verification scores displayed to user (transparency)
+- Auto-retry when face score < 7/10 with more conservative parameters
+- Significantly lower strength + higher guidance = better face preservation
+- All lint checks pass, dev server running, app accessible

@@ -33,11 +33,13 @@ type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864'
 interface TryOnJob {
   status: 'processing' | 'completed' | 'failed'
   imageUrl?: string
+  originalSelfie?: string
   productName?: string
   categorySlug?: string
   error?: string
   createdAt: number
   attempt?: number
+  faceScore?: number
 }
 
 const jobs = new Map<string, TryOnJob>()
@@ -66,32 +68,42 @@ function getProductImageBase64(imagePath: string): string | null {
   }
 }
 
-// ── Enhanced VLM Prompts for better accuracy ──────────────────────
+// ── Enhanced VLM Prompts ──────────────────────────────────────────
 
-const VLM_PERSON_PROMPT = `Analyze this person's photo for a virtual try-on application. I need precise details to overlay a product onto this person accurately:
+const VLM_PERSON_PROMPT = `Analyze this person's photo for a virtual try-on. I need VERY precise details:
 
-1. SKIN TONE: Describe exactly (fair/light, medium-warm, olive, tan/bronze, deep brown, etc.)
-2. BODY TYPE: Slim, average, curvy, athletic? Visible body proportions (shoulder width, torso length)
-3. CURRENT OUTFIT: What are they wearing now? (color, type, neckline style, sleeve length)
-4. POSE & FRAMING: Is this a headshot, half-body, or full-body? Facing camera directly or at angle? Arms visible?
-5. HAIR: Color and how it's styled (down, up, covering ears/neck or not)
-6. LIGHTING: Studio, natural, bright, dim?
+1. FACE: Face shape (round, oval, square, heart), skin tone (fair, medium-warm, olive, tan, deep brown), any distinctive facial features
+2. BODY: Body type (slim, average, curvy, athletic), visible proportions
+3. HAIR: Exact color, length, and style (up/down, covering ears or not)
+4. POSE: Headshot, half-body, or full-body? Facing camera or angled? Arms visible?
+5. CURRENT OUTFIT: What they're wearing now, neckline style, colors
+6. EXPRESSION: Smiling, neutral, serious?
 
-Be very specific about skin tone and body proportions - these are critical for accurate try-on. 3 sentences max.`
+Be extremely specific about face shape, skin tone, and hair - these are CRITICAL for face preservation. 3 sentences max.`
 
-const VLM_PRODUCT_PROMPT = `Describe this luxury product precisely for virtual try-on placement on a person:
+const VLM_PRODUCT_PROMPT = `Describe this luxury product in precise detail for virtual try-on:
 
-1. TYPE & PLACEMENT: What is it and exactly where does it go on the body? (e.g., "necklace - sits at collarbone level", "earrings - on earlobes", "saree - draped from waist over left shoulder")
-2. SIZE & PROPORTIONS: How large is it relative to the body part? (e.g., "chunky statement necklace 2 inches wide", "delicate chain necklace", "full-length saree")
-3. DOMINANT COLORS: Primary color(s) and any accent colors
-4. MATERIAL & TEXTURE: Gold, silver, silk, velvet? Shiny, matte, textured?
-5. KEY VISUAL DETAILS: Patterns, gemstones, embroidery type, border design, embellishments
+1. TYPE: What is it? (necklace, earrings, saree, shirt, watch, etc.)
+2. WHERE ON BODY: Exactly where does it go? (around neck, on earlobes, draped from waist, on torso, on wrist)
+3. COLORS: Primary color and all accent colors
+4. MATERIAL: Gold, silver, silk, cotton, leather? Shiny or matte?
+5. KEY DETAILS: Patterns, gemstones, embroidery, border design, collar style, sleeve type
+6. SIZE RELATIVE TO BODY: How big is it on the body? (delicate, statement, full-length)
 
-Focus on what makes this product visually distinctive. 3 sentences max.`
+Be very specific - every detail helps accuracy. 3 sentences max.`
 
-const VLM_SELFIE_CHECK_PROMPT = `Rate this selfie for virtual try-on suitability. Answer ONLY with: GOOD or POOR, followed by one brief reason.
-GOOD = clear face, good lighting, front-facing, visible body area for product placement.
-POOR = blurry, too dark, extreme angle, cropped too tight, or facing away from camera.`
+const VLM_FACE_CHECK_PROMPT = `Compare these two images. The FIRST image is the original selfie, the SECOND is an AI-generated try-on result. 
+
+Rate how well the face in the SECOND image matches the face in the FIRST image. Consider: face shape, skin tone, hair color/style, facial features (eyes, nose, mouth), and overall facial identity.
+
+Answer with ONLY a number from 1-10 where:
+1-3 = Face is completely different person
+4-5 = Face somewhat resembles but clearly different
+6-7 = Face is similar but noticeably altered
+8-9 = Face is very close match, minor differences
+10 = Face is identical, perfect match
+
+Then give ONE brief reason for your score. Format: SCORE|REASON`
 
 // ── Product-type specific context ──────────────────────────────
 
@@ -132,27 +144,27 @@ function getProductTypeContext(categorySlug: string, productName: string): strin
 
   if (categorySlug === 'mens-shirts') {
     if (nameLower.includes('dress shirt') || nameLower.includes('formal') || nameLower.includes('evening') || nameLower.includes('silk')) {
-      return 'PLACEMENT: Formal dress shirt worn on the torso, buttoned up, tucked into trousers. '
+      return 'PLACEMENT: Formal dress shirt on the torso, buttoned up. '
     }
     if (nameLower.includes('oxford') || nameLower.includes('button-down') || nameLower.includes('check') || nameLower.includes('linen')) {
-      return 'PLACEMENT: Casual button-up shirt worn on the torso, can be worn tucked or untucked. '
+      return 'PLACEMENT: Casual button-up shirt on the torso. '
     }
     if (nameLower.includes('polo')) {
-      return 'PLACEMENT: Polo shirt worn on the torso, collared, casual smart look. '
+      return 'PLACEMENT: Polo shirt on the torso, collared. '
     }
     if (nameLower.includes('henley')) {
-      return 'PLACEMENT: Henley shirt worn on the torso, partial button placket, relaxed style. '
+      return 'PLACEMENT: Henley shirt on the torso. '
     }
     if (nameLower.includes('t-shirt') || nameLower.includes('tee') || nameLower.includes('v-neck') || nameLower.includes('crew')) {
-      return 'PLACEMENT: T-shirt worn on the torso, casual relaxed fit. '
+      return 'PLACEMENT: T-shirt on the torso, casual fit. '
     }
-    return 'PLACEMENT: Shirt worn on the torso. '
+    return 'PLACEMENT: Shirt on the torso. '
   }
 
   return ''
 }
 
-// ── Category-specific edit settings ───────────────────────────────
+// ── Category-specific edit settings (OPTIMIZED FOR FACE PRESERVATION) ───
 
 interface EditSettings {
   strength: number
@@ -167,170 +179,160 @@ function getEditSettings(categorySlug: string, productName: string): EditSetting
 
   switch (categorySlug) {
     case 'jewelry': {
-      // Earrings - close-up face shot, very low strength to preserve face
+      // Jewelry: VERY low strength - we only need to add small items, face must stay identical
       if (nameLower.includes('earring') || nameLower.includes('jhumka') || nameLower.includes('stud')) {
         return {
-          strength: 0.15,
-          guidanceScale: 20,
+          strength: 0.12,
+          guidanceScale: 25,
           imageSize: '864x1152',
-          promptTemplate: 'PRESERVE: The exact same face, skin tone, hair, expression, and background. ADD ONLY: The exact earrings from the second reference image on the person\'s earlobes. The earrings must match the second image precisely - same color, shape, size, material, and dangling style. The person\'s face and hair must remain completely unchanged. Professional beauty portrait, studio lighting.',
+          promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, expression, eyes, nose, mouth, and background. Do NOT alter the face in ANY way. ADD ONLY: The described earrings on the person\'s earlobes. The earrings must match the product description precisely. NOTHING ELSE CHANGES. The face must be 100% identical to the original. Professional beauty portrait, studio lighting.',
           numAttempts: 3,
         }
       }
-      // Bracelet/cuff - preserve person, add bracelet on wrist
       if (nameLower.includes('bracelet') || nameLower.includes('cuff') || nameLower.includes('bangle')) {
         return {
-          strength: 0.15,
-          guidanceScale: 18,
+          strength: 0.12,
+          guidanceScale: 24,
           imageSize: '864x1152',
-          promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair, body, clothing, expression, and background. ADD ONLY: The exact bracelet from the second reference image on the person\'s wrist. The bracelet must match the second image precisely - same color, material, width, and design details. Nothing else changes. Professional fashion photography.',
+          promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, body, clothing, expression, and background. Do NOT alter the face in ANY way. ADD ONLY: The described bracelet on the person\'s wrist matching the product description precisely. NOTHING ELSE CHANGES. The face must be 100% identical to the original. Professional fashion photography.',
           numAttempts: 3,
         }
       }
-      // Ring - preserve person, add ring on finger
       if (nameLower.includes('ring')) {
         return {
-          strength: 0.18,
-          guidanceScale: 18,
+          strength: 0.14,
+          guidanceScale: 24,
           imageSize: '1024x1024',
-          promptTemplate: 'PRESERVE: The exact same person - same face, skin, hair, hands, and expression. ADD ONLY: The exact ring from the second reference image on the person\'s finger. The ring must match the second image precisely - same band color, gemstone, setting, and design. Only the ring is added. Professional close-up photography.',
+          promptTemplate: 'CRITICAL: Keep the EXACT same face, skin, hair, hands, and expression. Do NOT alter the face in ANY way. ADD ONLY: The described ring on the person\'s finger matching the product description precisely. NOTHING ELSE CHANGES. The face must be 100% identical to the original. Professional close-up photography.',
           numAttempts: 3,
         }
       }
-      // Necklace/choker - preserve person, add necklace
       if (nameLower.includes('necklace') || nameLower.includes('choker') || nameLower.includes('pendant') || nameLower.includes('temple')) {
         return {
-          strength: 0.18,
-          guidanceScale: 18,
+          strength: 0.14,
+          guidanceScale: 24,
           imageSize: '864x1152',
-          promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair, expression, clothing, and background. ADD ONLY: The exact necklace from the second reference image around the person\'s neck. The necklace must match the second image precisely - same color, gemstones, chain length, pendant shape, and design. The face and hair must remain completely unchanged. Professional fashion photography, studio lighting.',
+          promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, expression, eyes, nose, mouth, and background. Do NOT alter the face in ANY way. ADD ONLY: The described necklace around the person\'s neck matching the product description precisely - same color, gemstones, chain length, pendant shape, and design. The face and hair must be 100% identical to the original. Professional fashion photography, studio lighting.',
           numAttempts: 3,
         }
       }
-      // Jewelry set
       if (nameLower.includes('set') || nameLower.includes('bridal')) {
         return {
-          strength: 0.20,
-          guidanceScale: 18,
+          strength: 0.16,
+          guidanceScale: 24,
           imageSize: '864x1152',
-          promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair, expression, and background. ADD ONLY: The exact jewelry set from the second reference image - necklace around the neck and matching earrings on the earlobes. The jewelry must match the second image precisely - same color, gemstones, and design. The face and hair remain unchanged. Professional bridal photography, studio lighting.',
+          promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, expression, and background. Do NOT alter the face in ANY way. ADD ONLY: The described jewelry set - necklace around the neck and matching earrings on the earlobes, matching the product description precisely. The face and hair must be 100% identical to the original. Professional bridal photography, studio lighting.',
           numAttempts: 3,
         }
       }
-      // Default jewelry
       return {
-        strength: 0.18,
-        guidanceScale: 16,
+        strength: 0.14,
+        guidanceScale: 22,
         imageSize: '864x1152',
-        promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair, expression. ADD ONLY: The exact jewelry from the second reference image worn in its proper place. The jewelry must match the second image precisely in color, material, and design. Professional fashion photography, studio lighting.',
+        promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, and expression. Do NOT alter the face in ANY way. ADD ONLY: The described jewelry worn in its proper place, matching the product description precisely. The face must be 100% identical to the original. Professional fashion photography, studio lighting.',
         numAttempts: 3,
       }
     }
 
     case 'watches':
       return {
-        strength: 0.18,
-        guidanceScale: 18,
+        strength: 0.14,
+        guidanceScale: 24,
         imageSize: '864x1152',
-        promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair, body, clothing, and background. ADD ONLY: The exact watch from the second reference image on the person\'s left wrist. The watch must match precisely - same case color and shape, dial design, strap material and color, and size relative to the wrist. Professional fashion photography, natural lighting.',
+        promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, body, clothing, and background. Do NOT alter the face in ANY way. ADD ONLY: The described watch on the person\'s left wrist matching the product description precisely. The face must be 100% identical to the original. Professional fashion photography.',
         numAttempts: 3,
       }
 
     case 'fragrances':
       return {
-        strength: 0.15,
-        guidanceScale: 16,
+        strength: 0.12,
+        guidanceScale: 22,
         imageSize: '864x1152',
-        promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair, expression, and background. ADD ONLY: The exact fragrance bottle from the second reference image held elegantly near the person\'s chest. The bottle must match precisely - same shape, color, label, cap, and size. Professional beauty photography, soft lighting.',
+        promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, expression, and background. Do NOT alter the face in ANY way. ADD ONLY: The described fragrance bottle held elegantly near the person. The bottle must match the product description precisely. The face must be 100% identical to the original. Professional beauty photography.',
         numAttempts: 2,
       }
 
     case 'leather-goods':
       return {
-        strength: 0.20,
-        guidanceScale: 16,
+        strength: 0.16,
+        guidanceScale: 22,
         imageSize: '864x1152',
-        promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair, body, and expression. ADD ONLY: The exact leather bag from the second reference image carried by this person. The bag must match precisely - same color, shape, material texture, hardware, and straps. Professional fashion photography, lifestyle shot.',
+        promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, body, and expression. Do NOT alter the face in ANY way. ADD ONLY: The described leather bag carried by this person, matching the product description precisely. The face must be 100% identical to the original. Professional fashion photography.',
         numAttempts: 2,
       }
 
     case 'sarees': {
-      // Heavy bridal sarees - need higher strength for full outfit change
+      // Sarees need higher strength for outfit change, but face MUST be preserved
       if (nameLower.includes('bridal') || nameLower.includes('velvet') || nameLower.includes('zardozi')) {
         return {
-          strength: 0.40,
-          guidanceScale: 22,
+          strength: 0.30,
+          guidanceScale: 28,
           imageSize: '768x1344',
-          promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current outfit with the exact bridal saree from the second reference image. The saree must be draped elegantly in traditional Indian style with structured pleats at the waist, rich pallu draped over the left shoulder, and matching blouse. The saree must match precisely - same color, fabric, embroidery pattern, border design, and all embellishments. Professional bridal fashion photography, studio lighting.',
+          promptTemplate: 'ABSOLUTE PRIORITY: Keep the person\'s face, facial features, skin tone, and hair EXACTLY the same as the original photo. The face must be 100% identical - same eyes, nose, mouth, face shape, skin tone, hair color and style. CHANGE ONLY the outfit: Replace the current outfit with the described bridal saree. The saree must be draped elegantly in traditional Indian style with structured pleats at the waist, rich pallu draped over the left shoulder, and matching blouse. The saree must match the product description precisely. Professional bridal fashion photography, studio lighting.',
           numAttempts: 3,
         }
       }
-      // Lightweight sarees
       if (nameLower.includes('chiffon') || nameLower.includes('georgette') || nameLower.includes('organza')) {
         return {
-          strength: 0.38,
-          guidanceScale: 20,
+          strength: 0.28,
+          guidanceScale: 26,
           imageSize: '768x1344',
-          promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current outfit with the exact saree from the second reference image. The saree should be draped gracefully with soft flowing pleats and delicate pallu over the shoulder with matching blouse. The saree must match precisely - same color, fabric, embroidery, and border design. Professional fashion photography, soft natural lighting.',
+          promptTemplate: 'ABSOLUTE PRIORITY: Keep the person\'s face, facial features, skin tone, and hair EXACTLY the same as the original photo. The face must be 100% identical - same eyes, nose, mouth, face shape, skin tone, hair color and style. CHANGE ONLY the outfit: Replace the current outfit with the described lightweight saree. The saree should be draped gracefully with soft flowing pleats and delicate pallu over the shoulder with matching blouse. The saree must match the product description precisely. Professional fashion photography, soft natural lighting.',
           numAttempts: 3,
         }
       }
       // Silk sarees
       return {
-        strength: 0.40,
-        guidanceScale: 21,
+        strength: 0.30,
+        guidanceScale: 27,
         imageSize: '768x1344',
-        promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current outfit with the exact silk saree from the second reference image. The saree should be draped in traditional Indian style with neat pleats and ornate pallu over the shoulder with matching blouse. The saree must match precisely - same color, zari work, pattern, border design, and texture. Professional fashion photography, studio lighting.',
+        promptTemplate: 'ABSOLUTE PRIORITY: Keep the person\'s face, facial features, skin tone, and hair EXACTLY the same as the original photo. The face must be 100% identical - same eyes, nose, mouth, face shape, skin tone, hair color and style. CHANGE ONLY the outfit: Replace the current outfit with the described silk saree. The saree should be draped in traditional Indian style with neat pleats and ornate pallu over the shoulder with matching blouse. The saree must match the product description precisely. Professional fashion photography, studio lighting.',
         numAttempts: 3,
       }
     }
 
     case 'fashion':
       return {
-        strength: 0.40,
-        guidanceScale: 20,
+        strength: 0.30,
+        guidanceScale: 26,
         imageSize: '768x1344',
-        promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current outfit with the exact outfit from the second reference image. The outfit must match precisely - same color, fabric, cut, pattern, and all design details. Professional fashion photography, studio lighting.',
+        promptTemplate: 'ABSOLUTE PRIORITY: Keep the person\'s face, facial features, skin tone, and hair EXACTLY the same as the original photo. The face must be 100% identical - same eyes, nose, mouth, face shape, skin tone, hair color and style. CHANGE ONLY the outfit: Replace the current outfit with the described outfit matching the product description precisely - same color, fabric, cut, pattern, and all design details. Professional fashion photography, studio lighting.',
         numAttempts: 3,
       }
 
     case 'mens-shirts': {
-      // Formal dress shirts and evening shirts
       if (nameLower.includes('dress shirt') || nameLower.includes('evening') || nameLower.includes('silk')) {
         return {
-          strength: 0.38,
-          guidanceScale: 20,
+          strength: 0.28,
+          guidanceScale: 26,
           imageSize: '768x1344',
-          promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current top with the exact formal dress shirt from the second reference image. The shirt must match precisely - same color, collar style, cuff style, fabric texture, and fit. The shirt should be buttoned appropriately and worn tucked into trousers. Professional fashion photography, studio lighting.',
+          promptTemplate: 'ABSOLUTE PRIORITY: Keep the person\'s face, facial features, skin tone, and hair EXACTLY the same as the original photo. The face must be 100% identical - same eyes, nose, mouth, face shape, skin tone, hair color and style. CHANGE ONLY the shirt: Replace the current top with the described formal dress shirt matching the product description precisely - same color, collar style, cuff style, fabric texture, and fit. Professional fashion photography, studio lighting.',
           numAttempts: 3,
         }
       }
-      // T-shirts and casual tees
       if (nameLower.includes('t-shirt') || nameLower.includes('tee') || nameLower.includes('v-neck') || nameLower.includes('crew')) {
         return {
-          strength: 0.35,
-          guidanceScale: 18,
+          strength: 0.25,
+          guidanceScale: 24,
           imageSize: '768x1344',
-          promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current top with the exact t-shirt from the second reference image. The t-shirt must match precisely - same color, neckline style (crew or V-neck), fabric weight, and fit. Casual relaxed look. Professional fashion photography, natural lighting.',
+          promptTemplate: 'ABSOLUTE PRIORITY: Keep the person\'s face, facial features, skin tone, and hair EXACTLY the same as the original photo. The face must be 100% identical - same eyes, nose, mouth, face shape, skin tone, hair color and style. CHANGE ONLY the shirt: Replace the current top with the described t-shirt matching the product description precisely - same color, neckline style, fabric, and fit. Professional fashion photography, natural lighting.',
           numAttempts: 3,
         }
       }
-      // Polo shirts
       if (nameLower.includes('polo')) {
         return {
-          strength: 0.36,
-          guidanceScale: 19,
+          strength: 0.26,
+          guidanceScale: 25,
           imageSize: '768x1344',
-          promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current top with the exact polo shirt from the second reference image. The polo must match precisely - same color, stripe pattern, collar style, and piqué texture. Smart casual look. Professional fashion photography, natural lighting.',
+          promptTemplate: 'ABSOLUTE PRIORITY: Keep the person\'s face, facial features, skin tone, and hair EXACTLY the same as the original photo. The face must be 100% identical - same eyes, nose, mouth, face shape, skin tone, hair color and style. CHANGE ONLY the shirt: Replace the current top with the described polo shirt matching the product description precisely. Professional fashion photography, natural lighting.',
           numAttempts: 3,
         }
       }
-      // Default shirts (Oxford, linen, henley, etc.)
       return {
-        strength: 0.38,
-        guidanceScale: 19,
+        strength: 0.28,
+        guidanceScale: 25,
         imageSize: '768x1344',
-        promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair color as closely as possible. CHANGE: Replace the current top with the exact shirt from the second reference image. The shirt must match precisely - same color, pattern, collar style, fabric, and fit. Professional fashion photography, studio lighting.',
+        promptTemplate: 'ABSOLUTE PRIORITY: Keep the person\'s face, facial features, skin tone, and hair EXACTLY the same as the original photo. The face must be 100% identical - same eyes, nose, mouth, face shape, skin tone, hair color and style. CHANGE ONLY the shirt: Replace the current top with the described shirt matching the product description precisely. Professional fashion photography, studio lighting.',
         numAttempts: 3,
       }
     }
@@ -338,37 +340,37 @@ function getEditSettings(categorySlug: string, productName: string): EditSetting
     case 'romantic-gifts':
     case 'couple-gifts':
       return {
-        strength: 0.18,
-        guidanceScale: 16,
+        strength: 0.14,
+        guidanceScale: 22,
         imageSize: '864x1152',
-        promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair, expression. ADD ONLY: The exact gift from the second reference image held in the person\'s hands. The gift must match precisely - same shape, color, packaging, and all details. Professional photography, warm romantic lighting.',
+        promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair, and expression. Do NOT alter the face. ADD ONLY: The described gift held in the person\'s hands. The face must be 100% identical to the original. Professional photography, warm romantic lighting.',
         numAttempts: 2,
       }
 
     case 'toys':
       return {
-        strength: 0.18,
-        guidanceScale: 16,
+        strength: 0.14,
+        guidanceScale: 22,
         imageSize: '864x1152',
-        promptTemplate: 'PRESERVE: The exact same person - same face, skin tone, hair. ADD ONLY: The exact product from the second reference image near or held by the person. The product must match precisely - same color, shape, size, and details. Professional lifestyle photography.',
+        promptTemplate: 'CRITICAL: Keep the EXACT same face, skin tone, hair. Do NOT alter the face. ADD ONLY: The described product near or held by the person. The face must be 100% identical to the original. Professional lifestyle photography.',
         numAttempts: 2,
       }
 
     case 'home-living':
       return {
-        strength: 0.25,
-        guidanceScale: 16,
+        strength: 0.20,
+        guidanceScale: 22,
         imageSize: '1344x768',
-        promptTemplate: 'PRESERVE: The exact same person. ADD: The exact home product from the second reference image displayed in an elegant home setting near the person. The product must match precisely. Professional interior photography.',
+        promptTemplate: 'CRITICAL: Keep the EXACT same person. Do NOT alter the face. ADD: The described home product displayed near the person. The face must be 100% identical to the original. Professional interior photography.',
         numAttempts: 2,
       }
 
     default:
       return {
-        strength: 0.22,
-        guidanceScale: 16,
+        strength: 0.18,
+        guidanceScale: 22,
         imageSize: '864x1152',
-        promptTemplate: 'PRESERVE: The person\'s face, skin tone, and hair. ADD: The exact product from the second reference image. The product must match precisely. Professional photography.',
+        promptTemplate: 'CRITICAL: Keep the person\'s face, skin tone, and hair EXACTLY the same. Do NOT alter the face. ADD: The described product. The face must be 100% identical to the original. Professional photography.',
         numAttempts: 2,
       }
   }
@@ -416,6 +418,7 @@ export async function POST(request: NextRequest) {
       createdAt: Date.now(),
       categorySlug: product.category.slug,
       attempt: 1,
+      originalSelfie: selfieData,
     })
 
     processTryOnJob(jobId, product.name, product.category.slug, selfieData, productImageBase64)
@@ -459,12 +462,13 @@ export async function GET(request: NextRequest) {
     categorySlug: job.categorySlug,
     error: job.error,
     attempt: job.attempt,
+    faceScore: job.faceScore,
   })
 }
 
 // ── Helper: VLM call with timeout ─────────────────────────────────
 
-async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs = 25000): Promise<string> {
+async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs = 30000): Promise<string> {
   try {
     const vlmPromise = zai.chat.completions.createVision({
       model: 'glm-4v-flash',
@@ -489,7 +493,44 @@ async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs 
   }
 }
 
-// ── Background processing with quality-focused retry ──────────────
+// ── Helper: VLM face comparison between selfie and result ──────────
+
+async function verifyFaceMatch(
+  zai: any,
+  selfieData: string,
+  resultImageUrl: string,
+): Promise<{ score: number; reason: string }> {
+  try {
+    const prompt = VLM_FACE_CHECK_PROMPT
+    const response = await zai.chat.completions.createVision({
+      model: 'glm-4v-flash',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: selfieData } },
+          { type: 'image_url', image_url: { url: resultImageUrl } },
+        ],
+      }],
+      thinking: { type: 'disabled' },
+    })
+
+    const content = response.choices[0]?.message?.content || ''
+    console.log(`[try-on] Face check response: ${content}`)
+
+    // Parse score from response like "8|Face is very close match" or "8 - Face is close"
+    const scoreMatch = content.match(/(\d+)/)
+    const score = scoreMatch ? parseInt(scoreMatch[1]) : 5
+    const reason = content.replace(/^\d+[\|.\-\s]*/, '').trim()
+
+    return { score: Math.min(10, Math.max(1, score)), reason }
+  } catch (err) {
+    console.error('[try-on] Face verification failed:', err)
+    return { score: 7, reason: 'Verification unavailable' }
+  }
+}
+
+// ── Background processing with face-priority quality loop ──────────
 
 async function createZAI(): Promise<InstanceType<typeof ZAI>> {
   try {
@@ -498,7 +539,7 @@ async function createZAI(): Promise<InstanceType<typeof ZAI>> {
     return zai
   } catch (err) {
     console.error('[try-on] ZAI SDK initialization failed:', err)
-    throw new Error('AI service initialization failed. Please ensure the SDK config is properly set up.')
+    throw new Error('AI service initialization failed.')
   }
 }
 
@@ -511,6 +552,7 @@ async function processTryOnJob(
 ) {
   const settings = getEditSettings(categorySlug, productName)
   const maxAttempts = settings.numAttempts
+  const MIN_FACE_SCORE = 7 // Accept results with face score >= 7
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -519,57 +561,60 @@ async function processTryOnJob(
 
       const zai = await createZAI()
 
-      // Step 1: Run VLM analyses in PARALLEL for speed
+      // Step 1: Run VLM analyses in PARALLEL
       console.log(`[try-on] Starting VLM analysis for job ${jobId}, attempt ${attempt}`)
       const [personDescription, productDescription] = await Promise.all([
         vlmAnalyze(zai, VLM_PERSON_PROMPT, selfieData),
         vlmAnalyze(zai, VLM_PRODUCT_PROMPT, productImageBase64),
       ])
 
-      console.log(`[try-on] Person: ${personDescription.substring(0, 100)}...`)
-      console.log(`[try-on] Product: ${productDescription.substring(0, 100)}...`)
+      console.log(`[try-on] Person: ${personDescription.substring(0, 120)}...`)
+      console.log(`[try-on] Product: ${productDescription.substring(0, 120)}...`)
 
-      // Step 2: Build the prompt with clear PRESERVE/ADD structure
+      // Step 2: Build the prompt with face-priority instructions
       const productTypeContext = getProductTypeContext(categorySlug, productName)
       let editPrompt = settings.promptTemplate
 
-      // Prepend person description and product description for richer context
+      // Prepend rich context from VLM
       if (personDescription && productDescription) {
-        editPrompt = `${productTypeContext}PERSON: ${personDescription}. PRODUCT TO ADD: ${productDescription}. ${editPrompt}`
+        editPrompt = `${productTypeContext}PERSON DETAILS: ${personDescription}. PRODUCT TO APPLY: ${productDescription}. INSTRUCTION: ${editPrompt}`
       } else if (personDescription) {
-        editPrompt = `${productTypeContext}PERSON: ${personDescription}. ${editPrompt}`
+        editPrompt = `${productTypeContext}PERSON DETAILS: ${personDescription}. INSTRUCTION: ${editPrompt}`
       } else if (productDescription) {
-        editPrompt = `${productTypeContext}PRODUCT TO ADD: ${productDescription}. ${editPrompt}`
+        editPrompt = `${productTypeContext}PRODUCT TO APPLY: ${productDescription}. INSTRUCTION: ${editPrompt}`
       }
 
-      // Step 3: Adjust parameters per attempt
-      // Attempt 1: Use base settings
-      // Attempt 2: Slightly lower strength + higher guidance for more precision
-      // Attempt 3: Even more conservative approach
+      // Step 3: Progressive parameter adjustment per attempt
+      // Each subsequent attempt uses MORE conservative settings for better face preservation
       let adjustedStrength = settings.strength
       let adjustedGuidance = settings.guidanceScale
 
       if (attempt === 2) {
-        adjustedStrength = Math.max(0.12, settings.strength - 0.03)
-        adjustedGuidance = settings.guidanceScale + 2
+        adjustedStrength = Math.max(0.08, settings.strength - 0.04)
+        adjustedGuidance = settings.guidanceScale + 3
       } else if (attempt >= 3) {
-        adjustedStrength = Math.max(0.10, settings.strength - 0.05)
-        adjustedGuidance = settings.guidanceScale + 4
+        adjustedStrength = Math.max(0.06, settings.strength - 0.06)
+        adjustedGuidance = settings.guidanceScale + 6
       }
 
       console.log(`[try-on] Generating attempt ${attempt}/${maxAttempts} for ${jobId}, cat: ${categorySlug}, str: ${adjustedStrength.toFixed(2)}, gs: ${adjustedGuidance}`)
 
-      // Step 4: Image EDIT API with both reference images
-      const editResponse = await zai.images.generations.edit(({
+      // Step 4: Image EDIT API
+      // KEY CHANGE: Use `image` parameter with selfie as the BASE image to edit
+      // This makes the API start FROM the selfie, preserving it much better
+      // Also include product image in `images` array as a reference
+      const editBody: Record<string, any> = {
         prompt: editPrompt,
         size: settings.imageSize,
+        image: selfieData, // PRIMARY: Selfie is the base image being edited (STRONG face preservation)
         images: [
-          { url: selfieData },
-          { url: productImageBase64 },
+          { url: productImageBase64 }, // REFERENCE: Product image for visual reference
         ],
         strength: adjustedStrength,
         guidance_scale: adjustedGuidance,
-      }) as any)
+      }
+
+      const editResponse = await zai.images.generations.edit(editBody as any)
 
       const imageBase64 = editResponse.data[0]?.base64
       if (!imageBase64) throw new Error('No image generated')
@@ -577,20 +622,51 @@ async function processTryOnJob(
       const imageUrl = `data:image/png;base64,${imageBase64}`
       console.log(`[try-on] Job ${jobId} attempt ${attempt} completed, size: ${imageBase64.length}`)
 
-      // Step 5: Quick quality check with VLM (only on attempt 1 to save time)
-      if (attempt === 1 && imageBase64.length < 20000) {
-        // Very small image likely means poor quality - retry immediately
+      // Step 5: Quality check - reject very small images (likely poor quality)
+      if (imageBase64.length < 15000) {
         console.log(`[try-on] Image too small (${imageBase64.length}), likely poor quality - retrying`)
         continue
       }
 
+      // Step 6: VLM Face Verification (on all attempts for quality assurance)
+      console.log(`[try-on] Running face verification for job ${jobId}, attempt ${attempt}`)
+      const faceResult = await verifyFaceMatch(zai, selfieData, imageUrl)
+      const faceScore = faceResult.score
+
+      console.log(`[try-on] Face verification score: ${faceScore}/10 - ${faceResult.reason}`)
+
       if (currentJob) {
-        currentJob.status = 'completed'
-        currentJob.imageUrl = imageUrl
-        currentJob.productName = productName
-        currentJob.attempt = attempt
+        currentJob.faceScore = faceScore
       }
-      return // Success!
+
+      // If face score is good enough, accept the result
+      if (faceScore >= MIN_FACE_SCORE) {
+        console.log(`[try-on] Face score ${faceScore} >= ${MIN_FACE_SCORE}, accepting result`)
+        if (currentJob) {
+          currentJob.status = 'completed'
+          currentJob.imageUrl = imageUrl
+          currentJob.productName = productName
+          currentJob.attempt = attempt
+        }
+        return // Success with good face match!
+      }
+
+      // Face score too low - retry with more conservative settings
+      console.log(`[try-on] Face score ${faceScore} < ${MIN_FACE_SCORE}, will retry with more conservative settings`)
+
+      // If this was the last attempt, accept anyway (best we could do)
+      if (attempt === maxAttempts) {
+        console.log(`[try-on] Last attempt, accepting result despite face score ${faceScore}`)
+        if (currentJob) {
+          currentJob.status = 'completed'
+          currentJob.imageUrl = imageUrl
+          currentJob.productName = productName
+          currentJob.attempt = attempt
+        }
+        return
+      }
+
+      // Otherwise continue to next attempt with automatically adjusted params
 
     } catch (error) {
       console.error(`[try-on] Attempt ${attempt} failed for job ${jobId}:`, error)
@@ -600,7 +676,7 @@ async function processTryOnJob(
         await new Promise(resolve => setTimeout(resolve, waitTime))
         console.log(`[try-on] Retrying job ${jobId}, attempt ${attempt + 1}...`)
       } else {
-        // All attempts failed, try fallback
+        // All attempts failed, try simple fallback
         console.log(`[try-on] All ${maxAttempts} attempts failed for ${jobId}, trying fallback`)
 
         try {
@@ -608,25 +684,49 @@ async function processTryOnJob(
           const fallbackSettings = getEditSettings(categorySlug, productName)
           const productTypeContext = getProductTypeContext(categorySlug, productName)
 
-          const imageResponse = await zai.images.generations.create({
-            prompt: `${productTypeContext}Professional fashion photography of a person wearing ${productName}. Studio lighting, 8k quality, photorealistic.`,
+          // Fallback: Use edit with selfie as base (simpler prompt)
+          const fallbackResponse = await zai.images.generations.edit({
+            prompt: `${productTypeContext}Edit this photo: Add ${productName} on this person. Keep their face exactly the same. Professional photography.`,
             size: fallbackSettings.imageSize,
-          })
-          const imageBase64 = imageResponse.data[0]?.base64
-          if (!imageBase64) throw new Error('No fallback image')
+            image: selfieData,
+            strength: 0.15,
+          } as any)
+
+          const fbImageBase64 = fallbackResponse.data[0]?.base64
+          if (!fbImageBase64) throw new Error('No fallback image')
 
           const fallbackJob = jobs.get(jobId)
           if (fallbackJob) {
             fallbackJob.status = 'completed'
-            fallbackJob.imageUrl = `data:image/png;base64,${imageBase64}`
+            fallbackJob.imageUrl = `data:image/png;base64,${fbImageBase64}`
             fallbackJob.productName = productName
           }
         } catch (fallbackError) {
           console.error('[try-on] Fallback also failed:', fallbackError)
-          const failedJob = jobs.get(jobId)
-          if (failedJob) {
-            failedJob.status = 'failed'
-            failedJob.error = error instanceof Error ? error.message : 'Failed to generate try-on image'
+          
+          // Last resort: use create() with description
+          try {
+            const zai = await createZAI()
+            const imageResponse = await zai.images.generations.create({
+              prompt: `Professional fashion photography of a person wearing ${productName}. Studio lighting, 8k quality, photorealistic.`,
+              size: settings.imageSize,
+            })
+            const imageBase64 = imageResponse.data[0]?.base64
+            if (!imageBase64) throw new Error('No last-resort image')
+
+            const lastJob = jobs.get(jobId)
+            if (lastJob) {
+              lastJob.status = 'completed'
+              lastJob.imageUrl = `data:image/png;base64,${imageBase64}`
+              lastJob.productName = productName
+            }
+          } catch (lastError) {
+            console.error('[try-on] Last resort also failed:', lastError)
+            const failedJob = jobs.get(jobId)
+            if (failedJob) {
+              failedJob.status = 'failed'
+              failedJob.error = error instanceof Error ? error.message : 'Failed to generate try-on image'
+            }
           }
         }
       }

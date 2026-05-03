@@ -36,7 +36,7 @@ interface ProductDetail {
 }
 
 // ── Image Compression ──────────────────────────────────────────
-function compressImage(file: File, maxSize = 1280, quality = 0.85): Promise<string> {
+function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -44,7 +44,7 @@ function compressImage(file: File, maxSize = 1280, quality = 0.85): Promise<stri
       img.onload = () => {
         const canvas = document.createElement('canvas');
         let { width, height } = img;
-        // Higher resolution for better AI results, but cap at maxSize
+        // Higher resolution for better AI face preservation (1536px max)
         if (width > maxSize || height > maxSize) {
           if (width > height) {
             height = Math.round((height * maxSize) / width);
@@ -58,10 +58,11 @@ function compressImage(file: File, maxSize = 1280, quality = 0.85): Promise<stri
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) { reject(new Error('Canvas error')); return; }
-        // Use higher quality interpolation
+        // Use highest quality interpolation for better face detail
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
+        // Higher JPEG quality (0.92) to preserve face details
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.onerror = () => reject(new Error('Failed to load image'));
@@ -74,6 +75,14 @@ function compressImage(file: File, maxSize = 1280, quality = 0.85): Promise<stri
 
 // ── Try-On Dialog ──────────────────────────────────────────────
 type Step = 'upload' | 'preview' | 'generating' | 'result';
+
+// Face match quality label
+function getFaceScoreLabel(score: number): { label: string; color: string; emoji: string } {
+  if (score >= 9) return { label: 'Excellent Match', color: 'text-emerald-400', emoji: '✨' };
+  if (score >= 7) return { label: 'Good Match', color: 'text-emerald-400', emoji: '👍' };
+  if (score >= 5) return { label: 'Partial Match', color: 'text-amber-400', emoji: '⚡' };
+  return { label: 'Low Match', color: 'text-red-400', emoji: '⚠️' };
+}
 
 function TryOnDialog({
   open,
@@ -96,6 +105,7 @@ function TryOnDialog({
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
+  const [faceScore, setFaceScore] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -113,6 +123,7 @@ function TryOnDialog({
     setResultImage(null);
     setError(null);
     setPollCount(0);
+    setFaceScore(null);
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
@@ -133,7 +144,7 @@ function TryOnDialog({
       }
       setError(null);
       try {
-        const compressed = await compressImage(file, 1280, 0.85);
+        const compressed = await compressImage(file, 1536, 0.92);
         setSelfiePreview(compressed);
         setSelfieData(compressed);
         setStep('preview');
@@ -194,6 +205,7 @@ function TryOnDialog({
 
           if (pollData.status === 'completed' && pollData.imageUrl) {
             setResultImage(pollData.imageUrl);
+            setFaceScore(pollData.faceScore || null);
             setStep('result');
             if (pollingRef.current) {
               clearInterval(pollingRef.current);
@@ -278,10 +290,11 @@ function TryOnDialog({
 
   // Get progress message
   const getProgressMessage = () => {
-    if (pollCount < 3) return 'Analyzing your photo with AI...';
-    if (pollCount < 8) return 'Generating your virtual try-on...';
-    if (pollCount < 15) return 'Almost there, adding final touches...';
-    return 'Just a moment longer, AI is working hard...';
+    if (pollCount < 3) return 'Analyzing your photo & product with AI...';
+    if (pollCount < 6) return 'Generating your virtual try-on...';
+    if (pollCount < 10) return 'Verifying face match & quality...';
+    if (pollCount < 15) return 'Almost there, refining the result...';
+    return 'Just a moment longer, ensuring best quality...';
   };
 
   return (
@@ -507,10 +520,60 @@ function TryOnDialog({
                     <div className="absolute left-1.5 top-1.5 rounded-full bg-emerald-600/90 px-2 py-0.5 text-[9px] font-bold text-white shadow-lg">
                       AI
                     </div>
+                    {/* Face match score badge */}
+                    {faceScore !== null && (
+                      <div className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-stone-900/80 px-2 py-0.5 backdrop-blur-sm">
+                        <span className="text-[9px]">{getFaceScoreLabel(faceScore).emoji}</span>
+                        <span className={`text-[9px] font-bold ${getFaceScoreLabel(faceScore).color}`}>
+                          {faceScore}/10
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-center text-[10px] font-medium text-amber-400">AI Try-On</p>
+                  <div className="flex items-center justify-center gap-1">
+                    <p className="text-[10px] font-medium text-amber-400">AI Try-On</p>
+                    {faceScore !== null && (
+                      <span className={`text-[9px] ${getFaceScoreLabel(faceScore).color}`}>
+                        · {getFaceScoreLabel(faceScore).label}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
+
+              {/* Face Match Quality Indicator */}
+              {faceScore !== null && (
+                <div className="rounded-lg border border-amber-900/15 bg-stone-900/40 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">{getFaceScoreLabel(faceScore).emoji}</span>
+                      <div>
+                        <p className="text-[11px] font-semibold text-amber-200/70">Face Match Score</p>
+                        <p className={`text-[10px] ${getFaceScoreLabel(faceScore).color}`}>
+                          {getFaceScoreLabel(faceScore).label}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: 10 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className={`h-2 w-2 rounded-full transition-colors ${
+                            i < faceScore
+                              ? faceScore >= 7
+                                ? 'bg-emerald-500'
+                                : faceScore >= 5
+                                ? 'bg-amber-500'
+                                : 'bg-red-500'
+                              : 'bg-stone-700'
+                          }`
+                          }
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Product reference */}
               <div className="flex items-center gap-2 rounded-lg border border-amber-900/15 bg-stone-900/40 p-2">
@@ -534,10 +597,10 @@ function TryOnDialog({
               <div className="rounded-lg border border-amber-900/15 bg-amber-950/20 p-3">
                 <p className="text-[11px] text-amber-200/50">
                   {['sarees', 'fashion'].includes(categorySlug)
-                    ? '💡 AI shows the outfit style and drape. Facial features may vary — focus on how the outfit looks on you. For better results, use a well-lit full-body photo.'
+                    ? '💡 AI preserves your face while showing the outfit style. For best face accuracy, use a well-lit front-facing photo.'
                     : ['jewelry', 'watches'].includes(categorySlug)
-                    ? '💡 AI adds the product to your photo. For best results, ensure your face/neck/wrist is clearly visible. The product color and design will match closely.'
-                    : '💡 AI visualization combines your selfie with the product. For best results, use a clear, well-lit photo with the relevant body part visible.'}
+                    ? '💡 AI adds the product to your photo while preserving your face. For best results, ensure your face/neck/wrist is clearly visible.'
+                    : '💡 AI visualization preserves your face while adding the product. For best results, use a clear, well-lit front-facing photo.'}
                 </p>
               </div>
 
