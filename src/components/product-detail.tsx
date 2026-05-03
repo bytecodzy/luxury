@@ -76,12 +76,33 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
 // ── Try-On Dialog ──────────────────────────────────────────────
 type Step = 'upload' | 'preview' | 'generating' | 'result';
 
-// Face match quality label
-function getFaceScoreLabel(score: number): { label: string; color: string; emoji: string } {
-  if (score >= 9) return { label: 'Excellent Match', color: 'text-emerald-400', emoji: '✨' };
-  if (score >= 7) return { label: 'Good Match', color: 'text-emerald-400', emoji: '👍' };
-  if (score >= 5) return { label: 'Partial Match', color: 'text-amber-400', emoji: '⚡' };
-  return { label: 'Low Match', color: 'text-red-400', emoji: '⚠️' };
+// Match quality label
+function getScoreLabel(score: number, type: 'face' | 'product'): { label: string; color: string; emoji: string } {
+  if (score >= 9) return { label: type === 'face' ? 'Excellent Face Match' : 'Exact Product Match', color: 'text-emerald-400', emoji: '✨' };
+  if (score >= 7) return { label: type === 'face' ? 'Good Face Match' : 'Close Product Match', color: 'text-emerald-400', emoji: '👍' };
+  if (score >= 5) return { label: type === 'face' ? 'Partial Face Match' : 'Similar Product', color: 'text-amber-400', emoji: '⚡' };
+  return { label: type === 'face' ? 'Low Face Match' : 'Different Product', color: 'text-red-400', emoji: '⚠️' };
+}
+
+function ScoreDots({ score, max = 10 }: { score: number; max?: number }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {Array.from({ length: max }).map((_, i) => (
+        <div
+          key={i}
+          className={`h-1.5 w-1.5 rounded-full transition-colors ${
+            i < score
+              ? score >= 7
+                ? 'bg-emerald-500'
+                : score >= 5
+                ? 'bg-amber-500'
+                : 'bg-red-500'
+              : 'bg-stone-700'
+          }`}
+        />
+      ))}
+    </div>
+  );
 }
 
 function TryOnDialog({
@@ -106,6 +127,8 @@ function TryOnDialog({
   const [error, setError] = useState<string | null>(null);
   const [pollCount, setPollCount] = useState(0);
   const [faceScore, setFaceScore] = useState<number | null>(null);
+  const [productScore, setProductScore] = useState<number | null>(null);
+  const [strategy, setStrategy] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -124,6 +147,8 @@ function TryOnDialog({
     setError(null);
     setPollCount(0);
     setFaceScore(null);
+    setProductScore(null);
+    setStrategy(null);
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
@@ -195,7 +220,7 @@ function TryOnDialog({
       }
 
       // Step 2: Poll for completion
-      const maxAttempts = 60; // 60 * 3s = 3 minutes max
+      const maxAttempts = 80; // 80 * 3s = 4 minutes max (multiple strategies need more time)
       let attempts = 0;
 
       const poll = async () => {
@@ -206,6 +231,8 @@ function TryOnDialog({
           if (pollData.status === 'completed' && pollData.imageUrl) {
             setResultImage(pollData.imageUrl);
             setFaceScore(pollData.faceScore || null);
+            setProductScore(pollData.productScore || null);
+            setStrategy(pollData.strategy || null);
             setStep('result');
             if (pollingRef.current) {
               clearInterval(pollingRef.current);
@@ -290,11 +317,11 @@ function TryOnDialog({
 
   // Get progress message
   const getProgressMessage = () => {
-    if (pollCount < 3) return 'Analyzing your photo & product with AI...';
-    if (pollCount < 6) return 'Generating your virtual try-on...';
-    if (pollCount < 10) return 'Verifying face match & quality...';
-    if (pollCount < 15) return 'Almost there, refining the result...';
-    return 'Just a moment longer, ensuring best quality...';
+    if (pollCount < 4) return 'Analyzing your face & product details...';
+    if (pollCount < 8) return 'Generating try-on with multiple AI strategies...';
+    if (pollCount < 14) return 'Comparing results & selecting best match...';
+    if (pollCount < 20) return 'Verifying face & product accuracy...';
+    return 'Almost done, finalizing the best result...';
   };
 
   return (
@@ -511,7 +538,6 @@ function TryOnDialog({
                 </div>
                 <div className="space-y-1.5">
                   <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-600/30 bg-stone-900/60">
-                    {/* Use regular img tag for base64 data URLs */}
                     <img
                       src={resultImage}
                       alt={`Virtual try-on: ${productName}`}
@@ -520,58 +546,58 @@ function TryOnDialog({
                     <div className="absolute left-1.5 top-1.5 rounded-full bg-emerald-600/90 px-2 py-0.5 text-[9px] font-bold text-white shadow-lg">
                       AI
                     </div>
-                    {/* Face match score badge */}
-                    {faceScore !== null && (
-                      <div className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-stone-900/80 px-2 py-0.5 backdrop-blur-sm">
-                        <span className="text-[9px]">{getFaceScoreLabel(faceScore).emoji}</span>
-                        <span className={`text-[9px] font-bold ${getFaceScoreLabel(faceScore).color}`}>
-                          {faceScore}/10
-                        </span>
-                      </div>
-                    )}
                   </div>
-                  <div className="flex items-center justify-center gap-1">
-                    <p className="text-[10px] font-medium text-amber-400">AI Try-On</p>
-                    {faceScore !== null && (
-                      <span className={`text-[9px] ${getFaceScoreLabel(faceScore).color}`}>
-                        · {getFaceScoreLabel(faceScore).label}
-                      </span>
-                    )}
-                  </div>
+                  <p className="text-center text-[10px] font-medium text-amber-400">AI Try-On</p>
                 </div>
               </div>
 
-              {/* Face Match Quality Indicator */}
-              {faceScore !== null && (
-                <div className="rounded-lg border border-amber-900/15 bg-stone-900/40 p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm">{getFaceScoreLabel(faceScore).emoji}</span>
-                      <div>
-                        <p className="text-[11px] font-semibold text-amber-200/70">Face Match Score</p>
-                        <p className={`text-[10px] ${getFaceScoreLabel(faceScore).color}`}>
-                          {getFaceScoreLabel(faceScore).label}
-                        </p>
+              {/* Dual Match Quality Indicators */}
+              {(faceScore !== null || productScore !== null) && (
+                <div className="space-y-2">
+                  {/* Face Match */}
+                  {faceScore !== null && (
+                    <div className="rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs">👤</span>
+                          <div>
+                            <p className="text-[10px] font-semibold text-amber-200/70">Face Match</p>
+                            <p className={`text-[9px] ${getScoreLabel(faceScore, 'face').color}`}>
+                              {getScoreLabel(faceScore, 'face').label}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <ScoreDots score={faceScore} />
+                          <span className={`text-[11px] font-bold ${getScoreLabel(faceScore, 'face').color}`}>
+                            {faceScore}/10
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      {Array.from({ length: 10 }).map((_, i) => (
-                        <div
-                          key={i}
-                          className={`h-2 w-2 rounded-full transition-colors ${
-                            i < faceScore
-                              ? faceScore >= 7
-                                ? 'bg-emerald-500'
-                                : faceScore >= 5
-                                ? 'bg-amber-500'
-                                : 'bg-red-500'
-                              : 'bg-stone-700'
-                          }`
-                          }
-                        />
-                      ))}
+                  )}
+                  {/* Product Match */}
+                  {productScore !== null && (
+                    <div className="rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs">💎</span>
+                          <div>
+                            <p className="text-[10px] font-semibold text-amber-200/70">Product Match</p>
+                            <p className={`text-[9px] ${getScoreLabel(productScore, 'product').color}`}>
+                              {getScoreLabel(productScore, 'product').label}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <ScoreDots score={productScore} />
+                          <span className={`text-[11px] font-bold ${getScoreLabel(productScore, 'product').color}`}>
+                            {productScore}/10
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               )}
 
@@ -593,14 +619,10 @@ function TryOnDialog({
                 <span className="text-[10px] text-amber-200/30">&#10003; Applied</span>
               </div>
 
-              {/* Disclaimer */}
+              {/* Info */}
               <div className="rounded-lg border border-amber-900/15 bg-amber-950/20 p-3">
                 <p className="text-[11px] text-amber-200/50">
-                  {['sarees', 'fashion'].includes(categorySlug)
-                    ? '💡 AI preserves your face while showing the outfit style. For best face accuracy, use a well-lit front-facing photo.'
-                    : ['jewelry', 'watches'].includes(categorySlug)
-                    ? '💡 AI adds the product to your photo while preserving your face. For best results, ensure your face/neck/wrist is clearly visible.'
-                    : '💡 AI visualization preserves your face while adding the product. For best results, use a clear, well-lit front-facing photo.'}
+                  💡 AI uses multiple strategies (face-priority, product-priority, text-detailed) and picks the best result. For best accuracy, use a clear, well-lit, front-facing selfie.
                 </p>
               </div>
 

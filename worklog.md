@@ -159,3 +159,37 @@ Stage Summary:
 - Auto-retry when face score < 7/10 with more conservative parameters
 - Significantly lower strength + higher guidance = better face preservation
 - All lint checks pass, dev server running, app accessible
+
+---
+Task ID: 6
+Agent: Main
+Task: Fix AI try-on face not matching selfie AND product mismatch in generated image
+
+Work Log:
+- Analyzed dev server logs: face verification score was 1/10 across ALL 3 attempts
+- VLM said "The second image shows a completely different person" even with strength=0.24, guidance=33
+- Root cause identified: The edit API's `image` parameter is NOT preserving the face - it's treated as context/reference, not as a base to edit
+- Also identified: `strength`, `guidance_scale`, and `images` array are NOT in the SDK's CreateImageEditBody type definition and may be ignored by the backend
+- Completely rewrote try-on route with MULTI-STRATEGY approach:
+  - Strategy A: edit(selfie as image) + VLM product description → face-priority
+  - Strategy B: create(ultra-detailed VLM descriptions) → text-detailed
+  - Strategy C: edit(product as image) + VLM person description → product-priority
+  - Plus fallback: edit(selfie as image) with simple prompt if all else fails
+- Each strategy verified with DUAL VLM checks: face match AND product match (1-10 scores)
+- Best result selected using composite score (60% face weight + 40% product weight)
+- VLM prompts massively enhanced:
+  - Face: 10 specific categories (face shape, skin, eyes, eyebrows, nose, lips, hair, features, body, expression)
+  - Product: 10 specific categories (type, primary color, secondary colors, pattern, material, shape, ornamentation, border, size, distinctive feature)
+- Updated product-detail.tsx UI:
+  - Dual score display: Face Match 👤 + Product Match 💎
+  - ScoreDots component for visual representation
+  - getScoreLabel function with face/product specific labels
+  - Strategy info displayed
+  - Increased polling timeout to 4 minutes for multi-strategy generation
+
+Stage Summary:
+- Multi-strategy generation replaces single-strategy approach
+- Both face AND product accuracy now verified with VLM
+- Best of 3-4 results selected automatically based on composite scoring
+- No more reliance on unsupported API parameters (strength, guidance_scale, images array)
+- App compiled, lint passes, accessible at localhost:3000
