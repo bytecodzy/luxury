@@ -122,11 +122,11 @@ export function Header() {
                   onClick={handleDashboard}
                   className="hidden sm:flex items-center gap-2 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
                 >
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-600/20 text-[10px] font-bold text-amber-400">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-600/20 text-xs font-bold text-amber-400">
                     {authUser.name.charAt(0).toUpperCase()}
                   </div>
-                  <span className="max-w-24 truncate text-xs">{authUser.name}</span>
-                  <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-medium border ${roleBadge[authUser.role] || ''}`}>
+                  <span className="max-w-24 truncate text-sm">{authUser.name}</span>
+                  <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${roleBadge[authUser.role] || ''}`}>
                     {authUser.role}
                   </span>
                 </Button>
@@ -151,14 +151,14 @@ export function Header() {
               </div>
             ) : (
               <Button
-                variant="ghost"
-                size="sm"
+                variant="outline"
+                size="default"
                 onClick={() => setAuthView('login')}
-                className="text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400 gap-1.5"
+                className="border-amber-600/50 bg-amber-900/20 text-amber-300 hover:bg-amber-600/30 hover:text-amber-100 hover:border-amber-500/60 gap-2 px-4 py-2 font-medium shadow-sm shadow-amber-900/20"
                 aria-label="Sign in"
               >
                 <LogIn className="h-5 w-5" />
-                <span className="hidden sm:inline text-xs">Sign In</span>
+                <span className="text-sm">Sign In</span>
               </Button>
             )}
 
@@ -270,10 +270,10 @@ export function Header() {
                         setAuthView('login');
                         setMobileMenuOpen(false);
                       }}
-                      className="rounded-md px-4 py-2 text-left text-amber-400 transition-colors hover:bg-amber-900/20"
+                      className="rounded-md px-4 py-3 text-left text-amber-100 font-medium transition-colors bg-amber-600/20 border border-amber-600/40 hover:bg-amber-600/30"
                     >
                       <span className="flex items-center gap-2">
-                        <LogIn className="h-4 w-4" />
+                        <LogIn className="h-5 w-5" />
                         Sign In
                       </span>
                     </button>
