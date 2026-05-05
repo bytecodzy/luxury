@@ -900,29 +900,66 @@ async function seed() {
   }
   console.log(`✅ Created ${products.length} products`);
 
-  // Create default admin user
-  const adminExists = await db.user.findUnique({ where: { email: 'admin@3boxesluxury.com' } });
-  if (!adminExists) {
-    const { createHash } = await import('crypto');
-    const hashedPassword = createHash('sha256').update('admin123').digest('hex');
-    await db.user.create({
-      data: {
-        email: 'admin@3boxesluxury.com',
-        name: 'Admin User',
-        password: hashedPassword,
-        role: 'admin',
-        isActive: true,
-        approvalStatus: 'approved',
-        emailVerified: true,
-        permissions: {
-          create: [
-            'products.manage', 'orders.manage', 'users.approve', 'users.manage',
-            'reports.view', 'settings.manage', 'inventory.manage',
-          ].map((p) => ({ permission: p })),
+  // Create default demo users
+  const bcrypt = await import('bcryptjs');
+  const demoUsers = [
+    {
+      email: 'admin@3boxesluxury.com',
+      name: 'Admin',
+      password: 'admin123',
+      role: 'admin' as const,
+      permissions: [
+        'products.manage', 'orders.manage', 'users.approve', 'users.manage',
+        'reports.view', 'settings.manage', 'inventory.manage',
+      ],
+    },
+    {
+      email: 'user@3boxesluxury.com',
+      name: 'User',
+      password: 'user123',
+      role: 'user' as const,
+      permissions: ['orders.own', 'cart.manage', 'wishlist.manage', 'profile.own'],
+    },
+    {
+      email: 'agent@3boxesluxury.com',
+      name: 'Agent',
+      password: 'agent123',
+      role: 'agent' as const,
+      permissions: ['orders.view', 'orders.manage', 'products.view', 'customers.view', 'reports.view'],
+    },
+    {
+      email: 'team@3boxesluxury.com',
+      name: 'Team',
+      password: 'team123',
+      role: 'team' as const,
+      permissions: ['orders.view', 'products.view', 'inventory.manage', 'reports.view'],
+    },
+  ];
+
+  for (const demoUser of demoUsers) {
+    const exists = await db.user.findUnique({ where: { email: demoUser.email } });
+    if (!exists) {
+      const hashedPassword = await bcrypt.hash(demoUser.password, 12);
+      await db.user.create({
+        data: {
+          email: demoUser.email,
+          name: demoUser.name,
+          password: hashedPassword,
+          role: demoUser.role,
+          isActive: true,
+          approvalStatus: 'approved',
+          emailVerified: true,
+          phoneVerified: false,
+          twoFactorEnabled: false,
+          permissions: {
+            create: demoUser.permissions.map((p) => ({ permission: p })),
+          },
         },
-      },
-    });
-    console.log('✅ Created default admin user (admin@3boxesluxury.com / admin123)');
+      });
+      console.log(`✅ Created demo user: ${demoUser.email} / ${demoUser.password} (${demoUser.role})`);
+    } else {
+      console.log(`⏭️  Demo user already exists: ${demoUser.email}`);
+    }
   }
 
   console.log("🎉 Seeding complete!");
