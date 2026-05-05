@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
 import { Star, ShoppingCart, ExternalLink } from 'lucide-react';
-import Image from 'next/image';
+
 import { useState } from 'react';
 
 interface Product {
@@ -142,12 +142,10 @@ export function ProductCard({ product }: { product: Product }) {
       {/* Image */}
       <div className="relative aspect-square overflow-hidden bg-stone-800">
         {!imageError ? (
-          <Image
+          <img
             src={mainImage}
             alt={product.name}
-            fill
-            className="object-cover transition-transform duration-500 group-hover:scale-110"
-            sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
+            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
             onError={() => setImageError(true)}
           />
         ) : (
@@ -200,7 +198,7 @@ export function ProductCard({ product }: { product: Product }) {
             {product.category}
           </p>
           {isExternal && product.platformLogo && (
-            <Image
+            <img
               src={product.platformLogo}
               alt={platformName}
               width={12}

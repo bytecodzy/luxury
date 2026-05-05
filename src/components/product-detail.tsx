@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
-import Image from 'next/image';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -528,12 +527,10 @@ function TryOnDialog({
             <div className="space-y-4">
               <div className="flex items-center gap-3 rounded-lg border border-amber-900/20 bg-stone-900/60 p-3">
                 <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md">
-                  <Image
+                  <img
                     src={productImage}
                     alt={productName}
-                    fill
-                    className="object-cover"
-                    sizes="56px"
+                    className="absolute inset-0 h-full w-full object-cover"
                   />
                 </div>
                 <div>
@@ -616,12 +613,10 @@ function TryOnDialog({
                   <Crown className="h-6 w-6 text-amber-400/40" />
                   <span className="text-[10px] text-amber-200/30">+</span>
                   <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-amber-900/20">
-                    <Image
+                    <img
                       src={productImage}
                       alt={productName}
-                      fill
-                      className="object-cover"
-                      sizes="64px"
+                      className="absolute inset-0 h-full w-full object-cover"
                     />
                   </div>
                   <span className="text-[10px] text-amber-200/30">=</span>
@@ -717,12 +712,10 @@ function TryOnDialog({
                         key={i}
                         className="relative flex-shrink-0 h-20 w-20 overflow-hidden rounded-lg border border-amber-900/15 bg-stone-900/60"
                       >
-                        <Image
+                        <img
                           src={img}
                           alt={`${productName} view ${i + 1}`}
-                          fill
-                          className="object-cover"
-                          sizes="80px"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
                       </div>
                     ))}
@@ -753,12 +746,10 @@ function TryOnDialog({
                         }}
                       >
                         <div className="relative aspect-square overflow-hidden rounded-md bg-stone-800 mb-2">
-                          <Image
+                          <img
                             src={s.image}
                             alt={s.name}
-                            fill
-                            className="object-cover transition-transform group-hover:scale-105"
-                            sizes="120px"
+                            className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-105"
                           />
                         </div>
                         <p className="text-[10px] font-medium text-amber-200/70 truncate">{s.name}</p>
@@ -890,12 +881,10 @@ function TryOnDialog({
               {/* Product reference */}
               <div className="flex items-center gap-2 rounded-lg border border-amber-900/15 bg-stone-900/40 p-2">
                 <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-md">
-                  <Image
+                  <img
                     src={productImage}
                     alt={productName}
-                    fill
-                    className="object-cover"
-                    sizes="40px"
+                    className="absolute inset-0 h-full w-full object-cover"
                   />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -939,12 +928,10 @@ function TryOnDialog({
                         }}
                       >
                         <div className="relative aspect-square overflow-hidden rounded-md bg-stone-800 mb-1">
-                          <Image
+                          <img
                             src={s.image}
                             alt={s.name}
-                            fill
-                            className="object-cover"
-                            sizes="80px"
+                            className="absolute inset-0 h-full w-full object-cover"
                           />
                         </div>
                         <p className="text-[8px] font-medium text-amber-200/60 truncate">{s.name}</p>
@@ -1102,12 +1089,10 @@ export function ProductDetail() {
                 <span className="text-5xl text-amber-600/40">&#x1F48E;</span>
               </div>
             ) : (
-              <Image
+              <img
                 src={getProxiedImageUrl(product.images[selectedImage] || '/images/hero.png')}
                 alt={product.name}
-                fill
-                className="object-cover"
-                sizes="(max-width: 768px) 100vw, 50vw"
+                className="absolute inset-0 h-full w-full object-cover"
                 onError={() => {
                   setImageErrors((prev) => new Set(prev).add(selectedImage));
                 }}
@@ -1139,12 +1124,10 @@ export function ProductDetail() {
                   }`}
                 >
                   {!imageErrors.has(i) ? (
-                    <Image
+                    <img
                       src={getProxiedImageUrl(img)}
                       alt={`${product.name} ${i + 1}`}
-                      fill
-                      className="object-cover"
-                      sizes="64px"
+                      className="absolute inset-0 h-full w-full object-cover"
                       onError={() => {
                         setImageErrors((prev) => new Set(prev).add(i));
                       }}

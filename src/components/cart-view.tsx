@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Minus, Plus, Trash2, ShoppingBag, ArrowLeft } from 'lucide-react';
-import Image from 'next/image';
 
 export function CartView() {
   const { cartItems, updateQuantity, removeItem, setView } = useStore();
@@ -64,12 +63,10 @@ export function CartView() {
                 >
                   {/* Image */}
                   <div className="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-md bg-stone-800">
-                    <Image
+                    <img
                       src={item.image}
                       alt={item.name}
-                      fill
-                      className="object-cover"
-                      sizes="96px"
+                      className="absolute inset-0 h-full w-full object-cover"
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none';
                       }}
