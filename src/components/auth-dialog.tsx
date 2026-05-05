@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/select'
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp'
 import { Separator } from '@/components/ui/separator'
-import { Mail, Lock, User, Shield, Loader2, Eye, EyeOff } from 'lucide-react'
+import { Mail, Lock, User, Shield, Loader2, Eye, EyeOff, Building2 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 export function AuthDialog() {
@@ -47,6 +47,13 @@ export function AuthDialog() {
   const [regShowPassword, setRegShowPassword] = useState(false)
   const [regRole, setRegRole] = useState('user')
 
+  // Corporate registration fields
+  const [regCompanyName, setRegCompanyName] = useState('')
+  const [regContactName, setRegContactName] = useState('')
+  const [regContactPhone, setRegContactPhone] = useState('')
+  const [regIndustry, setRegIndustry] = useState('')
+  const [regWebsite, setRegWebsite] = useState('')
+
   // 2FA
   const [twoFACode, setTwoFACode] = useState('')
 
@@ -66,7 +73,12 @@ export function AuthDialog() {
     setRegName('')
     setRegPassword('')
     setRegShowPassword(false)
-    setRegRole('USER')
+    setRegRole('user')
+    setRegCompanyName('')
+    setRegContactName('')
+    setRegContactPhone('')
+    setRegIndustry('')
+    setRegWebsite('')
     setTwoFACode('')
     setError(null)
     setSuccess(null)
@@ -181,18 +193,46 @@ export function AuthDialog() {
         return
       }
 
+      // Corporate registration validation
+      if (regRole === 'corporate') {
+        if (!regCompanyName.trim() || !regContactName.trim()) {
+          setError('Company name and contact name are required for corporate accounts.')
+          return
+        }
+      }
+
       setLoading(true)
       try {
-        const res = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: regEmail.trim(),
-            name: regName.trim(),
-            password: regPassword,
-            role: regRole,
-          }),
-        })
+        let res: Response
+
+        if (regRole === 'corporate') {
+          // Use corporate registration endpoint
+          res = await fetch('/api/corporate/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: regEmail.trim(),
+              name: regName.trim(),
+              password: regPassword,
+              companyName: regCompanyName.trim(),
+              contactName: regContactName.trim(),
+              contactPhone: regContactPhone.trim() || undefined,
+              industry: regIndustry.trim() || undefined,
+              website: regWebsite.trim() || undefined,
+            }),
+          })
+        } else {
+          res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: regEmail.trim(),
+              name: regName.trim(),
+              password: regPassword,
+              role: regRole,
+            }),
+          })
+        }
 
         const data = await res.json()
 
@@ -204,7 +244,9 @@ export function AuthDialog() {
         // Check if registration requires approval
         if (data.approvalStatus === 'pending') {
           setSuccess(
-            'Your registration is pending approval. You will be notified once your account is approved.'
+            regRole === 'corporate'
+              ? 'Your corporate registration is pending admin approval. You will be notified once your account is approved.'
+              : 'Your registration is pending approval. You will be notified once your account is approved.'
           )
           // Don't log in - just show the message
           return
@@ -216,7 +258,7 @@ export function AuthDialog() {
             id: data.user.id,
             email: data.user.email,
             name: data.user.name,
-            role: data.user.role || 'USER',
+            role: data.user.role || 'user',
           }
           setAuth(user, data.token)
         } else if (data.user && !data.token) {
@@ -231,7 +273,7 @@ export function AuthDialog() {
         setLoading(false)
       }
     },
-    [regEmail, regName, regPassword, regRole, setAuth]
+    [regEmail, regName, regPassword, regRole, regCompanyName, regContactName, regContactPhone, regIndustry, regWebsite, setAuth]
   )
 
   const handle2FAVerify = useCallback(
@@ -751,6 +793,12 @@ export function AuthDialog() {
                               3Boxes Team
                             </div>
                           </SelectItem>
+                          <SelectItem value="corporate" className="text-amber-200/80 focus:bg-amber-900/30 focus:text-amber-100">
+                            <div className="flex items-center gap-2">
+                              <Building2 className="h-3.5 w-3.5" />
+                              Corporate
+                            </div>
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                       {regRole === 'team' && (
@@ -762,6 +810,84 @@ export function AuthDialog() {
                         <p className="text-xs text-amber-500/60">
                           Agent accounts may require verification.
                         </p>
+                      )}
+                      {regRole === 'corporate' && (
+                        <p className="text-xs text-amber-500/60">
+                          Corporate accounts require admin approval. You will be notified once approved.
+                        </p>
+                      )}
+
+                      {/* Corporate Registration Fields */}
+                      {regRole === 'corporate' && (
+                        <>
+                          <div className="space-y-2 mt-2">
+                            <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                              Company Name *
+                            </Label>
+                            <div className="relative">
+                              <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
+                              <Input
+                                type="text"
+                                placeholder="Your company name"
+                                value={regCompanyName}
+                                onChange={(e) => setRegCompanyName(e.target.value)}
+                                className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                                required
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                              Contact Person Name *
+                            </Label>
+                            <Input
+                              type="text"
+                              placeholder="Primary contact person"
+                              value={regContactName}
+                              onChange={(e) => setRegContactName(e.target.value)}
+                              className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                              required
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                              <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                                Phone
+                              </Label>
+                              <Input
+                                type="tel"
+                                placeholder="+91-9876543210"
+                                value={regContactPhone}
+                                onChange={(e) => setRegContactPhone(e.target.value)}
+                                className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                                Industry
+                              </Label>
+                              <Input
+                                type="text"
+                                placeholder="e.g. Technology"
+                                value={regIndustry}
+                                onChange={(e) => setRegIndustry(e.target.value)}
+                                className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                              Website
+                            </Label>
+                            <Input
+                              type="url"
+                              placeholder="https://yourcompany.com"
+                              value={regWebsite}
+                              onChange={(e) => setRegWebsite(e.target.value)}
+                              className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                            />
+                          </div>
+                        </>
                       )}
                     </div>
 

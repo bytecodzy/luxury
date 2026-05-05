@@ -36,6 +36,7 @@ export function Header() {
       case 'user': setView('user-dashboard'); break;
       case 'agent': setView('agent-dashboard'); break;
       case 'team': setView('team-dashboard'); break;
+      case 'corporate': setView('corporate-dashboard'); break;
     }
   };
 
@@ -44,6 +45,7 @@ export function Header() {
     user: 'bg-emerald-600/20 text-emerald-400 border-emerald-600/30',
     agent: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
     team: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
+    corporate: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
   };
 
   return (

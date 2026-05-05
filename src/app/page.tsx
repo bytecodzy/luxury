@@ -17,6 +17,7 @@ import { AdminDashboard } from '@/components/admin-dashboard';
 import { UserDashboard } from '@/components/user-dashboard';
 import { AgentDashboard } from '@/components/agent-dashboard';
 import { TeamDashboard } from '@/components/team-dashboard';
+import { CorporateDashboard } from '@/components/corporate-dashboard';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
 
@@ -51,6 +52,8 @@ function AppContent() {
         return <AgentDashboard />;
       case 'team-dashboard':
         return <TeamDashboard />;
+      case 'corporate-dashboard':
+        return <CorporateDashboard />;
       default:
         return (
           <>

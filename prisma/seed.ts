@@ -934,6 +934,13 @@ async function seed() {
       role: 'team' as const,
       permissions: ['orders.view', 'products.view', 'inventory.manage', 'reports.view'],
     },
+    {
+      email: 'corporate@3boxesluxury.com',
+      name: 'TechCorp Industries',
+      password: 'corporate123',
+      role: 'corporate' as const,
+      permissions: ['corporate.manage', 'campaigns.manage', 'branding.manage', 'recipients.manage'],
+    },
   ];
 
   for (const demoUser of demoUsers) {
@@ -962,7 +969,106 @@ async function seed() {
     }
   }
 
-  console.log("🎉 Seeding complete!");
+  // Create corporate account for demo corporate user
+  const corpUser = await db.user.findUnique({ where: { email: 'corporate@3boxesluxury.com' } });
+  if (corpUser) {
+    const existingCorp = await db.corporateAccount.findUnique({ where: { userId: corpUser.id } });
+    if (!existingCorp) {
+      const corp = await db.corporateAccount.create({
+        data: {
+          companyName: 'TechCorp Industries',
+          slug: 'techcorp-industries',
+          industry: 'Technology',
+          website: 'https://techcorp.example.com',
+          gstNumber: '27AABCT1234F1ZP',
+          panNumber: 'AABCT1234F',
+          contactName: 'Rajesh Kumar',
+          contactEmail: 'rajesh@techcorp.example.com',
+          contactPhone: '+91-9876543210',
+          address: '123 Tech Park, Cyber City',
+          city: 'Gurgaon',
+          state: 'Haryana',
+          zipCode: '122002',
+          userId: corpUser.id,
+          approvalStatus: 'approved',
+          creditLimit: 500000,
+          creditUsed: 0,
+          discountPercent: 12,
+        },
+      });
+
+      await db.corporateBranding.create({
+        data: {
+          corporateId: corp.id,
+          logoUrl: '/images/logo.png',
+          primaryColor: '#1e40af',
+          secondaryColor: '#f59e0b',
+          customMessage: 'Wishing you joy and success this festive season! — TechCorp Industries',
+          packagingType: 'premium',
+          giftWrapStyle: 'Gold ribbon with branded wrapping',
+          includeBranding: true,
+          hidePrice: true,
+        },
+      });
+
+      // Create demo campaigns
+      const products = await db.product.findMany({ take: 2 });
+      const campaign = await db.corporateCampaign.create({
+        data: {
+          corporateId: corp.id,
+          name: 'Diwali 2026 Corporate Gifts',
+          occasion: 'diwali',
+          description: 'Annual Diwali gifting for all employees and key clients',
+          budgetPerRecipient: 3000,
+          totalBudget: 150000,
+          status: 'approved',
+          deliveryType: 'bulk',
+          deliveryDate: new Date('2026-10-20'),
+          message: 'May the festival of lights bring you happiness and prosperity!',
+          productId: products[0]?.id || null,
+        },
+      });
+
+      const recipients = [
+        { name: 'Priya Sharma', email: 'priya@techcorp.example.com', designation: 'VP Engineering', department: 'Engineering', city: 'Gurgaon', state: 'Haryana' },
+        { name: 'Amit Patel', email: 'amit@techcorp.example.com', designation: 'CTO', department: 'Technology', city: 'Bangalore', state: 'Karnataka' },
+        { name: 'Sneha Reddy', email: 'sneha@techcorp.example.com', designation: 'Head of Design', department: 'Design', city: 'Mumbai', state: 'Maharashtra' },
+        { name: 'Vikram Singh', email: 'vikram@techcorp.example.com', designation: 'Director Sales', department: 'Sales', city: 'Delhi', state: 'Delhi' },
+        { name: 'Ananya Gupta', email: 'ananya@techcorp.example.com', designation: 'HR Manager', department: 'Human Resources', city: 'Pune', state: 'Maharashtra' },
+      ];
+      for (const r of recipients) {
+        await db.campaignRecipient.create({ data: { campaignId: campaign.id, ...r } });
+      }
+
+      const campaign2 = await db.corporateCampaign.create({
+        data: {
+          corporateId: corp.id,
+          name: 'New Year Team Appreciation',
+          occasion: 'new_year',
+          description: 'New year appreciation gifts for the leadership team',
+          budgetPerRecipient: 5000,
+          totalBudget: 50000,
+          status: 'pending_approval',
+          deliveryType: 'individual',
+          deliveryDate: new Date('2027-01-01'),
+          message: 'Happy New Year! Thank you for an amazing year ahead.',
+          productId: products[1]?.id || null,
+        },
+      });
+
+      const recipients2 = [
+        { name: 'Rajesh Kumar', email: 'rajesh@techcorp.example.com', designation: 'CEO', department: 'Leadership', city: 'Gurgaon', state: 'Haryana' },
+        { name: 'Priya Sharma', email: 'priya@techcorp.example.com', designation: 'VP Engineering', department: 'Engineering', city: 'Gurgaon', state: 'Haryana' },
+      ];
+      for (const r of recipients2) {
+        await db.campaignRecipient.create({ data: { campaignId: campaign2.id, ...r } });
+      }
+
+      console.log('✅ Created corporate account, branding, and 2 demo campaigns');
+    } else {
+      console.log('⏭️  Corporate account already exists');
+    }
+  }
 }
 
 seed()

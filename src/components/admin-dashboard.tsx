@@ -34,7 +34,7 @@ import {
   Search, Upload, X, ChevronDown, AlertTriangle, Check, Loader2,
   Eye, ArrowUpRight, ArrowDownRight, TrendingUp, DollarSign, Box, UserCheck,
   Globe, ExternalLink, Image as ImageIcon, RefreshCw, Link2, ShoppingCart,
-  Handshake,
+  Handshake, Building2, Megaphone, ThumbsUp, ThumbsDown, Users as UsersIcon,
 } from 'lucide-react'
 
 /* ─── style constants ─── */
@@ -134,6 +134,7 @@ export function AdminDashboard() {
     { value: 'import', icon: Import, label: 'Import' },
     { value: 'integrations', icon: Globe, label: 'Integrations' },
     { value: 'partners', icon: Handshake, label: 'Partners' },
+    { value: 'corporate', icon: Building2, label: 'Corporate' },
   ]
 
   return (
@@ -177,6 +178,7 @@ export function AdminDashboard() {
         <TabsContent value="import"><ImportTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="integrations"><IntegrationsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="partners"><PartnersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
+        <TabsContent value="corporate"><CorporateTab token={authToken} onMutate={invalidateAll} /></TabsContent>
       </Tabs>
     </motion.div>
   )
@@ -2665,6 +2667,491 @@ function SyncTriggerForm({ integration, onSync, onClose }: {
         <Button variant="outline" className={btnOutline} onClick={onClose}>Cancel</Button>
         <Button className={btnPrimary} onClick={() => onSync(category === 'all' ? undefined : category || undefined, query || undefined)}>
           <RefreshCw className="mr-1 h-4 w-4" /> Start Sync
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════
+   15. CORPORATE TAB
+   ════════════════════════════════════════════ */
+function CorporateTab({ token, onMutate }: { token: string | null; onMutate: () => void }) {
+  const qc = useQueryClient()
+  const [accountSearch, setAccountSearch] = useState('')
+  const [accountStatusFilter, setAccountStatusFilter] = useState('')
+  const [accountPage, setAccountPage] = useState(1)
+  const [approveAccount, setApproveAccount] = useState<any>(null)
+  const [rejectAccount, setRejectAccount] = useState<any>(null)
+  const [viewAccount, setViewAccount] = useState<any>(null)
+
+  const [campaignStatusFilter, setCampaignStatusFilter] = useState('')
+  const [campaignPage, setCampaignPage] = useState(1)
+  const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null)
+  const [viewCampaign, setViewCampaign] = useState<any>(null)
+
+  /* ─── Corporate Accounts Query ─── */
+  const { data: accountsData, isLoading: accountsLoading } = useQuery({
+    queryKey: ['admin-corporate', accountSearch, accountStatusFilter, accountPage],
+    queryFn: () => apiFetch(`/api/admin/corporate?search=${accountSearch}&approvalStatus=${accountStatusFilter}&page=${accountPage}&limit=20`, undefined, token),
+  })
+
+  const accounts = accountsData?.accounts || []
+  const accountsPagination = accountsData?.pagination
+
+  /* ─── Campaigns Query ─── */
+  const { data: campaignsData, isLoading: campaignsLoading } = useQuery({
+    queryKey: ['admin-campaigns', campaignStatusFilter, campaignPage],
+    queryFn: () => apiFetch(`/api/admin/campaigns?status=${campaignStatusFilter}&page=${campaignPage}&limit=20`, undefined, token),
+  })
+
+  const campaigns = campaignsData?.campaigns || []
+  const campaignsPagination = campaignsData?.pagination
+
+  /* ─── Campaign Detail Query ─── */
+  const { data: campaignDetail } = useQuery({
+    queryKey: ['admin-campaign-detail', expandedCampaign],
+    queryFn: () => apiFetch(`/api/admin/campaigns/${expandedCampaign}`, undefined, token),
+    enabled: !!expandedCampaign,
+  })
+
+  /* ─── Approve/Reject Account Mutation ─── */
+  const approveMut = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; approvalStatus: string; creditLimit?: number; discountPercent?: number; notes?: string }) =>
+      apiFetch(`/api/admin/corporate/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-corporate'] }); onMutate(); setApproveAccount(null) },
+  })
+
+  const rejectMut = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; approvalStatus: string; notes?: string }) =>
+      apiFetch(`/api/admin/corporate/${id}`, { method: 'PUT', body: JSON.stringify(body) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-corporate'] }); onMutate(); setRejectAccount(null) },
+  })
+
+  /* ─── Campaign Status Mutation ─── */
+  const campaignMut = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      apiFetch(`/api/admin/campaigns/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-campaigns'] }); onMutate(); setViewCampaign(null) },
+  })
+
+  return (
+    <div className="space-y-8">
+      {/* ─── Section 1: Corporate Accounts ─── */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Building2 className="h-5 w-5 text-amber-400" />
+          <h2 className="text-sm font-semibold text-amber-100">Corporate Accounts</h2>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-200/30" />
+            <Input className={`${inputCls} pl-9`} placeholder="Search companies, contacts, emails..." value={accountSearch} onChange={e => { setAccountSearch(e.target.value); setAccountPage(1) }} />
+          </div>
+          <Select value={accountStatusFilter || 'all'} onValueChange={v => { setAccountStatusFilter(v === 'all' ? '' : v); setAccountPage(1) }}>
+            <SelectTrigger className={`${selCls} w-40`}><SelectValue placeholder="Filter status" /></SelectTrigger>
+            <SelectContent className={selContentCls}>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {accountsLoading ? (
+          <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+        ) : (
+          <Card className={cardCls}>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-amber-900/20 hover:bg-transparent">
+                      <TableHead className="text-amber-200/50">Company</TableHead>
+                      <TableHead className="text-amber-200/50">Contact</TableHead>
+                      <TableHead className="text-amber-200/50">Email</TableHead>
+                      <TableHead className="text-amber-200/50">Industry</TableHead>
+                      <TableHead className="text-amber-200/50">Status</TableHead>
+                      <TableHead className="text-amber-200/50">Credit Limit</TableHead>
+                      <TableHead className="text-amber-200/50">Discount %</TableHead>
+                      <TableHead className="text-amber-200/50">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {accounts.map((a: any) => (
+                      <TableRow key={a.id} className="border-amber-900/10 hover:bg-amber-900/5">
+                        <TableCell>
+                          <p className="text-sm font-medium text-amber-100">{a.companyName}</p>
+                          <p className="text-xs text-amber-200/40">{a.slug}</p>
+                        </TableCell>
+                        <TableCell className="text-xs text-amber-200/60">{a.contactName}</TableCell>
+                        <TableCell className="text-xs text-amber-200/60">{a.contactEmail}</TableCell>
+                        <TableCell className="text-xs text-amber-200/60">{a.industry || '—'}</TableCell>
+                        <TableCell>
+                          <Badge className={statusColor(a.approvalStatus)}>{a.approvalStatus}</Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-amber-100">{fmt(a.creditLimit || 0)}</TableCell>
+                        <TableCell className="text-sm text-amber-100">{a.discountPercent || 0}%</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-amber-200/40 hover:text-amber-400" onClick={() => setViewAccount(a)}>
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                            {a.approvalStatus === 'pending' && (
+                              <>
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-green-400/40 hover:text-green-400" onClick={() => setApproveAccount(a)}>
+                                  <ThumbsUp className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-400/40 hover:text-red-400" onClick={() => setRejectAccount(a)}>
+                                  <ThumbsDown className="h-3.5 w-3.5" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {accounts.length === 0 && (
+                      <TableRow><TableCell colSpan={8} className="py-8 text-center text-amber-200/40">No corporate accounts found</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              {accountsPagination && accountsPagination.pages > 1 && (
+                <div className="flex items-center justify-between border-t border-amber-900/20 px-4 py-3">
+                  <p className="text-xs text-amber-200/40">Page {accountsPagination.page} of {accountsPagination.pages} ({accountsPagination.total} total)</p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className={btnOutline} disabled={accountPage <= 1} onClick={() => setAccountPage(p => p - 1)}>Prev</Button>
+                    <Button size="sm" variant="outline" className={btnOutline} disabled={accountPage >= accountsPagination.pages} onClick={() => setAccountPage(p => p + 1)}>Next</Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* ─── Section 2: Campaign Management ─── */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Megaphone className="h-5 w-5 text-amber-400" />
+          <h2 className="text-sm font-semibold text-amber-100">Campaign Management</h2>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={campaignStatusFilter || 'all'} onValueChange={v => { setCampaignStatusFilter(v === 'all' ? '' : v); setCampaignPage(1) }}>
+            <SelectTrigger className={`${selCls} w-44`}><SelectValue placeholder="Filter status" /></SelectTrigger>
+            <SelectContent className={selContentCls}>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="pending_approval">Pending Approval</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="in_progress">In Progress</SelectItem>
+              <SelectItem value="completed">Completed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {campaignsLoading ? (
+          <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+        ) : (
+          <Card className={cardCls}>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-amber-900/20 hover:bg-transparent">
+                      <TableHead className="text-amber-200/50">Campaign</TableHead>
+                      <TableHead className="text-amber-200/50">Company</TableHead>
+                      <TableHead className="text-amber-200/50">Occasion</TableHead>
+                      <TableHead className="text-amber-200/50">Status</TableHead>
+                      <TableHead className="text-amber-200/50">Recipients</TableHead>
+                      <TableHead className="text-amber-200/50">Budget</TableHead>
+                      <TableHead className="text-amber-200/50">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {campaigns.map((c: any) => (
+                      <React.Fragment key={c.id}>
+                        <TableRow className="border-amber-900/10 hover:bg-amber-900/5 cursor-pointer" onClick={() => setExpandedCampaign(expandedCampaign === c.id ? null : c.id)}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <ChevronDown className={`h-3.5 w-3.5 text-amber-200/30 transition-transform ${expandedCampaign === c.id ? 'rotate-180' : ''}`} />
+                              <div>
+                                <p className="text-sm font-medium text-amber-100">{c.name}</p>
+                                {c.product && <p className="text-xs text-amber-200/40">Product: {c.product.name}</p>}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-amber-200/60">{c.corporate?.companyName || '—'}</TableCell>
+                          <TableCell className="text-xs text-amber-200/60">{c.occasion || '—'}</TableCell>
+                          <TableCell>
+                            <Badge className={statusColor(c.status === 'pending_approval' ? 'pending' : c.status === 'in_progress' ? 'processing' : c.status)}>{c.status.replace(/_/g, ' ')}</Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-amber-100">{c.recipientCount || 0}</TableCell>
+                          <TableCell className="text-sm text-amber-100">{c.totalBudget ? fmt(c.totalBudget) : c.budgetPerRecipient ? `${fmt(c.budgetPerRecipient)}/person` : '—'}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-amber-200/40 hover:text-amber-400" onClick={() => setViewCampaign(c)}>
+                                <Eye className="h-3.5 w-3.5" />
+                              </Button>
+                              {c.status === 'pending_approval' && (
+                                <>
+                                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-green-400/40 hover:text-green-400" onClick={() => campaignMut.mutate({ id: c.id, status: 'approved' })}>
+                                    <ThumbsUp className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-400/40 hover:text-red-400" onClick={() => campaignMut.mutate({ id: c.id, status: 'rejected' })}>
+                                    <ThumbsDown className="h-3.5 w-3.5" />
+                                  </Button>
+                                </>
+                              )}
+                              {c.status === 'approved' && (
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-blue-400/40 hover:text-blue-400" onClick={() => campaignMut.mutate({ id: c.id, status: 'in_progress' })}>
+                                  Start
+                                </Button>
+                              )}
+                              {(c.status === 'approved' || c.status === 'in_progress') && (
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-red-400/40 hover:text-red-400" onClick={() => campaignMut.mutate({ id: c.id, status: 'cancelled' })}>
+                                  Cancel
+                                </Button>
+                              )}
+                              {c.status === 'in_progress' && (
+                                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-green-400/40 hover:text-green-400" onClick={() => campaignMut.mutate({ id: c.id, status: 'completed' })}>
+                                  Complete
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                        {/* Expanded Recipients Row */}
+                        {expandedCampaign === c.id && (
+                          <TableRow className="border-amber-900/10 bg-stone-800/20">
+                            <TableCell colSpan={7} className="p-4">
+                              <div className="space-y-2">
+                                <p className="text-xs font-medium text-amber-200/60">Recipients</p>
+                                {campaignDetail?.campaign?.recipients ? (
+                                  campaignDetail.campaign.recipients.length > 0 ? (
+                                    <div className="max-h-48 overflow-y-auto rounded-lg border border-amber-900/20 bg-stone-900/50">
+                                      <Table>
+                                        <TableHeader>
+                                          <TableRow className="border-amber-900/10 hover:bg-transparent">
+                                            <TableHead className="text-amber-200/40 text-xs">Name</TableHead>
+                                            <TableHead className="text-amber-200/40 text-xs">Email</TableHead>
+                                            <TableHead className="text-amber-200/40 text-xs">Phone</TableHead>
+                                            <TableHead className="text-amber-200/40 text-xs">Designation</TableHead>
+                                            <TableHead className="text-amber-200/40 text-xs">Department</TableHead>
+                                            <TableHead className="text-amber-200/40 text-xs">City</TableHead>
+                                          </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                          {campaignDetail.campaign.recipients.map((r: any) => (
+                                            <TableRow key={r.id} className="border-amber-900/5 hover:bg-amber-900/5">
+                                              <TableCell className="text-xs text-amber-100">{r.name}</TableCell>
+                                              <TableCell className="text-xs text-amber-200/60">{r.email}</TableCell>
+                                              <TableCell className="text-xs text-amber-200/60">{r.phone || '—'}</TableCell>
+                                              <TableCell className="text-xs text-amber-200/60">{r.designation || '—'}</TableCell>
+                                              <TableCell className="text-xs text-amber-200/60">{r.department || '—'}</TableCell>
+                                              <TableCell className="text-xs text-amber-200/60">{r.city || '—'}</TableCell>
+                                            </TableRow>
+                                          ))}
+                                        </TableBody>
+                                      </Table>
+                                    </div>
+                                  ) : (
+                                    <p className="text-xs text-amber-200/30">No recipients added yet</p>
+                                  )
+                                ) : (
+                                  <div className="flex items-center gap-2 text-xs text-amber-200/30"><Loader2 className="h-3 w-3 animate-spin" /> Loading recipients...</div>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </React.Fragment>
+                    ))}
+                    {campaigns.length === 0 && (
+                      <TableRow><TableCell colSpan={7} className="py-8 text-center text-amber-200/40">No campaigns found</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              {campaignsPagination && campaignsPagination.pages > 1 && (
+                <div className="flex items-center justify-between border-t border-amber-900/20 px-4 py-3">
+                  <p className="text-xs text-amber-200/40">Page {campaignsPagination.page} of {campaignsPagination.pages} ({campaignsPagination.total} total)</p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className={btnOutline} disabled={campaignPage <= 1} onClick={() => setCampaignPage(p => p - 1)}>Prev</Button>
+                    <Button size="sm" variant="outline" className={btnOutline} disabled={campaignPage >= campaignsPagination.pages} onClick={() => setCampaignPage(p => p + 1)}>Next</Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* ─── Approve Account Dialog ─── */}
+      <Dialog open={!!approveAccount} onOpenChange={() => setApproveAccount(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100">Approve Corporate Account</DialogTitle>
+          </DialogHeader>
+          {approveAccount && (
+            <ApproveAccountForm
+              account={approveAccount}
+              token={token}
+              onClose={() => setApproveAccount(null)}
+              onApproved={(id, body) => approveMut.mutate({ id, ...body })}
+              isPending={approveMut.isPending}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Reject Account Dialog ─── */}
+      <Dialog open={!!rejectAccount} onOpenChange={() => setRejectAccount(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100">Reject Corporate Account</DialogTitle>
+          </DialogHeader>
+          {rejectAccount && (
+            <RejectAccountForm
+              account={rejectAccount}
+              onClose={() => setRejectAccount(null)}
+              onRejected={(id, notes) => rejectMut.mutate({ id, approvalStatus: 'rejected', notes })}
+              isPending={rejectMut.isPending}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── View Account Dialog ─── */}
+      <Dialog open={!!viewAccount} onOpenChange={() => setViewAccount(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100">Corporate Account Details</DialogTitle>
+          </DialogHeader>
+          {viewAccount && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><p className={lblCls}>Company</p><p className="text-sm text-amber-100">{viewAccount.companyName}</p></div>
+                <div><p className={lblCls}>Slug</p><p className="text-sm text-amber-100">{viewAccount.slug}</p></div>
+                <div><p className={lblCls}>Contact</p><p className="text-sm text-amber-100">{viewAccount.contactName}</p></div>
+                <div><p className={lblCls}>Email</p><p className="text-sm text-amber-100">{viewAccount.contactEmail}</p></div>
+                <div><p className={lblCls}>Phone</p><p className="text-sm text-amber-100">{viewAccount.contactPhone || '—'}</p></div>
+                <div><p className={lblCls}>Industry</p><p className="text-sm text-amber-100">{viewAccount.industry || '—'}</p></div>
+                <div><p className={lblCls}>GST Number</p><p className="text-sm text-amber-100">{viewAccount.gstNumber || '—'}</p></div>
+                <div><p className={lblCls}>PAN Number</p><p className="text-sm text-amber-100">{viewAccount.panNumber || '—'}</p></div>
+                <div><p className={lblCls}>Website</p><p className="text-sm text-amber-100">{viewAccount.website || '—'}</p></div>
+                <div><p className={lblCls}>Status</p><Badge className={statusColor(viewAccount.approvalStatus)}>{viewAccount.approvalStatus}</Badge></div>
+                <div><p className={lblCls}>Credit Limit</p><p className="text-sm text-amber-100">{fmt(viewAccount.creditLimit || 0)}</p></div>
+                <div><p className={lblCls}>Discount %</p><p className="text-sm text-amber-100">{viewAccount.discountPercent || 0}%</p></div>
+                <div><p className={lblCls}>Credit Used</p><p className="text-sm text-amber-100">{fmt(viewAccount.creditUsed || 0)}</p></div>
+                <div><p className={lblCls}>Campaigns</p><p className="text-sm text-amber-100">{viewAccount.campaignCount || 0}</p></div>
+              </div>
+              {viewAccount.address && (
+                <div><p className={lblCls}>Address</p><p className="text-sm text-amber-100">{viewAccount.address}{viewAccount.city ? `, ${viewAccount.city}` : ''}{viewAccount.state ? `, ${viewAccount.state}` : ''} {viewAccount.zipCode || ''}</p></div>
+              )}
+              {viewAccount.notes && (
+                <div><p className={lblCls}>Notes</p><p className="text-sm text-amber-100">{viewAccount.notes}</p></div>
+              )}
+              <div className="flex items-center gap-2">
+                <p className={lblCls}>Linked User:</p>
+                <p className="text-xs text-amber-200/60">{viewAccount.user?.email || '—'}</p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── View Campaign Dialog ─── */}
+      <Dialog open={!!viewCampaign} onOpenChange={() => setViewCampaign(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto border-amber-900/30 bg-stone-950 sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100">Campaign Details</DialogTitle>
+          </DialogHeader>
+          {viewCampaign && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><p className={lblCls}>Name</p><p className="text-sm text-amber-100">{viewCampaign.name}</p></div>
+                <div><p className={lblCls}>Company</p><p className="text-sm text-amber-100">{viewCampaign.corporate?.companyName || '—'}</p></div>
+                <div><p className={lblCls}>Occasion</p><p className="text-sm text-amber-100">{viewCampaign.occasion || '—'}</p></div>
+                <div><p className={lblCls}>Status</p><Badge className={statusColor(viewCampaign.status === 'pending_approval' ? 'pending' : viewCampaign.status === 'in_progress' ? 'processing' : viewCampaign.status)}>{viewCampaign.status.replace(/_/g, ' ')}</Badge></div>
+                <div><p className={lblCls}>Delivery Type</p><p className="text-sm text-amber-100">{viewCampaign.deliveryType || '—'}</p></div>
+                <div><p className={lblCls}>Delivery Date</p><p className="text-sm text-amber-100">{viewCampaign.deliveryDate ? fmtDate(viewCampaign.deliveryDate) : '—'}</p></div>
+                <div><p className={lblCls}>Budget/Recipient</p><p className="text-sm text-amber-100">{viewCampaign.budgetPerRecipient ? fmt(viewCampaign.budgetPerRecipient) : '—'}</p></div>
+                <div><p className={lblCls}>Total Budget</p><p className="text-sm text-amber-100">{viewCampaign.totalBudget ? fmt(viewCampaign.totalBudget) : '—'}</p></div>
+                <div><p className={lblCls}>Recipients</p><p className="text-sm text-amber-100">{viewCampaign.recipientCount || 0}</p></div>
+                <div><p className={lblCls}>Product</p><p className="text-sm text-amber-100">{viewCampaign.product?.name || '—'}</p></div>
+              </div>
+              {viewCampaign.description && (
+                <div><p className={lblCls}>Description</p><p className="text-sm text-amber-100">{viewCampaign.description}</p></div>
+              )}
+              {viewCampaign.message && (
+                <div><p className={lblCls}>Message</p><p className="text-sm text-amber-100">{viewCampaign.message}</p></div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+/* ─── Approve Account Form ─── */
+function ApproveAccountForm({ account, token, onClose, onApproved, isPending }: { account: any; token: string | null; onClose: () => void; onApproved: (id: string, body: { approvalStatus: string; creditLimit: number; discountPercent: number; notes?: string }) => void; isPending: boolean }) {
+  const [creditLimit, setCreditLimit] = useState(String(account.creditLimit || 50000))
+  const [discountPercent, setDiscountPercent] = useState(String(account.discountPercent || 10))
+  const [notes, setNotes] = useState('')
+  const [error, setError] = useState('')
+
+  const handleSubmit = () => {
+    const cl = parseFloat(creditLimit)
+    const dp = parseFloat(discountPercent)
+    if (isNaN(cl) || cl < 0) { setError('Invalid credit limit'); return }
+    if (isNaN(dp) || dp < 0 || dp > 100) { setError('Discount must be 0-100'); return }
+    onApproved(account.id, { approvalStatus: 'approved', creditLimit: cl, discountPercent: dp, notes: notes.trim() || undefined })
+  }
+
+  return (
+    <div className="space-y-3">
+      {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
+      <p className="text-sm text-amber-200/60">Approve <strong className="text-amber-100">{account.companyName}</strong></p>
+      <div><Label className={lblCls}>Credit Limit (INR) *</Label><Input type="number" className={`${inputCls} mt-1`} value={creditLimit} onChange={e => setCreditLimit(e.target.value)} /></div>
+      <div><Label className={lblCls}>Discount % *</Label><Input type="number" className={`${inputCls} mt-1`} value={discountPercent} onChange={e => setDiscountPercent(e.target.value)} min={0} max={100} /></div>
+      <div><Label className={lblCls}>Notes</Label><Textarea className={`${inputCls} mt-1`} rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional approval notes..." /></div>
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="outline" className={btnOutline} onClick={onClose}>Cancel</Button>
+        <Button className="bg-green-600 text-white hover:bg-green-500" onClick={handleSubmit} disabled={isPending}>
+          {isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} Approve
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Reject Account Form ─── */
+function RejectAccountForm({ account, onClose, onRejected, isPending }: { account: any; onClose: () => void; onRejected: (id: string, notes?: string) => void; isPending: boolean }) {
+  const [notes, setNotes] = useState('')
+  const [error, setError] = useState('')
+
+  const handleSubmit = () => {
+    if (!notes.trim()) { setError('Please provide a rejection reason'); return }
+    onRejected(account.id, notes.trim())
+  }
+
+  return (
+    <div className="space-y-3">
+      {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
+      <p className="text-sm text-amber-200/60">Reject <strong className="text-amber-100">{account.companyName}</strong></p>
+      <div><Label className={lblCls}>Rejection Reason *</Label><Textarea className={`${inputCls} mt-1`} rows={3} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Reason for rejection..." /></div>
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="outline" className={btnOutline} onClick={onClose}>Cancel</Button>
+        <Button className="bg-red-600 text-white hover:bg-red-500" onClick={handleSubmit} disabled={isPending}>
+          {isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} Reject
         </Button>
       </div>
     </div>

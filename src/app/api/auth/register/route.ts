@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     // Validate role
     const validRole = role || 'user';
-    const allowedRoles = ['admin', 'user', 'agent', 'team'];
+    const allowedRoles = ['admin', 'user', 'agent', 'team', 'corporate'];
     if (!allowedRoles.includes(validRole)) {
       return NextResponse.json(
         { error: 'Invalid role. Must be one of: admin, user, agent, team' },
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Determine approval status based on role
-    const approvalStatus = ['admin', 'user'].includes(validRole) ? 'approved' : 'pending';
+    const approvalStatus = ['admin', 'user', 'corporate'].includes(validRole) ? 'approved' : 'pending';
 
     // Create user
     const user = await db.user.create({

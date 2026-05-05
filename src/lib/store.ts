@@ -1,12 +1,12 @@
 import { create } from 'zustand'
 
-export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'wiki'
+export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'corporate-dashboard' | 'wiki'
 
 export interface AuthUser {
   id: string
   email: string
   name: string
-  role: 'admin' | 'user' | 'agent' | 'team'
+  role: 'admin' | 'user' | 'agent' | 'team' | 'corporate'
 }
 
 export interface CartItem {

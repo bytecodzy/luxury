@@ -54,6 +54,8 @@ model Product {
   orderItems     OrderItem[]
   inventoryLogs  InventoryLog[]
   wishlistItems  WishlistItem[]
+  campaigns      CorporateCampaign[]
+  recipients     CampaignRecipient[]
 }
 
 model PlatformIntegration {
@@ -152,7 +154,7 @@ model User {
   email              String            @unique
   name               String
   password           String?
-  role               String            @default("user") // admin, user, agent, team
+  role               String            @default("user") // admin, user, agent, team, corporate
   avatar             String?
   phone              String?
   isActive           Boolean           @default(true)
@@ -174,6 +176,7 @@ model User {
   permissions        UserPermission[]
   sessions           Session[]
   wishlistItems      WishlistItem[]
+  corporateAccount   CorporateAccount?
 }
 
 model UserPermission {
@@ -358,4 +361,97 @@ model PartnerCategoryMap {
   createdAt      DateTime @default(now())
 
   @@unique([integrationId, partnerCatSlug])
+}
+
+// ─── Corporate Gifting Portal Models ───
+
+model CorporateAccount {
+  id              String    @id @default(cuid())
+  companyName     String
+  slug            String    @unique
+  industry        String?
+  website         String?
+  gstNumber       String?
+  panNumber       String?
+  contactName     String
+  contactEmail    String
+  contactPhone    String?
+  address         String?
+  city            String?
+  state           String?
+  zipCode         String?
+  country         String    @default("India")
+  logo            String?
+  userId          String    @unique  // linked User account
+  user            User      @relation(fields: [userId], references: [id])
+  approvalStatus  String    @default("pending") // pending, approved, rejected
+  isActive        Boolean   @default(true)
+  creditLimit     Float     @default(0)
+  creditUsed      Float     @default(0)
+  discountPercent Float     @default(0) // default corporate discount %
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  campaigns       CorporateCampaign[]
+  branding        CorporateBranding?
+}
+
+model CorporateBranding {
+  id              String          @id @default(cuid())
+  corporateId     String          @unique
+  corporate       CorporateAccount @relation(fields: [corporateId], references: [id], onDelete: Cascade)
+  logoUrl         String?
+  primaryColor    String?         // hex color
+  secondaryColor  String?         // hex color
+  customMessage   String?         // default greeting message
+  packagingType   String          @default("standard") // standard, premium, luxury
+  giftWrapStyle   String?         // ribbon color, wrapping style
+  includeBranding Boolean         @default(true) // include corporate branding on package
+  hidePrice       Boolean         @default(true) // hide price on gift
+  cardTemplate    String?         // custom card template
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model CorporateCampaign {
+  id              String   @id @default(cuid())
+  corporateId     String
+  corporate       CorporateAccount @relation(fields: [corporateId], references: [id])
+  name            String
+  occasion        String?  // diwali, christmas, new_year, birthday, anniversary, onboarding, etc.
+  description     String?
+  budgetPerRecipient Float?
+  totalBudget     Float?
+  status          String   @default("draft") // draft, pending_approval, approved, in_progress, completed, cancelled
+  deliveryType    String   @default("bulk") // bulk, individual
+  deliveryDate    DateTime?
+  message         String?  // custom greeting message for this campaign
+  productId       String?  // selected product for all recipients
+  product         Product? @relation(fields: [productId], references: [id])
+  recipients      CampaignRecipient[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model CampaignRecipient {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    CorporateCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name        String
+  email       String
+  phone       String?
+  designation String?
+  department  String?
+  address     String?
+  city        String?
+  state       String?
+  zipCode     String?
+  productId   String?  // override campaign-level product
+  product     Product? @relation(fields: [productId], references: [id])
+  budget      Float?   // override campaign budget
+  message     String?  // override campaign message
+  giftStatus  String   @default("pending") // pending, ordered, shipped, delivered, cancelled
+  orderId     String?  // linked order once placed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
