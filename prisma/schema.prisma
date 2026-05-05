@@ -19,24 +19,34 @@ model Category {
 }
 
 model Product {
-  id          String    @id @default(cuid())
-  name        String
-  slug        String    @unique
-  description String
-  price       Float
+  id             String    @id @default(cuid())
+  productNumber  String    @unique
+  name           String
+  slug           String    @unique
+  description    String
+  price          Float
   compareAtPrice Float?
-  images      String    // JSON array of image URLs
-  categoryId  String
-  category    Category  @relation(fields: [categoryId], references: [id])
-  stock       Int       @default(0)
-  rating      Float     @default(0)
-  reviewCount Int       @default(0)
-  featured    Boolean   @default(false)
-  tags        String?   // JSON array of tags
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  cartItems   CartItem[]
-  orderItems  OrderItem[]
+  costPrice      Float?
+  sku            String?
+  images         String    // JSON array of image URLs
+  categoryId     String
+  category       Category  @relation(fields: [categoryId], references: [id])
+  stock          Int       @default(0)
+  reorderLevel   Int       @default(5)
+  rating         Float     @default(0)
+  reviewCount    Int       @default(0)
+  featured       Boolean   @default(false)
+  tags           String?   // JSON array of tags
+  vendorId       String?
+  vendor         Vendor?   @relation(fields: [vendorId], references: [id])
+  sourceUrl      String?
+  platform       String?   // myntra, nykaa, amazon, etc.
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+  inventoryLogs  InventoryLog[]
+  wishlistItems  WishlistItem[]
 }
 
 model Cart {
@@ -90,4 +100,194 @@ model OrderItem {
   price     Float
   quantity  Int
   image     String?
+}
+
+model User {
+  id                 String            @id @default(cuid())
+  email              String            @unique
+  name               String
+  password           String?
+  role               String            @default("user") // admin, user, agent, team
+  avatar             String?
+  phone              String?
+  isActive           Boolean           @default(true)
+  emailVerified      Boolean           @default(false)
+  phoneVerified      Boolean           @default(false)
+  twoFactorSecret    String?
+  twoFactorEnabled   Boolean           @default(false)
+  approvalStatus     String            @default("pending") // pending, approved, rejected
+  socialProvider     String?           // google, facebook, linkedin
+  socialId           String?
+  resetToken         String?
+  resetTokenExpiry   DateTime?
+  emailVerifyToken   String?
+  emailVerifyExpiry  DateTime?
+  phoneVerifyCode    String?
+  phoneVerifyExpiry  DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  permissions        UserPermission[]
+  sessions           Session[]
+  wishlistItems      WishlistItem[]
+}
+
+model UserPermission {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission String   // e.g. "products.manage", "orders.manage", "accounting.view"
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, permission])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
+model Vendor {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  gstNumber   String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+  invoices    Invoice[]
+}
+
+model Invoice {
+  id             String       @id @default(cuid())
+  invoiceNumber  String       @unique
+  vendorId       String?
+  vendor         Vendor?      @relation(fields: [vendorId], references: [id])
+  orderId        String?
+  amount         Float
+  tax            Float        @default(0)
+  total          Float
+  status         String       @default("draft") // draft, sent, paid, cancelled
+  dueDate        DateTime?
+  paidDate       DateTime?
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  items          InvoiceItem[]
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Int     @default(1)
+  unitPrice   Float
+  amount      Float
+}
+
+model AccountEntry {
+  id          String   @id @default(cuid())
+  entryNumber String   @unique
+  type        String   // debit, credit
+  category    String   // sales, purchase, expense, refund, tax, other
+  amount      Float
+  description String
+  reference   String?  // order number, invoice number, etc.
+  createdAt   DateTime @default(now())
+}
+
+model InventoryLog {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  type      String   // in, out, adjustment, return
+  quantity  Int
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+}
+
+model PaymentMethod {
+  id           String   @id @default(cuid())
+  type         String   // card, upi, netbanking, wallet
+  provider     String?
+  last4        String?
+  isDefault    Boolean  @default(false)
+  userId       String?
+  createdAt    DateTime @default(now())
+}
+
+model Offer {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  code        String    @unique
+  type        String    // percentage, fixed
+  value       Float
+  minOrder    Float?
+  maxDiscount Float?
+  validFrom   DateTime
+  validTo     DateTime
+  isActive    Boolean   @default(true)
+  usageLimit  Int?
+  usedCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model WikiDocument {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  category  String?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AgentDocShare {
+  id         String   @id @default(cuid())
+  agentId    String
+  docId      String
+  sharedBy   String
+  createdAt  DateTime @default(now())
+}
+
+model SupportTicket {
+  id        String                  @id @default(cuid())
+  subject   String
+  status    String                  @default("open") // open, in_progress, resolved, closed
+  priority  String                  @default("medium") // low, medium, high, urgent
+  userId    String?
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
+  messages  SupportTicketMessage[]
+}
+
+model SupportTicketMessage {
+  id        String         @id @default(cuid())
+  ticketId  String
+  ticket    SupportTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId  String?
+  message   String
+  createdAt DateTime       @default(now())
 }

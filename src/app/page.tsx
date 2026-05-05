@@ -12,6 +12,11 @@ import { CartView } from '@/components/cart-view';
 import { CheckoutView } from '@/components/checkout-view';
 import { OrderConfirmation } from '@/components/order-confirmation';
 import { OrderHistory } from '@/components/order-history';
+import { AuthDialog } from '@/components/auth-dialog';
+import { AdminDashboard } from '@/components/admin-dashboard';
+import { UserDashboard } from '@/components/user-dashboard';
+import { AgentDashboard } from '@/components/agent-dashboard';
+import { TeamDashboard } from '@/components/team-dashboard';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
 
@@ -38,6 +43,14 @@ function AppContent() {
         return <OrderConfirmation />;
       case 'orders':
         return <OrderHistory />;
+      case 'admin-dashboard':
+        return <AdminDashboard />;
+      case 'user-dashboard':
+        return <UserDashboard />;
+      case 'agent-dashboard':
+        return <AgentDashboard />;
+      case 'team-dashboard':
+        return <TeamDashboard />;
       default:
         return (
           <>
@@ -68,6 +81,7 @@ function AppContent() {
         </div>
       </main>
       <Footer />
+      <AuthDialog />
     </div>
   );
 }

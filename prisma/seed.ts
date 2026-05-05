@@ -877,6 +877,7 @@ async function seed() {
   console.log(`✅ Created ${categories.length} categories`);
 
   // Create products
+  let productCounter = 10001;
   for (const prod of products) {
     const category = await db.category.findUnique({
       where: { slug: prod.categorySlug },
@@ -888,14 +889,41 @@ async function seed() {
     }
 
     const { categorySlug, ...productData } = prod;
+    const productNumber = `PRD-${productCounter}`;
+    productCounter++;
 
     await db.product.upsert({
       where: { slug: prod.slug },
-      update: { ...productData, categoryId: category.id },
-      create: { ...productData, categoryId: category.id },
+      update: { ...productData, categoryId: category.id, productNumber },
+      create: { ...productData, categoryId: category.id, productNumber },
     });
   }
   console.log(`✅ Created ${products.length} products`);
+
+  // Create default admin user
+  const adminExists = await db.user.findUnique({ where: { email: 'admin@3boxesluxury.com' } });
+  if (!adminExists) {
+    const { createHash } = await import('crypto');
+    const hashedPassword = createHash('sha256').update('admin123').digest('hex');
+    await db.user.create({
+      data: {
+        email: 'admin@3boxesluxury.com',
+        name: 'Admin User',
+        password: hashedPassword,
+        role: 'admin',
+        isActive: true,
+        approvalStatus: 'approved',
+        emailVerified: true,
+        permissions: {
+          create: [
+            'products.manage', 'orders.manage', 'users.approve', 'users.manage',
+            'reports.view', 'settings.manage', 'inventory.manage',
+          ].map((p) => ({ permission: p })),
+        },
+      },
+    });
+    console.log('✅ Created default admin user (admin@3boxesluxury.com / admin123)');
+  }
 
   console.log("🎉 Seeding complete!");
 }

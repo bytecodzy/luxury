@@ -4,13 +4,13 @@ import { useStore } from '@/lib/store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X } from 'lucide-react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 
 export function Header() {
-  const { searchQuery, setSearch, setView, cartItems, setCategory } = useStore();
+  const { searchQuery, setSearch, setView, cartItems, setCategory, authUser, setAuthView, clearAuth } = useStore();
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -28,6 +28,23 @@ export function Header() {
   useEffect(() => {
     setLocalSearch(searchQuery);
   }, [searchQuery]);
+
+  const handleDashboard = () => {
+    if (!authUser) return;
+    switch (authUser.role) {
+      case 'admin': setView('admin-dashboard'); break;
+      case 'user': setView('user-dashboard'); break;
+      case 'agent': setView('agent-dashboard'); break;
+      case 'team': setView('team-dashboard'); break;
+    }
+  };
+
+  const roleBadge: Record<string, string> = {
+    admin: 'bg-red-600/20 text-red-400 border-red-600/30',
+    user: 'bg-emerald-600/20 text-emerald-400 border-emerald-600/30',
+    agent: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
+    team: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-amber-900/30 bg-stone-950/95 backdrop-blur-md">
@@ -95,6 +112,55 @@ export function Header() {
             >
               <Package className="h-5 w-5" />
             </Button>
+
+            {/* Login / Profile */}
+            {authUser ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleDashboard}
+                  className="hidden sm:flex items-center gap-2 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
+                >
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-600/20 text-[10px] font-bold text-amber-400">
+                    {authUser.name.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="max-w-24 truncate text-xs">{authUser.name}</span>
+                  <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-medium border ${roleBadge[authUser.role] || ''}`}>
+                    {authUser.role}
+                  </span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleDashboard}
+                  className="sm:hidden text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
+                  aria-label="My Dashboard"
+                >
+                  <Shield className="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => { clearAuth(); setView('home') }}
+                  className="text-amber-200/40 hover:bg-red-900/20 hover:text-red-400"
+                  aria-label="Sign out"
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAuthView('login')}
+                className="text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400 gap-1.5"
+                aria-label="Sign in"
+              >
+                <LogIn className="h-5 w-5" />
+                <span className="hidden sm:inline text-xs">Sign In</span>
+              </Button>
+            )}
 
             {/* Cart */}
             <Button
@@ -170,6 +236,48 @@ export function Header() {
                   >
                     Home
                   </button>
+                  {authUser ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          handleDashboard();
+                          setMobileMenuOpen(false);
+                        }}
+                        className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
+                      >
+                        <span className="flex items-center gap-2">
+                          <User className="h-4 w-4" />
+                          My Dashboard ({authUser.role})
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          clearAuth();
+                          setView('home');
+                          setMobileMenuOpen(false);
+                        }}
+                        className="rounded-md px-4 py-2 text-left text-red-400/80 transition-colors hover:bg-red-900/20 hover:text-red-400"
+                      >
+                        <span className="flex items-center gap-2">
+                          <LogOut className="h-4 w-4" />
+                          Sign Out
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setAuthView('login');
+                        setMobileMenuOpen(false);
+                      }}
+                      className="rounded-md px-4 py-2 text-left text-amber-400 transition-colors hover:bg-amber-900/20"
+                    >
+                      <span className="flex items-center gap-2">
+                        <LogIn className="h-4 w-4" />
+                        Sign In
+                      </span>
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setView('cart');
