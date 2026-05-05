@@ -83,7 +83,22 @@ export function ProductCard({ product }: { product: Product }) {
   const { trackClick } = useAffiliateClick();
   const [isAdding, setIsAdding] = useState(false);
   const [imageError, setImageError] = useState(false);
-  const mainImage = product.images[0] || '/images/placeholder.jpg';
+
+  // For external products with HTTP image URLs, use the image proxy
+  const getProxiedImageUrl = (url: string): string => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      // Use our image proxy to bypass CORS/hotlink protection
+      return `/api/image-proxy?url=${encodeURIComponent(url)}&platform=${product.platform || ''}`;
+    }
+    if (url.startsWith('//')) {
+      return `/api/image-proxy?url=${encodeURIComponent('https:' + url)}&platform=${product.platform || ''}`;
+    }
+    return url;
+  };
+
+  const mainImage = product.images.length > 0
+    ? getProxiedImageUrl(product.images[0])
+    : '/images/placeholder.jpg';
   const isExternal = product.isExternal && product.platform;
   const platformSlug = product.platform?.toLowerCase() || '';
   const platformName = PLATFORM_DISPLAY_NAMES[platformSlug] || product.platform || '';

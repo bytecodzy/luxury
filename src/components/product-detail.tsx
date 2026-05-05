@@ -1011,6 +1011,17 @@ export function ProductDetail() {
 
   const product = data?.product;
 
+  // For external products with HTTP image URLs, use the image proxy
+  const getProxiedImageUrl = (url: string): string => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return `/api/image-proxy?url=${encodeURIComponent(url)}&platform=${product?.platform || ''}`;
+    }
+    if (url.startsWith('//')) {
+      return `/api/image-proxy?url=${encodeURIComponent('https:' + url)}&platform=${product?.platform || ''}`;
+    }
+    return url;
+  };
+
   const handleAddToCart = () => {
     if (!product) return;
     setIsAdding(true);
@@ -1019,7 +1030,7 @@ export function ProductDetail() {
         productId: product.id,
         name: product.name,
         price: product.price,
-        image: product.images[0] || '/images/placeholder.jpg',
+        image: getProxiedImageUrl(product.images[0] || '/images/placeholder.jpg'),
       });
     }
     setTimeout(() => setIsAdding(false), 800);
@@ -1092,7 +1103,7 @@ export function ProductDetail() {
               </div>
             ) : (
               <Image
-                src={product.images[selectedImage] || '/images/hero.png'}
+                src={getProxiedImageUrl(product.images[selectedImage] || '/images/hero.png')}
                 alt={product.name}
                 fill
                 className="object-cover"
@@ -1129,7 +1140,7 @@ export function ProductDetail() {
                 >
                   {!imageErrors.has(i) ? (
                     <Image
-                      src={img}
+                      src={getProxiedImageUrl(img)}
                       alt={`${product.name} ${i + 1}`}
                       fill
                       className="object-cover"
@@ -1368,9 +1379,9 @@ export function ProductDetail() {
           onOpenChange={setTryOnOpen}
           productId={product.id}
           productName={product.name}
-          productImage={product.images[0] || '/images/hero.png'}
+          productImage={getProxiedImageUrl(product.images[0] || '/images/hero.png')}
           categorySlug={product.categorySlug}
-          productImages={product.images}
+          productImages={product.images.map(img => getProxiedImageUrl(img))}
           onBackgroundJob={handleBackgroundJob}
           onResetBackground={handleResetBackground}
         />

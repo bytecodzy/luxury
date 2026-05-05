@@ -24,7 +24,7 @@ import { Separator } from '@/components/ui/separator'
 import {
   Globe, Plus, Pencil, Trash2, RefreshCw, Loader2, ExternalLink,
   Link2, Tag, Eye, ArrowUpRight, X, Check, AlertTriangle,
-  ShoppingCart, TrendingUp,
+  ShoppingCart, TrendingUp, ImageIcon,
 } from 'lucide-react'
 
 /* ─── style constants (matching admin-dashboard) ─── */
@@ -165,6 +165,24 @@ export function PartnersTab({ token, onMutate }: { token: string | null; onMutat
   }
 
   const isAnySyncing = syncingPartnerIds.size > 0 || partners.some((p: any) => p.syncStatus === 'syncing')
+  const [fixingImages, setFixingImages] = useState(false)
+  const [fixImagesResult, setFixImagesResult] = useState<string | null>(null)
+
+  const handleFixImages = async () => {
+    setFixingImages(true)
+    setFixImagesResult(null)
+    try {
+      const result = await apiFetch('/api/products/fix-images', {
+        method: 'POST',
+        body: JSON.stringify({ all: true }),
+      }, token)
+      setFixImagesResult(`Fixed ${result.fixed} of ${result.total} products. ${result.failed} failed.`)
+    } catch (e: any) {
+      setFixImagesResult(`Error: ${e.message}`)
+    } finally {
+      setFixingImages(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -185,6 +203,18 @@ export function PartnersTab({ token, onMutate }: { token: string | null; onMutat
           {isAnySyncing ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}
           Sync All Active
         </Button>
+        <Button
+          variant="outline"
+          className={btnOutline}
+          onClick={handleFixImages}
+          disabled={fixingImages}
+        >
+          {fixingImages ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <ImageIcon className="mr-1 h-4 w-4" />}
+          Fix Missing Images
+        </Button>
+        {fixImagesResult && (
+          <span className="text-xs text-amber-200/50">{fixImagesResult}</span>
+        )}
       </div>
 
       {/* Partner Cards Grid */}

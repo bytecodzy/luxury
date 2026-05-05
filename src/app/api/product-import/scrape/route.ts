@@ -52,12 +52,20 @@ Extract structured product data from the given webpage content. Return ONLY a va
 - description: string (detailed product description, well-formatted)
 - price: number (current selling price in INR, numeric only)
 - compareAtPrice: number or null (original/MRP price if available, otherwise null)
-- images: string[] (array of image URLs found on the page)
+- images: string[] (array of FULL, ABSOLUTE image URLs found on the page - must start with http or https. Do NOT include relative URLs, data URIs, or placeholder images. Look for high-resolution product images in <img>, <source>, <picture> tags, and CSS background-image properties. For platforms like Nykaa, Myntra, Amazon, images are often in img tags with data-src or src attributes, or in JSON-LD structured data.)
 - brand: string or null (brand name if available)
 - category: string or null (product category like "Watches", "Jewelry", "Fashion", "Sarees", "Fragrance", "Home Decor", "Mens Shirts", "Leather", "Toys", "Romantic", "Couple")
 - tags: string[] (relevant tags for the product)
 - sku: string or null (SKU if available)
 - inStock: boolean (whether the product appears to be in stock)
+
+IMPORTANT FOR IMAGES:
+- Only include COMPLETE URLs starting with http:// or https://
+- Include the LARGEST/HIGHEST QUALITY version of each image
+- Exclude thumbnails, icons, logos, and UI elements
+- Exclude data: URIs and placeholder images
+- If you find image URLs starting with //, prefix them with https:
+- Look in these locations: <img src>, <img data-src>, <source srcset>, JSON-LD "image" field, og:image meta tags
 
 If you cannot find a field, use null. For prices, extract the numeric value only (no currency symbols).
 Return ONLY the JSON object, no markdown or explanation.`,

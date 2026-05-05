@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getSessionAsync } from '@/lib/sessions';
+import { processProductImages } from '@/lib/image-downloader';
 
 async function verifyAdmin(request: NextRequest) {
   const auth = request.headers.get('authorization');
@@ -64,6 +65,21 @@ export async function POST(request: NextRequest) {
       slugCounter++;
     }
 
+    // Download external images to local storage if they're from external URLs
+    let finalImages = images || [];
+    if (Array.isArray(images) && images.length > 0 && platform) {
+      const hasExternalUrl = images.some((url: string) =>
+        url.startsWith('http') || url.startsWith('//')
+      );
+      if (hasExternalUrl) {
+        const localImages = await processProductImages(images, platform);
+        if (localImages.length > 0) {
+          finalImages = localImages;
+        }
+        // If download failed, keep original URLs (they'll be proxied at runtime)
+      }
+    }
+
     const product = await db.product.create({
       data: {
         productNumber,
@@ -74,7 +90,7 @@ export async function POST(request: NextRequest) {
         compareAtPrice: compareAtPrice ? parseFloat(compareAtPrice) : null,
         costPrice: costPrice ? parseFloat(costPrice) : null,
         sku: sku || null,
-        images: images ? JSON.stringify(images) : '[]',
+        images: JSON.stringify(finalImages),
         categoryId,
         stock: stock ? parseInt(stock) : 0,
         reorderLevel: 5,
