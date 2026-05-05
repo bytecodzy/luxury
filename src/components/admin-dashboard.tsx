@@ -27,12 +27,14 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
+import { PartnersTab } from '@/components/admin/partners-tab'
 import {
   LayoutDashboard, Package, Warehouse, ShoppingBag, FileText, Calculator,
   Truck, Users, BookOpen, Share2, Tag, Import, Plus, Pencil, Trash2,
   Search, Upload, X, ChevronDown, AlertTriangle, Check, Loader2,
   Eye, ArrowUpRight, ArrowDownRight, TrendingUp, DollarSign, Box, UserCheck,
-  Globe, ExternalLink, Image as ImageIcon, RefreshCw,
+  Globe, ExternalLink, Image as ImageIcon, RefreshCw, Link2, ShoppingCart,
+  Handshake,
 } from 'lucide-react'
 
 /* ─── style constants ─── */
@@ -130,6 +132,8 @@ export function AdminDashboard() {
     { value: 'sharedocs', icon: Share2, label: 'Share Docs' },
     { value: 'offers', icon: Tag, label: 'Offers' },
     { value: 'import', icon: Import, label: 'Import' },
+    { value: 'integrations', icon: Globe, label: 'Integrations' },
+    { value: 'partners', icon: Handshake, label: 'Partners' },
   ]
 
   return (
@@ -171,6 +175,8 @@ export function AdminDashboard() {
         <TabsContent value="sharedocs"><ShareDocsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="offers"><OffersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="import"><ImportTab token={authToken} onMutate={invalidateAll} /></TabsContent>
+        <TabsContent value="integrations"><IntegrationsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
+        <TabsContent value="partners"><PartnersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
       </Tabs>
     </motion.div>
   )
@@ -2217,6 +2223,449 @@ function ImportProductForm({ token, product, sourceUrl, platform, categories, ve
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="outline" className={btnOutline} onClick={onClose}>Cancel</Button>
         <Button className={btnPrimary} onClick={handleImport} disabled={saving}>{saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Import Product</Button>
+      </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════
+   13. INTEGRATIONS TAB
+   ════════════════════════════════════════════ */
+function IntegrationsTab({ token, onMutate }: { token: string | null; onMutate: () => void }) {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [editIntegration, setEditIntegration] = useState<any>(null)
+  const [showSyncDialog, setShowSyncDialog] = useState<any>(null)
+  const [syncProgress, setSyncProgress] = useState<string | null>(null)
+  const [selectedIntegration, setSelectedIntegration] = useState<string | null>(null)
+  const syncPollRef = useRef<NodeJS.Timeout | null>(null)
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['integrations'],
+    queryFn: () => apiFetch('/api/integrations', undefined, token),
+  })
+
+  const { data: integrationDetail } = useQuery({
+    queryKey: ['integration-detail', selectedIntegration],
+    queryFn: () => apiFetch(`/api/integrations/${selectedIntegration}`, undefined, token),
+    enabled: !!selectedIntegration,
+  })
+
+  const integrations = data?.integrations || data || []
+  const syncLogs = integrationDetail?.syncLogs || []
+
+  const discoverMut = useMutation({
+    mutationFn: () => apiFetch('/api/integrations/discover', { method: 'POST' }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['integrations'] }); onMutate() },
+  })
+
+  const toggleMut = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      apiFetch(`/api/integrations/${id}`, { method: 'PUT', body: JSON.stringify({ isActive }) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['integrations'] }); onMutate() },
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/integrations/${id}`, { method: 'DELETE' }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['integrations'] }); onMutate() },
+  })
+
+  const syncMut = useMutation({
+    mutationFn: ({ id, category, query }: { id: string; category?: string; query?: string }) =>
+      apiFetch('/api/integrations/sync', { method: 'POST', body: JSON.stringify({ integrationId: id, category, query }) }, token),
+    onSuccess: () => {
+      setSyncProgress(null)
+      qc.invalidateQueries({ queryKey: ['integrations'] })
+      qc.invalidateQueries({ queryKey: ['integration-detail'] })
+      onMutate()
+      if (syncPollRef.current) { clearInterval(syncPollRef.current); syncPollRef.current = null }
+    },
+    onError: () => {
+      setSyncProgress(null)
+      if (syncPollRef.current) { clearInterval(syncPollRef.current); syncPollRef.current = null }
+    },
+  })
+
+  const handleSync = (integration: any, category?: string, query?: string) => {
+    setSyncProgress(integration.id)
+    syncMut.mutate({ id: integration.id, category, query })
+    // Poll for sync status updates
+    syncPollRef.current = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ['integrations'] })
+      qc.invalidateQueries({ queryKey: ['integration-detail', integration.id] })
+    }, 5000)
+  }
+
+  useEffect(() => {
+    return () => { if (syncPollRef.current) clearInterval(syncPollRef.current) }
+  }, [])
+
+  const syncStatusColor = (s: string) => {
+    const m: Record<string, string> = {
+      idle: 'bg-stone-600/20 text-stone-400 border-stone-600/30',
+      syncing: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
+      error: 'bg-red-600/20 text-red-400 border-red-600/30',
+      completed: 'bg-green-600/20 text-green-400 border-green-600/30',
+      failed: 'bg-red-600/20 text-red-400 border-red-600/30',
+    }
+    return m[s] || defCls
+  }
+
+  const platformIcon = (slug: string) => {
+    const colors: Record<string, string> = {
+      myntra: 'bg-pink-600/20 text-pink-400',
+      nykaa: 'bg-purple-600/20 text-purple-400',
+      amazon: 'bg-orange-600/20 text-orange-400',
+      flipkart: 'bg-blue-600/20 text-blue-400',
+      caratlane: 'bg-amber-600/20 text-amber-400',
+      tanishq: 'bg-yellow-600/20 text-yellow-400',
+      bluestone: 'bg-cyan-600/20 text-cyan-400',
+      voylla: 'bg-rose-600/20 text-rose-400',
+    }
+    return colors[slug?.toLowerCase()] || 'bg-stone-600/20 text-stone-400'
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button className={btnPrimary} onClick={() => { setEditIntegration(null); setShowForm(true) }}>
+          <Plus className="mr-1 h-4 w-4" /> Add Platform
+        </Button>
+        <Button
+          variant="outline"
+          className={btnOutline}
+          onClick={() => discoverMut.mutate()}
+          disabled={discoverMut.isPending}
+        >
+          {discoverMut.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Globe className="mr-1 h-4 w-4" />}
+          Auto-Discover Platforms
+        </Button>
+      </div>
+
+      {discoverMut.isSuccess && discoverMut.data && (
+        <Card className="border-green-900/30 bg-green-950/20">
+          <CardContent className="p-3">
+            <p className="text-sm text-green-400">
+              <Check className="mr-1 inline h-4 w-4" />
+              Discovered: {discoverMut.data.created?.length || 0} new, {discoverMut.data.skipped?.length || 0} existing
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+      ) : integrations.length === 0 ? (
+        <Card className={cardCls}>
+          <CardContent className="py-12 text-center">
+            <Globe className="mx-auto mb-3 h-10 w-10 text-amber-200/20" />
+            <p className="text-amber-200/40">No platform integrations yet</p>
+            <p className="mt-1 text-xs text-amber-200/30">Click "Auto-Discover Platforms" to add default integrations</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Platform Cards Grid */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {integrations.map((intg: any) => (
+              <motion.div key={intg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+                <Card className={`${cardCls} transition-all hover:border-amber-600/30`}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${platformIcon(intg.slug)}`}>
+                          {intg.logo ? (
+                            <img src={intg.logo} alt={intg.name} className="h-6 w-6 rounded object-contain" />
+                          ) : (
+                            <Globe className="h-5 w-5" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-amber-100">{intg.name}</p>
+                          <p className="text-[10px] text-amber-200/40">{intg.slug}</p>
+                        </div>
+                      </div>
+                      <Badge className={statusColor(intg.isActive ? 'active' : 'inactive')}>
+                        {intg.isActive ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </div>
+
+                    <div className="mb-3 space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-amber-200/40">Products</span>
+                        <span className="text-amber-100 font-medium">{intg.productCount ?? intg._count?.products ?? 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-amber-200/40">Sync Status</span>
+                        <Badge className={`${syncStatusColor(intg.syncStatus || 'idle')} text-[9px] px-1.5 py-0`}>
+                          {intg.syncStatus || 'idle'}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-amber-200/40">Last Synced</span>
+                        <span className="text-amber-100">{intg.lastSyncedAt ? fmtDateTime(intg.lastSyncedAt) : 'Never'}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-amber-200/40">Commission</span>
+                        <span className="text-amber-100">{intg.commission || 0}%</span>
+                      </div>
+                    </div>
+
+                    {intg.categories && intg.categories.length > 0 && (
+                      <div className="mb-3 flex flex-wrap gap-1">
+                        {(Array.isArray(intg.categories) ? intg.categories : JSON.parse(intg.categories || '[]')).slice(0, 3).map((c: string, i: number) => (
+                          <Badge key={i} className="bg-stone-700/30 text-stone-300 border-stone-600/30 text-[8px] px-1.5 py-0">
+                            {c}
+                          </Badge>
+                        ))}
+                        {(Array.isArray(intg.categories) ? intg.categories : JSON.parse(intg.categories || '[]')).length > 3 && (
+                          <Badge className="bg-stone-700/30 text-stone-300 border-stone-600/30 text-[8px] px-1.5 py-0">
+                            +{(Array.isArray(intg.categories) ? intg.categories : JSON.parse(intg.categories || '[]')).length - 3}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`${btnOutline} flex-1 h-7 text-[10px]`}
+                        onClick={() => handleSync(intg)}
+                        disabled={syncProgress === intg.id || !intg.isActive}
+                      >
+                        {syncProgress === intg.id ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <RefreshCw className="mr-1 h-3 w-3" />}
+                        {syncProgress === intg.id ? 'Syncing...' : 'Sync Now'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`${btnOutline} h-7 w-7 p-0`}
+                        onClick={() => { setEditIntegration(intg); setShowForm(true) }}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`${btnOutline} h-7 w-7 p-0`}
+                        onClick={() => toggleMut.mutate({ id: intg.id, isActive: !intg.isActive })}
+                      >
+                        {intg.isActive ? <Eye className="h-3 w-3" /> : <Eye className="h-3 w-3 text-red-400/60" />}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`${btnOutline} h-7 w-7 p-0`}
+                        onClick={() => { setSelectedIntegration(intg.id); setShowSyncDialog(intg) }}
+                      >
+                        <Link2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Sync History for Selected Integration */}
+          {selectedIntegration && (
+            <Card className={cardCls}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-semibold text-amber-100">
+                    Sync History — {integrations.find((i: any) => i.id === selectedIntegration)?.name || 'Platform'}
+                  </CardTitle>
+                  <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-amber-200/40 hover:text-amber-400" onClick={() => setSelectedIntegration(null)}>
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-amber-900/20 hover:bg-transparent">
+                        <TableHead className="text-amber-200/50">Date</TableHead>
+                        <TableHead className="text-amber-200/50">Type</TableHead>
+                        <TableHead className="text-amber-200/50">Status</TableHead>
+                        <TableHead className="text-amber-200/50">Found</TableHead>
+                        <TableHead className="text-amber-200/50">Added</TableHead>
+                        <TableHead className="text-amber-200/50">Updated</TableHead>
+                        <TableHead className="text-amber-200/50">Errors</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {syncLogs.length === 0 ? (
+                        <TableRow><TableCell colSpan={7} className="py-8 text-center text-amber-200/40">No sync history</TableCell></TableRow>
+                      ) : syncLogs.map((log: any) => (
+                        <TableRow key={log.id} className="border-amber-900/10 hover:bg-amber-900/5">
+                          <TableCell className="text-xs text-amber-200/60">{fmtDateTime(log.startedAt)}</TableCell>
+                          <TableCell className="text-xs text-amber-200/60">{log.type || 'full'}</TableCell>
+                          <TableCell>
+                            <Badge className={syncStatusColor(log.status)}>{log.status}</Badge>
+                          </TableCell>
+                          <TableCell className="text-sm text-amber-100">{log.productsFound ?? '—'}</TableCell>
+                          <TableCell className="text-sm text-amber-100">{log.productsAdded ?? '—'}</TableCell>
+                          <TableCell className="text-sm text-amber-100">{log.productsUpdated ?? '—'}</TableCell>
+                          <TableCell className="text-xs text-red-400/60 max-w-[200px] truncate">{log.errors || '—'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+
+      {/* Add/Edit Integration Dialog */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto border-amber-900/30 bg-stone-950 sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100">{editIntegration ? 'Edit Integration' : 'Add Platform Integration'}</DialogTitle>
+          </DialogHeader>
+          <IntegrationForm
+            token={token}
+            integration={editIntegration}
+            onClose={() => { setShowForm(false); setEditIntegration(null) }}
+            onSaved={() => { qc.invalidateQueries({ queryKey: ['integrations'] }); onMutate(); setShowForm(false); setEditIntegration(null) }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Trigger Sync Dialog */}
+      <Dialog open={!!showSyncDialog} onOpenChange={() => setShowSyncDialog(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100">Trigger Sync — {showSyncDialog?.name}</DialogTitle>
+          </DialogHeader>
+          <SyncTriggerForm
+            integration={showSyncDialog}
+            onSync={(category, query) => { handleSync(showSyncDialog, category, query); setShowSyncDialog(null) }}
+            onClose={() => setShowSyncDialog(null)}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+/* ─── Integration Form ─── */
+function IntegrationForm({ token, integration, onClose, onSaved }: {
+  token: string | null; integration: any; onClose: () => void; onSaved: () => void
+}) {
+  const [form, setForm] = useState({
+    name: '', slug: '', baseUrl: '', logo: '', categories: '', affiliateTag: '',
+    commission: '5', maxProducts: '100', autoSync: true, syncInterval: '24',
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (integration) {
+      const cats = Array.isArray(integration.categories)
+        ? integration.categories.join(', ')
+        : integration.categories || ''
+      setForm({
+        name: integration.name || '', slug: integration.slug || '', baseUrl: integration.baseUrl || '',
+        logo: integration.logo || '', categories: cats, affiliateTag: integration.affiliateTag || '',
+        commission: String(integration.commission || 5), maxProducts: String(integration.maxProducts || 100),
+        autoSync: integration.autoSync ?? true, syncInterval: String(integration.syncInterval || 24),
+      })
+    }
+  }, [integration])
+
+  const handleSubmit = async () => {
+    if (!form.name || !form.slug) { setError('Name and slug are required'); return }
+    setSaving(true); setError('')
+    try {
+      const body = {
+        ...form,
+        commission: parseFloat(form.commission),
+        maxProducts: parseInt(form.maxProducts),
+        syncInterval: parseInt(form.syncInterval),
+        categories: form.categories ? form.categories.split(',').map(c => c.trim()).filter(Boolean) : [],
+      }
+      if (integration) {
+        await apiFetch(`/api/integrations/${integration.id}`, { method: 'PUT', body: JSON.stringify(body) }, token)
+      } else {
+        await apiFetch('/api/integrations', { method: 'POST', body: JSON.stringify(body) }, token)
+      }
+      onSaved()
+    } catch (e: any) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="space-y-4">
+      {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Slug *</Label><Input className={`${inputCls} mt-1`} value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} placeholder="e.g. myntra" /></div>
+        <div><Label className={lblCls}>Base URL</Label><Input className={`${inputCls} mt-1`} value={form.baseUrl} onChange={e => setForm(f => ({ ...f, baseUrl: e.target.value }))} placeholder="https://www.myntra.com" /></div>
+        <div><Label className={lblCls}>Logo URL</Label><Input className={`${inputCls} mt-1`} value={form.logo} onChange={e => setForm(f => ({ ...f, logo: e.target.value }))} /></div>
+        <div className="sm:col-span-2"><Label className={lblCls}>Categories (comma separated)</Label><Input className={`${inputCls} mt-1`} value={form.categories} onChange={e => setForm(f => ({ ...f, categories: e.target.value }))} placeholder="sarees, jewelry, watches" /></div>
+        <div><Label className={lblCls}>Affiliate Tag</Label><Input className={`${inputCls} mt-1`} value={form.affiliateTag} onChange={e => setForm(f => ({ ...f, affiliateTag: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Commission %</Label><Input type="number" className={`${inputCls} mt-1`} value={form.commission} onChange={e => setForm(f => ({ ...f, commission: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Max Products</Label><Input type="number" className={`${inputCls} mt-1`} value={form.maxProducts} onChange={e => setForm(f => ({ ...f, maxProducts: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Sync Interval (hrs)</Label><Input type="number" className={`${inputCls} mt-1`} value={form.syncInterval} onChange={e => setForm(f => ({ ...f, syncInterval: e.target.value }))} /></div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch checked={form.autoSync} onCheckedChange={v => setForm(f => ({ ...f, autoSync: v }))} />
+        <Label className={lblCls}>Auto Sync</Label>
+      </div>
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="outline" className={btnOutline} onClick={onClose}>Cancel</Button>
+        <Button className={btnPrimary} onClick={handleSubmit} disabled={saving}>
+          {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{integration ? 'Update' : 'Create'} Integration
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Sync Trigger Form ─── */
+function SyncTriggerForm({ integration, onSync, onClose }: {
+  integration: any; onSync: (category?: string, query?: string) => void; onClose: () => void
+}) {
+  const [category, setCategory] = useState('')
+  const [query, setQuery] = useState('')
+  const categories = Array.isArray(integration?.categories)
+    ? integration.categories
+    : JSON.parse(integration?.categories || '[]')
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Globe className="h-4 w-4 text-amber-400/60" />
+          <p className="text-sm font-medium text-amber-100">{integration?.name}</p>
+        </div>
+        <p className="text-xs text-amber-200/40">Current status: <Badge className={`${statusColor(integration?.isActive ? 'active' : 'inactive')} text-[9px]`}>{integration?.syncStatus || 'idle'}</Badge></p>
+      </div>
+
+      <div>
+        <Label className={lblCls}>Category (optional — leave empty for all)</Label>
+        <Select value={category} onValueChange={setCategory}>
+          <SelectTrigger className={`${selCls} mt-1`}><SelectValue placeholder="All categories" /></SelectTrigger>
+          <SelectContent className={selContentCls}>
+            <SelectItem value="all">All Categories</SelectItem>
+            {categories.map((c: string, i: number) => <SelectItem key={i} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label className={lblCls}>Search Query (optional)</Label>
+        <Input className={`${inputCls} mt-1`} value={query} onChange={e => setQuery(e.target.value)} placeholder="e.g. gold necklace" />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-2">
+        <Button variant="outline" className={btnOutline} onClick={onClose}>Cancel</Button>
+        <Button className={btnPrimary} onClick={() => onSync(category === 'all' ? undefined : category || undefined, query || undefined)}>
+          <RefreshCw className="mr-1 h-4 w-4" /> Start Sync
+        </Button>
       </div>
     </div>
   )

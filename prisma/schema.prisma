@@ -40,13 +40,58 @@ model Product {
   vendorId       String?
   vendor         Vendor?   @relation(fields: [vendorId], references: [id])
   sourceUrl      String?
-  platform       String?   // myntra, nykaa, amazon, etc.
+  platform       String?   // myntra, nykaa, amazon, caratlane, tanishq, bluestone, voylla, flipkart, etc.
+  affiliateUrl   String?   // affiliate/tracking link for external products
+  affiliateId    String?   // affiliate network ID
+  commission     Float?    // commission percentage
+  externalId     String?   // product ID on the source platform
+  lastSyncedAt   DateTime? // when the product was last synced from source
+  syncStatus     String    @default("active") // active, paused, error, removed
+  isExternal     Boolean   @default(false) // true = product lives on another platform
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   cartItems      CartItem[]
   orderItems     OrderItem[]
   inventoryLogs  InventoryLog[]
   wishlistItems  WishlistItem[]
+}
+
+model PlatformIntegration {
+  id              String    @id @default(cuid())
+  name            String    @unique  // e.g. "Myntra", "Nykaa", "CaratLane"
+  slug            String    @unique  // e.g. "myntra", "nykaa", "caratlane"
+  baseUrl         String    // e.g. "https://www.myntra.com"
+  logo            String?   // URL to platform logo
+  isActive        Boolean   @default(true)
+  autoSync        Boolean   @default(true) // automatically sync products
+  syncInterval    Int       @default(3600) // sync interval in seconds (1 hour default)
+  lastSyncedAt    DateTime?
+  syncStatus      String    @default("idle") // idle, syncing, error
+  lastSyncError   String?
+  categories      String    @default("[]") // JSON array of categories to import
+  affiliateTag    String?   // affiliate tracking tag
+  commission      Float?    @default(0) // default commission %
+  maxProducts     Int       @default(500) // max products to keep from this platform
+  productCount    Int       @default(0) // current number of products from this platform
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  syncLogs        SyncLog[]
+  categoryMaps    PartnerCategoryMap[]
+}
+
+model SyncLog {
+  id              String    @id @default(cuid())
+  integrationId   String
+  integration     PlatformIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  type            String    // full, incremental, category
+  status          String    // started, completed, failed
+  productsFound   Int       @default(0)
+  productsAdded   Int       @default(0)
+  productsUpdated Int       @default(0)
+  productsRemoved Int       @default(0)
+  error           String?
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
 }
 
 model Cart {
@@ -290,4 +335,27 @@ model SupportTicketMessage {
   senderId  String?
   message   String
   createdAt DateTime       @default(now())
+}
+
+model AffiliateClick {
+  id           String   @id @default(cuid())
+  productId    String
+  platform     String   // which platform the click was for
+  sourceUrl    String?  // the external URL clicked
+  referralCode String?  // affiliate referral code used
+  ipAddress    String?
+  userAgent    String?
+  clickedAt    DateTime @default(now())
+}
+
+model PartnerCategoryMap {
+  id             String   @id @default(cuid())
+  integrationId  String
+  integration    PlatformIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  partnerCatName String   // category name on partner site (e.g. "Rings", "Necklaces")
+  partnerCatSlug String   // category slug on partner site
+  localCatId     String?  // map to our category (nullable = create new)
+  createdAt      DateTime @default(now())
+
+  @@unique([integrationId, partnerCatSlug])
 }

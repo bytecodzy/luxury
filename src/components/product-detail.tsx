@@ -4,7 +4,7 @@ import { useStore } from '@/lib/store';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles } from 'lucide-react';
+import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -16,7 +16,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown } from 'lucide-react';
+import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon } from 'lucide-react';
+import { useAffiliateClick } from '@/hooks/useAffiliateClick';
 
 interface ProductDetail {
   id: string;
@@ -33,7 +34,46 @@ interface ProductDetail {
   reviewCount: number;
   featured: boolean;
   tags: string[];
+  isExternal?: boolean;
+  platform?: string;
+  sourceUrl?: string;
+  affiliateUrl?: string;
+  platformLogo?: string;
 }
+
+const PLATFORM_COLORS: Record<string, string> = {
+  myntra: 'bg-red-600/20 text-red-300 border-red-600/30',
+  nykaa: 'bg-pink-600/20 text-pink-300 border-pink-600/30',
+  amazon: 'bg-orange-600/20 text-orange-300 border-orange-600/30',
+  flipkart: 'bg-yellow-600/20 text-yellow-300 border-yellow-600/30',
+  caratlane: 'bg-amber-600/20 text-amber-300 border-amber-600/30',
+  tanishq: 'bg-rose-600/20 text-rose-300 border-rose-600/30',
+  bluestone: 'bg-blue-600/20 text-blue-300 border-blue-600/30',
+  voylla: 'bg-purple-600/20 text-purple-300 border-purple-600/30',
+};
+
+// Platform button brand colors (for Shop on Platform CTA)
+const PLATFORM_BUTTON_COLORS: Record<string, string> = {
+  caratlane: 'bg-amber-600 hover:bg-amber-500',
+  tanishq: 'bg-rose-600 hover:bg-rose-500',
+  bluestone: 'bg-blue-600 hover:bg-blue-500',
+  voylla: 'bg-purple-600 hover:bg-purple-500',
+  myntra: 'bg-red-600 hover:bg-red-500',
+  nykaa: 'bg-pink-600 hover:bg-pink-500',
+  amazon: 'bg-orange-600 hover:bg-orange-500',
+  flipkart: 'bg-yellow-600 hover:bg-yellow-500',
+};
+
+const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
+  myntra: 'Myntra',
+  nykaa: 'Nykaa',
+  amazon: 'Amazon',
+  flipkart: 'Flipkart',
+  caratlane: 'CaratLane',
+  tanishq: 'Tanishq',
+  bluestone: 'BlueStone',
+  voylla: 'Voylla',
+};
 
 // ── Image Compression ──────────────────────────────────────────
 function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<string> {
@@ -955,6 +995,7 @@ function TryOnDialog({
 // ── Product Detail Component ───────────────────────────────────
 export function ProductDetail() {
   const { selectedProductId, setView, addItem, setCategory } = useStore();
+  const { trackClick } = useAffiliateClick();
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
   const [isAdding, setIsAdding] = useState(false);
@@ -1111,12 +1152,19 @@ export function ProductDetail() {
         {/* Product Info */}
         <div className="space-y-6">
           <div>
-            <button
-              onClick={() => setCategory(product.categorySlug)}
-              className="text-xs font-medium uppercase tracking-wider text-amber-500/60 hover:text-amber-400 transition-colors"
-            >
-              {product.category}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCategory(product.categorySlug)}
+                className="text-xs font-medium uppercase tracking-wider text-amber-500/60 hover:text-amber-400 transition-colors"
+              >
+                {product.category}
+              </button>
+              {product.isExternal && product.platform && (
+                <Badge className={`${PLATFORM_COLORS[product.platform.toLowerCase()] || 'bg-stone-600/20 text-stone-300 border-stone-600/30'} text-[10px] font-semibold border px-2 py-0.5`}>
+                  {PLATFORM_DISPLAY_NAMES[product.platform.toLowerCase()] || product.platform}
+                </Badge>
+              )}
+            </div>
             <h1 className="mt-2 text-2xl font-bold text-amber-100 sm:text-3xl">
               {product.name}
             </h1>
@@ -1178,23 +1226,31 @@ export function ProductDetail() {
             </div>
           )}
 
-          {/* Stock */}
-          <div className="flex items-center gap-2">
-            <Package className="h-4 w-4 text-amber-200/40" />
-            {product.stock > 0 ? (
-              <span
-                className={`text-sm ${
-                  product.stock <= 5 ? 'text-amber-500' : 'text-emerald-400'
-                }`}
-              >
-                {product.stock <= 5
-                  ? `Only ${product.stock} left in stock`
-                  : 'In Stock'}
-              </span>
-            ) : (
-              <span className="text-sm text-red-400">Out of Stock</span>
-            )}
-          </div>
+          {/* Stock / Availability */}
+          {product.isExternal && product.platform ? (
+            <div className="flex items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-emerald-400" />
+              <span className="text-sm text-emerald-400 font-medium">Available</span>
+              <span className="text-xs text-amber-200/30">on {PLATFORM_DISPLAY_NAMES[product.platform.toLowerCase()] || product.platform}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-amber-200/40" />
+              {product.stock > 0 ? (
+                <span
+                  className={`text-sm ${
+                    product.stock <= 5 ? 'text-amber-500' : 'text-emerald-400'
+                  }`}
+                >
+                  {product.stock <= 5
+                    ? `Only ${product.stock} left in stock`
+                    : 'In Stock'}
+                </span>
+              ) : (
+                <span className="text-sm text-red-400">Out of Stock</span>
+              )}
+            </div>
+          )}
 
           {/* AI Try-On Button - Available for ALL categories */}
           <motion.div
@@ -1217,46 +1273,91 @@ export function ProductDetail() {
             </button>
           </motion.div>
 
-          {/* Quantity & Add to Cart */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center rounded-lg border border-amber-900/30 bg-stone-900/60">
-              <button
-                onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                className="flex h-10 w-10 items-center justify-center text-amber-200/60 hover:text-amber-400 transition-colors"
-              >
-                <Minus className="h-4 w-4" />
-              </button>
-              <span className="w-10 text-center text-sm font-medium text-amber-100">
-                {quantity}
-              </span>
-              <button
-                onClick={() => setQuantity(Math.min(product.stock, quantity + 1))}
-                className="flex h-10 w-10 items-center justify-center text-amber-200/60 hover:text-amber-400 transition-colors"
-              >
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
-            <Button
-              onClick={handleAddToCart}
-              disabled={product.stock === 0}
-              className={`flex-1 transition-all duration-300 ${
-                isAdding
-                  ? 'bg-emerald-600 text-white scale-95'
-                  : 'bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25'
-              }`}
-            >
-              {isAdding ? (
-                <>
-                  <ShoppingCart className="mr-2 h-4 w-4" />
-                  Added!
-                </>
-              ) : product.stock === 0 ? (
-                'Out of Stock'
-              ) : (
-                `Add to Cart - $${(product.price * quantity).toLocaleString()}`
+          {/* External Product Notice */}
+          {product.isExternal && product.platform && (
+            <div className="rounded-lg border border-amber-900/20 bg-stone-900/40 p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <Globe className="h-4 w-4 text-amber-400/60" />
+                <p className="text-sm font-medium text-amber-200/70">
+                  Available on {PLATFORM_DISPLAY_NAMES[product.platform.toLowerCase()] || product.platform}
+                </p>
+              </div>
+              <p className="text-xs text-amber-200/40 italic">
+                This product is sold by our partner {PLATFORM_DISPLAY_NAMES[product.platform.toLowerCase()] || product.platform}. You'll be redirected to their site to complete your purchase.
+              </p>
+              {product.sourceUrl && (
+                <a
+                  href={product.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-amber-400/70 hover:text-amber-400 transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  View original listing
+                </a>
               )}
-            </Button>
-          </div>
+            </div>
+          )}
+
+          {/* Quantity & Add to Cart / Shop on Platform */}
+          {product.isExternal && product.platform ? (
+            <div className="space-y-3">
+              <Button
+                onClick={() => {
+                  if (product.sourceUrl) {
+                    trackClick(product.id, product.platform!.toLowerCase(), product.sourceUrl, product.affiliateUrl);
+                  } else {
+                    window.open(product.affiliateUrl || product.sourceUrl || '#', '_blank', 'noopener,noreferrer');
+                  }
+                }}
+                className={`w-full transition-all duration-300 text-stone-950 hover:shadow-lg hover:shadow-amber-600/25 h-12 text-base font-semibold gap-2 ${PLATFORM_BUTTON_COLORS[product.platform.toLowerCase()] || 'bg-amber-600 hover:bg-amber-500'}`}
+              >
+                <ExternalLink className="h-5 w-5" />
+                Shop on {PLATFORM_DISPLAY_NAMES[product.platform.toLowerCase()] || product.platform}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-4">
+              <div className="flex items-center rounded-lg border border-amber-900/30 bg-stone-900/60">
+                <button
+                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  className="flex h-10 w-10 items-center justify-center text-amber-200/60 hover:text-amber-400 transition-colors"
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="w-10 text-center text-sm font-medium text-amber-100">
+                  {quantity}
+                </span>
+                <button
+                  onClick={() => setQuantity(Math.min(product.stock, quantity + 1))}
+                  className="flex h-10 w-10 items-center justify-center text-amber-200/60 hover:text-amber-400 transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+              <Button
+                onClick={handleAddToCart}
+                disabled={product.stock === 0}
+                className={`flex-1 transition-all duration-300 ${
+                  isAdding
+                    ? 'bg-emerald-600 text-white scale-95'
+                    : 'bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25'
+                }`}
+              >
+                {isAdding ? (
+                  <>
+                    <ShoppingCart className="mr-2 h-4 w-4" />
+                    Added!
+                  </>
+                ) : product.stock === 0 ? (
+                  'Out of Stock'
+                ) : (
+                  `Add to Cart - $${(product.price * quantity).toLocaleString()}`
+                )}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
