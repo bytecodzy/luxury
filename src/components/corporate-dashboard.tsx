@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useStore } from '@/lib/store'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -32,7 +32,7 @@ import {
   Send, Eye, CreditCard, Gift, ChevronLeft, X,
   Package, Calendar, CheckCircle2, Clock, IndianRupee,
   Percent, TrendingUp, Mail, Phone, MapPin, Globe,
-  FileText, ArrowUpRight,
+  FileText, ArrowUpRight, ShoppingBag, Upload as UploadIcon, Download,
 } from 'lucide-react'
 
 /* ─── style constants ─── */
@@ -124,6 +124,8 @@ export function CorporateDashboard() {
     { value: 'overview', icon: LayoutDashboard, label: 'Overview' },
     { value: 'campaigns', icon: Megaphone, label: 'Campaigns' },
     { value: 'recipients', icon: Users, label: 'Recipients' },
+    { value: 'orders', icon: ShoppingBag, label: 'Orders' },
+    { value: 'invoices', icon: FileText, label: 'Invoices' },
     { value: 'branding', icon: Palette, label: 'Branding' },
     { value: 'profile', icon: Building2, label: 'Profile' },
   ]
@@ -158,6 +160,8 @@ export function CorporateDashboard() {
         <TabsContent value="overview"><OverviewTab token={authToken} onNavigate={setActiveTab} /></TabsContent>
         <TabsContent value="campaigns"><CampaignsTab token={authToken} /></TabsContent>
         <TabsContent value="recipients"><RecipientsTab token={authToken} /></TabsContent>
+        <TabsContent value="orders"><CorporateOrdersTab token={authToken} /></TabsContent>
+        <TabsContent value="invoices"><CorporateInvoicesTab token={authToken} /></TabsContent>
         <TabsContent value="branding"><BrandingTab token={authToken} /></TabsContent>
         <TabsContent value="profile"><ProfileTab token={authToken} /></TabsContent>
       </Tabs>
@@ -931,24 +935,63 @@ function BulkAddForm({ token, campaignId, onClose, onSaved }: {
   const [csvInput, setCsvInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [parsedPreview, setParsedPreview] = useState<any[] | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const parseCSV = (text: string) => {
+    let lines = text.trim().split('\n').filter(l => l.trim())
+    // Skip header row if present
+    if (lines.length > 0 && /^(name|Name)/.test(lines[0].split(',')[0]?.trim())) {
+      lines = lines.slice(1)
+    }
+    const recipients = lines.map(line => {
+      const parts = line.split(',').map(s => s.trim())
+      return {
+        name: parts[0] || '',
+        email: parts[1] || '',
+        phone: parts[2] || '',
+        designation: parts[3] || '',
+        department: parts[4] || '',
+        address: parts[5] || '',
+        city: parts[6] || '',
+        state: parts[7] || '',
+        zipCode: parts[8] || '',
+        budget: parts[9] || '',
+        message: parts[10] || '',
+      }
+    }).filter(r => r.name && r.email)
+    return recipients
+  }
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      setCsvInput(text)
+      const parsed = parseCSV(text)
+      setParsedPreview(parsed.length > 0 ? parsed : null)
+    }
+    reader.readAsText(file)
+  }
+
+  const handleTextChange = (text: string) => {
+    setCsvInput(text)
+    if (text.trim()) {
+      const parsed = parseCSV(text)
+      setParsedPreview(parsed.length > 0 ? parsed : null)
+    } else {
+      setParsedPreview(null)
+    }
+  }
 
   const handleSubmit = async () => {
-    if (!csvInput.trim()) { setError('Please enter recipient data'); return }
+    const recipients = parsedPreview || parseCSV(csvInput)
+    if (recipients.length === 0) { setError('No valid recipients found. Format: name, email, phone, designation, department, address, city, state, zipCode, budget, message'); return }
     setSaving(true); setError('')
 
     try {
-      const lines = csvInput.trim().split('\n').filter(l => l.trim())
-      const recipients = lines.map(line => {
-        const parts = line.split(',').map(s => s.trim())
-        return {
-          name: parts[0] || '',
-          email: parts[1] || '',
-          phone: parts[2] || '',
-        }
-      }).filter(r => r.name && r.email)
-
-      if (recipients.length === 0) { setError('No valid recipients found. Format: name, email, phone'); setSaving(false); return }
-
       await apiFetch(`/api/corporate/campaigns/${campaignId}/recipients`, {
         method: 'POST',
         body: JSON.stringify({ recipients }),
@@ -962,15 +1005,62 @@ function BulkAddForm({ token, campaignId, onClose, onSaved }: {
       {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
       <div>
         <Label className={lblCls}>CSV Data (one recipient per line)</Label>
-        <p className="mt-1 text-xs text-amber-200/40">Format: name, email, phone (phone is optional)</p>
+        <p className="mt-1 text-xs text-amber-200/40">Format: name, email, phone, designation, department, address, city, state, zipCode, budget, message</p>
+        <div className="mt-2 flex items-center gap-2">
+          <Button variant="outline" className={btnOutline} onClick={() => fileRef.current?.click()}>
+            <UploadIcon className="mr-1 h-4 w-4" /> Upload CSV
+          </Button>
+          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+          <Button variant="outline" className={btnOutline} onClick={() => {
+            const template = 'name,email,phone,designation,department,address,city,state,zipCode,budget,message\nJohn Doe,john@company.com,+91-9876543210,Manager,Engineering,123 Business Park,Mumbai,MH,400001,5000,Happy Diwali\nJane Smith,jane@company.com,+91-9876543211,Director,Marketing,456 Tech Hub,Bangalore,KA,560001,7500,Seasons Greetings'
+            const blob = new Blob([template], { type: 'text/csv' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url; a.download = 'recipient-template.csv'; a.click()
+            URL.revokeObjectURL(url)
+          }}>
+            <Download className="mr-1 h-4 w-4" /> Download Template
+          </Button>
+        </div>
         <Textarea
           className={`${inputCls} mt-2 font-mono text-xs`}
           rows={8}
           value={csvInput}
-          onChange={e => setCsvInput(e.target.value)}
-          placeholder={`John Doe, john@company.com, +91-9876543210\nJane Smith, jane@company.com\nRaj Kumar, raj@company.com, +91-9876543211`}
+          onChange={e => handleTextChange(e.target.value)}
+          placeholder={`John Doe, john@company.com, +91-9876543210, Manager, Engineering, 123 St, Mumbai, MH, 400001, 5000, Happy Diwali\nJane Smith, jane@company.com, +91-9876543211, Director, Marketing`}
         />
       </div>
+
+      {/* Parsed Preview */}
+      {parsedPreview && parsedPreview.length > 0 && (
+        <div>
+          <Label className={lblCls}>Preview ({parsedPreview.length} recipients)</Label>
+          <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-amber-900/20 bg-stone-800/30 p-2">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-amber-900/20 hover:bg-transparent">
+                  <TableHead className="text-amber-200/50 text-xs">Name</TableHead>
+                  <TableHead className="text-amber-200/50 text-xs">Email</TableHead>
+                  <TableHead className="text-amber-200/50 text-xs">Dept</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {parsedPreview.slice(0, 10).map((r: any, i: number) => (
+                  <TableRow key={i} className="border-amber-900/10">
+                    <TableCell className="text-xs text-amber-100">{r.name}</TableCell>
+                    <TableCell className="text-xs text-amber-200/60">{r.email}</TableCell>
+                    <TableCell className="text-xs text-amber-200/60">{r.department || '—'}</TableCell>
+                  </TableRow>
+                ))}
+                {parsedPreview.length > 10 && (
+                  <TableRow><TableCell colSpan={3} className="text-xs text-amber-200/40 text-center">... and {parsedPreview.length - 10} more</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
         <Button variant="outline" className={btnOutline} onClick={onClose}>Cancel</Button>
         <Button className={btnPrimary} onClick={handleSubmit} disabled={saving}>
@@ -1150,6 +1240,476 @@ function BrandingTab({ token }: { token: string | null }) {
           </div>
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════
+   3b. CORPORATE ORDERS TAB
+   ════════════════════════════════════════════ */
+function CorporateOrdersTab({ token }: { token: string | null }) {
+  const { authUser } = useStore()
+  const [selectedOrder, setSelectedOrder] = useState<any>(null)
+
+  // Fetch corporate profile to get contact email
+  const { data: profileData } = useQuery({
+    queryKey: ['corporate-profile'],
+    queryFn: () => apiFetch('/api/corporate/profile', undefined, token),
+  })
+  const corporateEmail = profileData?.corporate?.contactEmail || authUser?.email || ''
+  const emailDomain = authUser?.email?.split('@')[1] || ''
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['corporate-orders', corporateEmail],
+    queryFn: () => apiFetch(`/api/orders?email=${encodeURIComponent(corporateEmail)}`, undefined, token),
+    enabled: !!corporateEmail,
+  })
+
+  const allOrders = data?.orders || []
+  // Also include orders matching the email domain
+  const orders = allOrders.length > 0 ? allOrders : (() => {
+    // Fallback: try fetching all and filter by domain
+    return []
+  })()
+
+  const orderStatusColor = (s: string) => {
+    const m: Record<string, string> = {
+      pending: 'bg-yellow-600/20 text-yellow-400 border-yellow-600/30',
+      processing: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
+      shipped: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
+      delivered: 'bg-green-600/20 text-green-400 border-green-600/30',
+      cancelled: 'bg-red-600/20 text-red-400 border-red-600/30',
+    }
+    return m[s] || defCls
+  }
+
+  const estimatedDelivery = (o: any) => {
+    if (o.estimatedDelivery) return fmtDate(o.estimatedDelivery)
+    if (o.status === 'delivered') return 'Delivered'
+    if (o.status === 'cancelled') return '—'
+    // Rough estimate: 5-7 business days from order date
+    const d = new Date(o.createdAt)
+    d.setDate(d.getDate() + 7)
+    return fmtDate(d.toISOString())
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <p className="text-xs text-amber-200/40">Showing orders for {corporateEmail || `@${emailDomain}`}</p>
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+      ) : orders.length === 0 ? (
+        <Card className={cardCls}>
+          <CardContent className="py-12 text-center">
+            <ShoppingBag className="mx-auto mb-3 h-10 w-10 text-amber-200/20" />
+            <p className="text-sm text-amber-200/40">No orders found for your account</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className={cardCls}>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-amber-900/20 hover:bg-transparent">
+                    <TableHead className="text-amber-200/50">Order #</TableHead>
+                    <TableHead className="text-amber-200/50">Date</TableHead>
+                    <TableHead className="text-amber-200/50">Items</TableHead>
+                    <TableHead className="text-amber-200/50">Total</TableHead>
+                    <TableHead className="text-amber-200/50">Status</TableHead>
+                    <TableHead className="text-amber-200/50">Delivery Type</TableHead>
+                    <TableHead className="text-amber-200/50">Tracking</TableHead>
+                    <TableHead className="text-amber-200/50">Est. Delivery</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orders.map((o: any) => (
+                    <TableRow key={o.id} className="border-amber-900/10 hover:bg-amber-900/5 cursor-pointer" onClick={() => setSelectedOrder(o)}>
+                      <TableCell className="text-sm font-medium text-amber-100">{o.orderNumber}</TableCell>
+                      <TableCell className="text-xs text-amber-200/60">{fmtDate(o.createdAt)}</TableCell>
+                      <TableCell>
+                        <p className="text-sm text-amber-100">{o.items?.length || 0} items</p>
+                      </TableCell>
+                      <TableCell className="text-sm font-medium text-amber-100">{fmt(o.total)}</TableCell>
+                      <TableCell><Badge className={orderStatusColor(o.status)}>{o.status}</Badge></TableCell>
+                      <TableCell className="text-xs text-amber-200/60 capitalize">{o.deliveryType || 'standard'}</TableCell>
+                      <TableCell>
+                        {o.trackingNumber ? (
+                          <div>
+                            <p className="text-xs text-amber-400">{o.trackingNumber}</p>
+                            {o.trackingUrl && <a href={o.trackingUrl} target="_blank" rel="noopener" className="text-xs text-amber-600 underline" onClick={e => e.stopPropagation()}>Track</a>}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-amber-200/30">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-amber-200/60">{estimatedDelivery(o)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Order Details Dialog */}
+      <Dialog open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto border-amber-900/30 bg-stone-950 sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100 flex items-center gap-2">
+              <Package className="h-5 w-5 text-amber-400" /> Order {selectedOrder?.orderNumber}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedOrder && (
+            <div className="space-y-4">
+              {/* Status & Date */}
+              <div className="flex items-center gap-3">
+                <Badge className={orderStatusColor(selectedOrder.status)}>{selectedOrder.status}</Badge>
+                <span className="text-xs text-amber-200/40">Placed on {fmtDateTime(selectedOrder.createdAt)}</span>
+              </div>
+
+              {/* Order Summary Cards */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                  <p className={lblCls}>Total</p>
+                  <p className="mt-1 text-sm font-bold text-amber-100">{fmt(selectedOrder.total)}</p>
+                </div>
+                <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                  <p className={lblCls}>Delivery Type</p>
+                  <p className="mt-1 text-sm font-medium text-amber-100 capitalize">{selectedOrder.deliveryType || 'Standard'}</p>
+                </div>
+                <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                  <p className={lblCls}>Est. Delivery</p>
+                  <p className="mt-1 text-sm font-medium text-amber-100">{estimatedDelivery(selectedOrder)}</p>
+                </div>
+                <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                  <p className={lblCls}>Payment</p>
+                  <p className="mt-1 text-sm font-medium text-amber-100 capitalize">{selectedOrder.paymentMethod || selectedOrder.paymentStatus || '—'}</p>
+                </div>
+              </div>
+
+              {/* Tracking Info */}
+              {(selectedOrder.trackingNumber || selectedOrder.trackingUrl) && (
+                <Card className={cardCls}>
+                  <CardContent className="p-4">
+                    <p className={lblCls + ' mb-2 flex items-center gap-1'}><Package className="h-3.5 w-3.5" /> Tracking Information</p>
+                    {selectedOrder.trackingNumber && (
+                      <p className="text-sm text-amber-100">Tracking #: <span className="text-amber-400">{selectedOrder.trackingNumber}</span></p>
+                    )}
+                    {selectedOrder.trackingUrl && (
+                      <a href={selectedOrder.trackingUrl} target="_blank" rel="noopener" className="mt-1 inline-flex items-center gap-1 text-xs text-amber-600 underline hover:text-amber-400">
+                        <ArrowUpRight className="h-3 w-3" /> Track Shipment
+                      </a>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Items */}
+              <div>
+                <p className={lblCls + ' mb-2'}>Items ({selectedOrder.items?.length || 0})</p>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {(selectedOrder.items || []).map((item: any, idx: number) => (
+                    <div key={idx} className="flex items-center justify-between rounded-lg border border-amber-900/20 bg-stone-800/20 p-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-amber-100 truncate">{item.name || item.productName || `Item ${idx + 1}`}</p>
+                        <div className="mt-1 flex items-center gap-3 text-xs text-amber-200/40">
+                          <span>Qty: {item.quantity || 1}</span>
+                          {item.price && <span>{fmt(item.price)} each</span>}
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-amber-100">{fmt((item.price || 0) * (item.quantity || 1))}</p>
+                    </div>
+                  ))}
+                  {(!selectedOrder.items || selectedOrder.items.length === 0) && (
+                    <p className="text-xs text-amber-200/40">No item details available</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Shipping Address */}
+              {selectedOrder.shippingAddress && (
+                <Card className={cardCls}>
+                  <CardContent className="p-4">
+                    <p className={lblCls + ' mb-2 flex items-center gap-1'}><MapPin className="h-3.5 w-3.5" /> Shipping Address</p>
+                    <p className="text-sm text-amber-100">
+                      {typeof selectedOrder.shippingAddress === 'string'
+                        ? selectedOrder.shippingAddress
+                        : [
+                            selectedOrder.shippingAddress.name,
+                            selectedOrder.shippingAddress.line1,
+                            selectedOrder.shippingAddress.line2,
+                            selectedOrder.shippingAddress.city,
+                            selectedOrder.shippingAddress.state,
+                            selectedOrder.shippingAddress.zip,
+                            selectedOrder.shippingAddress.country,
+                          ].filter(Boolean).join(', ')}
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Gift Wrapping Info */}
+              {selectedOrder.giftWrapping && (
+                <Card className={cardCls}>
+                  <CardContent className="p-4">
+                    <p className={lblCls + ' mb-2 flex items-center gap-1'}><Gift className="h-3.5 w-3.5" /> Gift Wrapping</p>
+                    <div className="space-y-1">
+                      {typeof selectedOrder.giftWrapping === 'string' ? (
+                        <p className="text-sm text-amber-100">{selectedOrder.giftWrapping}</p>
+                      ) : (
+                        <>
+                          {selectedOrder.giftWrapping.type && <p className="text-sm text-amber-100">Style: <span className="capitalize">{selectedOrder.giftWrapping.type}</span></p>}
+                          {selectedOrder.giftWrapping.message && <p className="text-sm text-amber-200/60 italic">&ldquo;{selectedOrder.giftWrapping.message}&rdquo;</p>}
+                          {selectedOrder.giftWrapping.from && <p className="text-xs text-amber-200/40">From: {selectedOrder.giftWrapping.from}</p>}
+                        </>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Gift Message */}
+              {selectedOrder.giftMessage && (
+                <Card className={cardCls}>
+                  <CardContent className="p-4">
+                    <p className={lblCls + ' mb-2 flex items-center gap-1'}><Gift className="h-3.5 w-3.5" /> Gift Message</p>
+                    <p className="text-sm italic text-amber-200/60">&ldquo;{selectedOrder.giftMessage}&rdquo;</p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════
+   3c. CORPORATE INVOICES TAB
+   ════════════════════════════════════════════ */
+function CorporateInvoicesTab({ token }: { token: string | null }) {
+  const { authUser } = useStore()
+  const [selectedInvoice, setSelectedInvoice] = useState<any>(null)
+
+  // Fetch corporate profile to get contact email for order lookup
+  const { data: profileData } = useQuery({
+    queryKey: ['corporate-profile'],
+    queryFn: () => apiFetch('/api/corporate/profile', undefined, token),
+  })
+  const corporateEmail = profileData?.corporate?.contactEmail || authUser?.email || ''
+
+  const { data: ordersData } = useQuery({
+    queryKey: ['corporate-orders-invoices', corporateEmail],
+    queryFn: () => apiFetch(`/api/orders?email=${encodeURIComponent(corporateEmail)}`, undefined, token),
+    enabled: !!corporateEmail,
+  })
+
+  const emailDomain = authUser?.email?.split('@')[1] || ''
+  const allOrders = ordersData?.orders || []
+  const corporateOrderIds = allOrders
+    .filter((o: any) => o.email?.endsWith(`@${emailDomain}`) || o.email === authUser?.email)
+    .map((o: any) => o.id)
+
+  const { data: invoicesData, isLoading } = useQuery({
+    queryKey: ['corporate-invoices'],
+    queryFn: () => apiFetch('/api/invoices', undefined, token),
+    enabled: !!token,
+  })
+
+  const allInvoices = invoicesData?.invoices || []
+  const invoices = allInvoices.filter((inv: any) =>
+    corporateOrderIds.includes(inv.orderId) || inv.orderId === null
+  )
+
+  const invoiceStatusColor = (s: string) => {
+    const m: Record<string, string> = {
+      draft: 'bg-stone-600/20 text-stone-400 border-stone-600/30',
+      sent: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
+      paid: 'bg-green-600/20 text-green-400 border-green-600/30',
+      overdue: 'bg-red-600/20 text-red-400 border-red-600/30',
+    }
+    return m[s] || defCls
+  }
+
+  const downloadInvoice = (inv: any) => {
+    const rows = [['Invoice #', inv.invoiceNumber], ['Date', fmtDate(inv.createdAt)], ['Amount', fmt(inv.amount)], ['Tax', fmt(inv.tax)], ['Total', fmt(inv.total)], ['Status', inv.status]]
+    if (inv.dueDate) rows.push(['Due Date', fmtDate(inv.dueDate)])
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `invoice-${inv.invoiceNumber}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Find the related order for the selected invoice
+  const selectedInvoiceOrder = selectedInvoice
+    ? allOrders.find((o: any) => o.id === selectedInvoice.orderId)
+    : null
+
+  return (
+    <div className="space-y-4">
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+      ) : invoices.length === 0 ? (
+        <Card className={cardCls}>
+          <CardContent className="py-12 text-center">
+            <FileText className="mx-auto mb-3 h-10 w-10 text-amber-200/20" />
+            <p className="text-sm text-amber-200/40">No invoices found for your account</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className={cardCls}>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-amber-900/20 hover:bg-transparent">
+                    <TableHead className="text-amber-200/50">Invoice #</TableHead>
+                    <TableHead className="text-amber-200/50">Amount</TableHead>
+                    <TableHead className="text-amber-200/50">Status</TableHead>
+                    <TableHead className="text-amber-200/50">Date</TableHead>
+                    <TableHead className="text-amber-200/50">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.map((inv: any) => (
+                    <TableRow key={inv.id} className="border-amber-900/10 hover:bg-amber-900/5 cursor-pointer" onClick={() => setSelectedInvoice(inv)}>
+                      <TableCell className="text-sm font-medium text-amber-100">{inv.invoiceNumber}</TableCell>
+                      <TableCell className="text-sm font-medium text-amber-100">{fmt(inv.total || inv.amount)}</TableCell>
+                      <TableCell><Badge className={invoiceStatusColor(inv.status)}>{inv.status}</Badge></TableCell>
+                      <TableCell className="text-xs text-amber-200/60">{fmtDate(inv.createdAt)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <Button size="sm" variant="ghost" className="h-7 text-amber-200/40 hover:text-amber-400" onClick={() => setSelectedInvoice(inv)}>
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7 text-amber-200/40 hover:text-amber-400" onClick={() => downloadInvoice(inv)}>
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Invoice Details Dialog */}
+      <Dialog open={!!selectedInvoice} onOpenChange={() => setSelectedInvoice(null)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto border-amber-900/30 bg-stone-950 sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100 flex items-center gap-2">
+              <FileText className="h-5 w-5 text-amber-400" /> Invoice {selectedInvoice?.invoiceNumber}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedInvoice && (
+            <div className="space-y-4">
+              {/* Status */}
+              <div className="flex items-center gap-3">
+                <Badge className={invoiceStatusColor(selectedInvoice.status)}>{selectedInvoice.status}</Badge>
+                <span className="text-xs text-amber-200/40">Issued on {fmtDate(selectedInvoice.createdAt)}</span>
+              </div>
+
+              {/* Amount Breakdown */}
+              <Card className={cardCls}>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className={lblCls}>Subtotal</span>
+                    <span className="text-sm text-amber-100">{fmt(selectedInvoice.amount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={lblCls}>Tax</span>
+                    <span className="text-sm text-amber-200/60">{fmt(selectedInvoice.tax)}</span>
+                  </div>
+                  <Separator className="bg-amber-900/20" />
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-amber-100">Total</span>
+                    <span className="text-lg font-bold text-amber-100">{fmt(selectedInvoice.total)}</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Invoice Details */}
+              <div className="grid grid-cols-2 gap-3">
+                {selectedInvoice.dueDate && (
+                  <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                    <p className={lblCls}>Due Date</p>
+                    <p className="mt-1 text-sm font-medium text-amber-100">{fmtDate(selectedInvoice.dueDate)}</p>
+                  </div>
+                )}
+                {selectedInvoice.paidDate && (
+                  <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                    <p className={lblCls}>Paid Date</p>
+                    <p className="mt-1 text-sm font-medium text-green-400">{fmtDate(selectedInvoice.paidDate)}</p>
+                  </div>
+                )}
+                {selectedInvoice.paymentMethod && (
+                  <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                    <p className={lblCls}>Payment Method</p>
+                    <p className="mt-1 text-sm font-medium text-amber-100 capitalize">{selectedInvoice.paymentMethod}</p>
+                  </div>
+                )}
+                {selectedInvoice.invoiceNumber && (
+                  <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                    <p className={lblCls}>Invoice #</p>
+                    <p className="mt-1 text-sm font-medium text-amber-100">{selectedInvoice.invoiceNumber}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Related Order */}
+              {selectedInvoiceOrder && (
+                <Card className={cardCls}>
+                  <CardContent className="p-4">
+                    <p className={lblCls + ' mb-2 flex items-center gap-1'}><ShoppingBag className="h-3.5 w-3.5" /> Related Order</p>
+                    <div className="space-y-1">
+                      <p className="text-sm text-amber-100">Order #: <span className="font-medium">{selectedInvoiceOrder.orderNumber}</span></p>
+                      <p className="text-xs text-amber-200/60">Placed: {fmtDate(selectedInvoiceOrder.createdAt)}</p>
+                      <p className="text-xs text-amber-200/60">Status: <Badge className={(() => {
+                        const m: Record<string, string> = {
+                          pending: 'bg-yellow-600/20 text-yellow-400 border-yellow-600/30',
+                          processing: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
+                          shipped: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
+                          delivered: 'bg-green-600/20 text-green-400 border-green-600/30',
+                          cancelled: 'bg-red-600/20 text-red-400 border-red-600/30',
+                        }
+                        return m[selectedInvoiceOrder.status] || defCls
+                      })()}>{selectedInvoiceOrder.status}</Badge></p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Notes */}
+              {selectedInvoice.notes && (
+                <Card className={cardCls}>
+                  <CardContent className="p-4">
+                    <p className={lblCls + ' mb-1'}>Notes</p>
+                    <p className="text-sm text-amber-200/60">{selectedInvoice.notes}</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Download Button */}
+              <div className="flex justify-end">
+                <Button className={btnOutline} onClick={() => downloadInvoice(selectedInvoice)}>
+                  <Download className="mr-1 h-4 w-4" /> Download CSV
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

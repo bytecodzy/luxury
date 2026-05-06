@@ -37,6 +37,10 @@ model Product {
   reviewCount    Int       @default(0)
   featured       Boolean   @default(false)
   tags           String?   // JSON array of tags
+  occasions      String?   // JSON array: birthday, anniversary, wedding, diwali, christmas, etc.
+  recipientTypes String?   // JSON array: him, her, couple, kids, parents, friend, colleague
+  relationships  String?   // JSON array: spouse, parent, sibling, friend, colleague, boss
+  deliveryEstimate String? // e.g. "3-5 business days"
   vendorId       String?
   vendor         Vendor?   @relation(fields: [vendorId], references: [id])
   sourceUrl      String?
@@ -56,6 +60,7 @@ model Product {
   wishlistItems  WishlistItem[]
   campaigns      CorporateCampaign[]
   recipients     CampaignRecipient[]
+  reviews        Review[]
 }
 
 model PlatformIntegration {
@@ -114,27 +119,43 @@ model CartItem {
 }
 
 model Order {
-  id            String      @id @default(cuid())
-  orderNumber   String      @unique
-  email         String
-  firstName     String
-  lastName      String
-  address       String
-  city          String
-  state         String
-  zipCode       String
-  country       String
-  phone         String?
-  subtotal      Float
-  shipping      Float
-  tax           Float
-  total         Float
-  status        String      @default("pending") // pending, processing, shipped, delivered, cancelled
-  paymentMethod String      @default("card")
-  paymentStatus String      @default("pending") // pending, paid, failed, refunded
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  items         OrderItem[]
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  email           String
+  firstName       String
+  lastName        String
+  address         String
+  city            String
+  state           String
+  zipCode         String
+  country         String
+  phone           String?
+  subtotal        Float
+  shipping        Float
+  tax             Float
+  discount        Float       @default(0)
+  total           Float
+  status          String      @default("pending") // pending, processing, shipped, delivered, cancelled
+  paymentMethod   String      @default("card")
+  paymentStatus   String      @default("pending") // pending, paid, failed, refunded
+  deliveryType    String      @default("standard") // standard, express, same-day
+  giftWrapping    Boolean     @default(false)
+  giftWrapStyle   String?     // classic, premium, luxury
+  greetingMessage String?
+  hidePrice       Boolean     @default(false)
+  couponCode      String?
+  trackingNumber  String?
+  trackingUrl     String?
+  estimatedDelivery DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  refundStatus    String?     // pending, processed, denied
+  refundAmount    Float?
+  refundedAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  items           OrderItem[]
+  reviews         Review[]
 }
 
 model OrderItem {
@@ -454,4 +475,22 @@ model CampaignRecipient {
   orderId     String?  // linked order once placed
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// ─── Reviews ───
+
+model Review {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderId   String?
+  order     Order?   @relation(fields: [orderId], references: [id])
+  userId    String?
+  userName  String
+  rating    Int      // 1-5
+  title     String?
+  comment   String
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

@@ -18,6 +18,8 @@ import { UserDashboard } from '@/components/user-dashboard';
 import { AgentDashboard } from '@/components/agent-dashboard';
 import { TeamDashboard } from '@/components/team-dashboard';
 import { CorporateDashboard } from '@/components/corporate-dashboard';
+import { GiftAssistant } from '@/components/gift-assistant';
+import { GiftBuilder } from '@/components/gift-builder';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
 
@@ -85,6 +87,8 @@ function AppContent() {
       </main>
       <Footer />
       <AuthDialog />
+      <GiftBuilder />
+      <GiftAssistant />
     </div>
   );
 }

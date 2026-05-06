@@ -29,6 +29,7 @@ interface AppState {
   authView: 'login' | 'register' | null
   authTwoFAStep: boolean
   authPendingUserId: string | null
+  giftBuilderView: boolean
 
   setView: (view: View) => void
   selectProduct: (productId: string) => void
@@ -44,6 +45,7 @@ interface AppState {
   setAuthView: (view: 'login' | 'register' | null) => void
   setAuthTwoFAStep: (step: boolean) => void
   setAuthPendingUserId: (id: string | null) => void
+  toggleGiftBuilder: () => void
 }
 
 function loadAuthFromStorage(): { user: AuthUser | null; token: string | null } {
@@ -74,6 +76,7 @@ export const useStore = create<AppState>((set) => ({
   authView: null,
   authTwoFAStep: false,
   authPendingUserId: null,
+  giftBuilderView: false,
 
   setView: (view) => set({ view }),
   selectProduct: (productId) => set({ selectedProductId: productId, view: 'product' }),
@@ -127,4 +130,5 @@ export const useStore = create<AppState>((set) => ({
   setAuthView: (view) => set({ authView: view }),
   setAuthTwoFAStep: (step) => set({ authTwoFAStep: step }),
   setAuthPendingUserId: (id) => set({ authPendingUserId: id }),
+  toggleGiftBuilder: () => set((state) => ({ giftBuilderView: !state.giftBuilderView })),
 }))

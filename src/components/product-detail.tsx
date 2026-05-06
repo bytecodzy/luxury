@@ -4,10 +4,12 @@ import { useStore } from '@/lib/store';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle } from 'lucide-react';
+import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle, Truck, Heart, MessageSquare } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -15,7 +17,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon } from 'lucide-react';
+import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send } from 'lucide-react';
 import { useAffiliateClick } from '@/hooks/useAffiliateClick';
 
 interface ProductDetail {
@@ -33,11 +35,22 @@ interface ProductDetail {
   reviewCount: number;
   featured: boolean;
   tags: string[];
+  deliveryEstimate?: string;
   isExternal?: boolean;
   platform?: string;
   sourceUrl?: string;
   affiliateUrl?: string;
   platformLogo?: string;
+}
+
+interface Review {
+  id: string;
+  userName: string;
+  rating: number;
+  title?: string;
+  comment: string;
+  verified: boolean;
+  createdAt: string;
 }
 
 const PLATFORM_COLORS: Record<string, string> = {
@@ -981,7 +994,7 @@ function TryOnDialog({
 
 // ── Product Detail Component ───────────────────────────────────
 export function ProductDetail() {
-  const { selectedProductId, setView, addItem, setCategory } = useStore();
+  const { selectedProductId, setView, addItem, setCategory, authUser, authToken } = useStore();
   const { trackClick } = useAffiliateClick();
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
@@ -989,6 +1002,11 @@ export function ProductDetail() {
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [tryOnOpen, setTryOnOpen] = useState(false);
   const [backgroundJobStep, setBackgroundJobStep] = useState<'generating' | 'result' | null>(null);
+  const [isWishlisted, setIsWishlisted] = useState(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [reviewForm, setReviewForm] = useState({ rating: 5, title: '', comment: '', name: '' });
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
 
   const { data, isLoading } = useQuery<{ product: ProductDetail }>({
     queryKey: ['product', selectedProductId],
@@ -997,6 +1015,88 @@ export function ProductDetail() {
   });
 
   const product = data?.product;
+
+  // Wishlist check
+  const { data: wishlistData } = useQuery({
+    queryKey: ['wishlist-check', selectedProductId],
+    queryFn: async () => {
+      if (!authToken) return { wishlist: [] };
+      const res = await fetch('/api/wishlist', {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (!res.ok) return { wishlist: [] };
+      return res.json();
+    },
+    enabled: !!authToken && !!selectedProductId,
+  });
+
+  useEffect(() => {
+    if (wishlistData?.wishlist) {
+      const found = wishlistData.wishlist.some((w: any) => w.productId === selectedProductId);
+      setIsWishlisted(found);
+    }
+  }, [wishlistData, selectedProductId]);
+
+  // Reviews query
+  const { data: reviewsData, isLoading: reviewsLoading } = useQuery({
+    queryKey: ['reviews', selectedProductId],
+    queryFn: () => fetch(`/api/reviews?productId=${selectedProductId}`).then((r) => r.json()),
+    enabled: !!selectedProductId,
+  });
+
+  const reviews: Review[] = reviewsData?.reviews ?? [];
+
+  const handleToggleWishlist = async () => {
+    if (!authToken || !selectedProductId) return;
+    setWishlistLoading(true);
+    try {
+      if (isWishlisted) {
+        await fetch('/api/wishlist', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+          body: JSON.stringify({ productId: selectedProductId }),
+        });
+        setIsWishlisted(false);
+      } else {
+        await fetch('/api/wishlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+          body: JSON.stringify({ productId: selectedProductId }),
+        });
+        setIsWishlisted(true);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setWishlistLoading(false);
+    }
+  };
+
+  const handleSubmitReview = async () => {
+    if (!selectedProductId || !reviewForm.name || !reviewForm.comment) return;
+    setReviewSubmitting(true);
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: selectedProductId,
+          userName: reviewForm.name,
+          rating: reviewForm.rating,
+          title: reviewForm.title || undefined,
+          comment: reviewForm.comment,
+        }),
+      });
+      if (res.ok) {
+        setReviewDialogOpen(false);
+        setReviewForm({ rating: 5, title: '', comment: '', name: '' });
+      }
+    } catch {
+      // ignore
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
 
   // For external products with HTTP image URLs, use the image proxy
   const getProxiedImageUrl = (url: string): string => {
@@ -1246,6 +1346,14 @@ export function ProductDetail() {
             </div>
           )}
 
+          {/* Delivery Estimate */}
+          <div className="flex items-center gap-2">
+            <Truck className="h-4 w-4 text-amber-400/60" />
+            <span className="text-sm text-amber-200/50">
+              Estimated delivery: {product.deliveryEstimate || '3-5 business days'}
+            </span>
+          </div>
+
           {/* AI Try-On Button - Available for ALL categories */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -1312,7 +1420,7 @@ export function ProductDetail() {
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <div className="flex items-center rounded-lg border border-amber-900/30 bg-stone-900/60">
                 <button
                   onClick={() => setQuantity(Math.max(1, quantity - 1))}
@@ -1350,10 +1458,178 @@ export function ProductDetail() {
                   `Add to Cart - $${(product.price * quantity).toLocaleString()}`
                 )}
               </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleToggleWishlist}
+                disabled={wishlistLoading || !authToken}
+                className={`h-10 w-10 shrink-0 border-amber-900/30 ${
+                  isWishlisted
+                    ? 'bg-red-600/20 border-red-500/50 text-red-400 hover:bg-red-600/30'
+                    : 'text-amber-200/40 hover:text-red-400 hover:border-red-500/30'
+                }`}
+                title={authToken ? (isWishlisted ? 'Remove from Wishlist' : 'Add to Wishlist') : 'Sign in to add to wishlist'}
+              >
+                <Heart className={`h-4 w-4 ${isWishlisted ? 'fill-current' : ''}`} />
+              </Button>
             </div>
           )}
         </div>
       </div>
+
+      {/* Reviews Section */}
+      <div className="mt-12">
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <MessageSquare className="h-5 w-5 text-amber-400" />
+            <h3 className="text-lg font-semibold text-amber-100">
+              Reviews ({reviews.length})
+            </h3>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Star
+                  key={i}
+                  className={`h-4 w-4 ${
+                    i < Math.floor(product.rating) ? 'fill-amber-500 text-amber-500' : 'text-amber-700/40'
+                  }`}
+                />
+              ))}
+              <span className="ml-1 text-sm text-amber-200/50">{product.rating.toFixed(1)}</span>
+            </div>
+          </div>
+          <Button
+            onClick={() => setReviewDialogOpen(true)}
+            className="bg-amber-600 text-stone-950 hover:bg-amber-500"
+          >
+            Write a Review
+          </Button>
+        </div>
+
+        {reviewsLoading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-amber-400" />
+          </div>
+        ) : reviews.length === 0 ? (
+          <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-8 text-center">
+            <MessageSquare className="mx-auto mb-3 h-8 w-8 text-amber-200/20" />
+            <p className="text-sm text-amber-200/40">No reviews yet. Be the first to share your thoughts!</p>
+          </div>
+        ) : (
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            {reviews.map((review) => (
+              <div key={review.id} className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-amber-600/20 text-xs font-bold text-amber-400">
+                      {review.userName.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-amber-100">{review.userName}</span>
+                        {review.verified && (
+                          <Badge className="bg-emerald-600/20 text-emerald-400 text-[10px] border-emerald-600/30">Verified</Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star
+                            key={i}
+                            className={`h-3 w-3 ${
+                              i < review.rating ? 'fill-amber-500 text-amber-500' : 'text-amber-700/40'
+                            }`}
+                          />
+                        ))}
+                        <span className="ml-1 text-xs text-amber-200/30">
+                          {new Date(review.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {review.title && (
+                  <p className="mt-2 text-sm font-medium text-amber-200/80">{review.title}</p>
+                )}
+                <p className="mt-1 text-sm text-amber-200/50">{review.comment}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Review Dialog */}
+      <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100">Write a Review</DialogTitle>
+            <DialogDescription className="text-amber-200/50">Share your experience with this product</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            {/* Star Picker */}
+            <div>
+              <Label className="text-sm text-amber-200/60">Rating</Label>
+              <div className="flex items-center gap-1 mt-1">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setReviewForm((prev) => ({ ...prev, rating: i + 1 }))}
+                    className="transition-transform hover:scale-110"
+                  >
+                    <Star
+                      className={`h-6 w-6 ${
+                        i < reviewForm.rating ? 'fill-amber-500 text-amber-500' : 'text-amber-700/40'
+                      }`}
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="review-name" className="text-sm text-amber-200/60">Your Name</Label>
+              <Input
+                id="review-name"
+                value={reviewForm.name}
+                onChange={(e) => setReviewForm((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Enter your name"
+                className="mt-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20"
+              />
+            </div>
+            <div>
+              <Label htmlFor="review-title" className="text-sm text-amber-200/60">Title (optional)</Label>
+              <Input
+                id="review-title"
+                value={reviewForm.title}
+                onChange={(e) => setReviewForm((prev) => ({ ...prev, title: e.target.value }))}
+                placeholder="Summary of your review"
+                className="mt-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20"
+              />
+            </div>
+            <div>
+              <Label htmlFor="review-comment" className="text-sm text-amber-200/60">Your Review</Label>
+              <textarea
+                id="review-comment"
+                value={reviewForm.comment}
+                onChange={(e) => setReviewForm((prev) => ({ ...prev, comment: e.target.value }))}
+                placeholder="What did you like or dislike?"
+                rows={4}
+                className="mt-1 w-full rounded-md border border-amber-900/40 bg-stone-800/50 px-3 py-2 text-sm text-amber-50 placeholder:text-amber-200/20 focus:outline-none focus:ring-1 focus:ring-amber-600 resize-none"
+              />
+            </div>
+            <Button
+              onClick={handleSubmitReview}
+              disabled={reviewSubmitting || !reviewForm.name || !reviewForm.comment}
+              className="w-full bg-amber-600 text-stone-950 hover:bg-amber-500"
+            >
+              {reviewSubmitting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-2 h-4 w-4" />
+              )}
+              Submit Review
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* AI Try-On Dialog - always mounted when open or background job active */}
       {(tryOnOpen || backgroundJobStep !== null) && product && (

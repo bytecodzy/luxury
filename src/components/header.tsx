@@ -4,13 +4,13 @@ import { useStore } from '@/lib/store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield } from 'lucide-react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 
 export function Header() {
-  const { searchQuery, setSearch, setView, cartItems, setCategory, authUser, setAuthView, clearAuth } = useStore();
+  const { searchQuery, setSearch, setView, cartItems, setCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder } = useStore();
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -113,6 +113,18 @@ export function Header() {
               aria-label="View orders"
             >
               <Package className="h-5 w-5" />
+            </Button>
+
+            {/* Gift Builder */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleGiftBuilder}
+              className="hidden sm:flex items-center gap-1.5 text-amber-300/80 hover:bg-amber-900/20 hover:text-amber-300 border border-amber-600/30 hover:border-amber-500/50"
+            >
+              <Gift className="h-4 w-4" />
+              <span className="text-xs font-medium">Gift Builder</span>
+              <Sparkles className="h-3 w-3 text-amber-400/60" />
             </Button>
 
             {/* Login / Profile */}
@@ -297,6 +309,17 @@ export function Header() {
                     className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
                   >
                     Orders
+                  </button>
+                  <button
+                    onClick={() => {
+                      toggleGiftBuilder();
+                      setMobileMenuOpen(false);
+                    }}
+                    className="rounded-md px-4 py-2 text-left text-amber-300/90 transition-colors hover:bg-amber-900/20 hover:text-amber-300 flex items-center gap-2"
+                  >
+                    <Gift className="h-4 w-4" />
+                    Gift Builder
+                    <Sparkles className="h-3 w-3 text-amber-400/60" />
                   </button>
                 </div>
               </SheetContent>

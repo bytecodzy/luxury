@@ -1,12 +1,19 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, ChevronDown, Package, ArrowLeft } from 'lucide-react';
+import { Search, ChevronDown, Package, ArrowLeft, Truck, ExternalLink, Gift, Tag, XCircle, Loader2, Clock } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { useState } from 'react';
 
@@ -26,10 +33,18 @@ interface Order {
   subtotal: number;
   shipping: number;
   tax: number;
+  discount?: number;
   total: number;
   createdAt: string;
   itemCount: number;
   items: OrderItem[];
+  deliveryType?: string;
+  giftWrapping?: boolean;
+  giftWrapStyle?: string;
+  couponCode?: string;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  estimatedDelivery?: string;
 }
 
 const statusColors: Record<string, string> = {
@@ -40,10 +55,22 @@ const statusColors: Record<string, string> = {
   cancelled: 'bg-red-600/20 text-red-400 border-red-600/30',
 };
 
+const deliveryTypeLabels: Record<string, string> = {
+  standard: 'Standard',
+  express: 'Express',
+  'same-day': 'Same-Day',
+};
+
 export function OrderHistory() {
   const { setView } = useStore();
   const [email, setEmail] = useState('');
   const [searchEmail, setSearchEmail] = useState('');
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery<{ orders: Order[] }>({
     queryKey: ['orders', searchEmail],
@@ -53,11 +80,31 @@ export function OrderHistory() {
 
   const orders = data?.orders ?? [];
 
-  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
-
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setSearchEmail(email);
+  };
+
+  const handleCancelOrder = async () => {
+    if (!cancelOrderId) return;
+    setCancelLoading(true);
+    try {
+      const res = await fetch(`/api/orders/${cancelOrderId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: cancelReason, email: searchEmail }),
+      });
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: ['orders', searchEmail] });
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCancelLoading(false);
+      setCancelDialogOpen(false);
+      setCancelReason('');
+      setCancelOrderId(null);
+    }
   };
 
   return (
@@ -131,12 +178,26 @@ export function OrderHistory() {
                   <span className="font-mono text-sm font-semibold text-amber-400">
                     {order.orderNumber}
                   </span>
-                  <Badge
-                    variant="outline"
-                    className={`w-fit text-xs ${statusColors[order.status] || 'bg-stone-600/20 text-stone-400'}`}
-                  >
-                    {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                  </Badge>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge
+                      variant="outline"
+                      className={`text-xs ${statusColors[order.status] || 'bg-stone-600/20 text-stone-400'}`}
+                    >
+                      {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                    </Badge>
+                    {order.deliveryType && (
+                      <Badge variant="outline" className="bg-stone-600/20 text-stone-300 border-stone-600/30 text-[10px]">
+                        <Truck className="mr-1 h-3 w-3" />
+                        {deliveryTypeLabels[order.deliveryType] || order.deliveryType}
+                      </Badge>
+                    )}
+                    {order.giftWrapping && (
+                      <Badge variant="outline" className="bg-pink-600/15 text-pink-300 border-pink-600/30 text-[10px]">
+                        <Gift className="mr-1 h-3 w-3" />
+                        Gift
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right">
@@ -167,6 +228,47 @@ export function OrderHistory() {
                   >
                     <Separator className="bg-amber-900/20" />
                     <div className="p-4 space-y-3">
+                      {/* Tracking Info */}
+                      {(order.trackingNumber || order.estimatedDelivery) && (
+                        <div className="rounded-lg border border-amber-900/15 bg-stone-800/30 p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Truck className="h-4 w-4 text-amber-400" />
+                            <span className="text-xs font-medium text-amber-200/70">Tracking</span>
+                          </div>
+                          {order.trackingNumber && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-amber-200/40">Number:</span>
+                              {order.trackingUrl ? (
+                                <a
+                                  href={order.trackingUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs text-amber-400 hover:underline"
+                                >
+                                  {order.trackingNumber}
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              ) : (
+                                <span className="text-xs text-amber-100">{order.trackingNumber}</span>
+                              )}
+                            </div>
+                          )}
+                          {order.estimatedDelivery && (
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-3.5 w-3.5 text-amber-200/30" />
+                              <span className="text-xs text-amber-200/40">Est. Delivery:</span>
+                              <span className="text-xs text-amber-100">
+                                {new Date(order.estimatedDelivery).toLocaleDateString('en-US', {
+                                  weekday: 'short',
+                                  month: 'short',
+                                  day: 'numeric',
+                                })}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {order.items.map((item) => (
                         <div
                           key={item.id}
@@ -204,11 +306,46 @@ export function OrderHistory() {
                           <span className="text-amber-200/40">Tax</span>
                           <span className="text-amber-200/60">${order.tax.toFixed(2)}</span>
                         </div>
+                        {order.discount && order.discount > 0 && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-emerald-400/70 flex items-center gap-1">
+                              <Tag className="h-3 w-3" />
+                              Discount{order.couponCode ? ` (${order.couponCode})` : ''}
+                            </span>
+                            <span className="text-emerald-400">-${order.discount.toFixed(2)}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between text-sm font-semibold">
                           <span className="text-amber-100">Total</span>
                           <span className="text-amber-400">${order.total.toFixed(2)}</span>
                         </div>
                       </div>
+
+                      {/* Gift Wrapping Info */}
+                      {order.giftWrapping && (
+                        <div className="flex items-center gap-2 text-xs text-amber-200/40">
+                          <Gift className="h-3.5 w-3.5 text-pink-400/50" />
+                          <span>Gift Wrapped{order.giftWrapStyle ? ` — ${order.giftWrapStyle.charAt(0).toUpperCase() + order.giftWrapStyle.slice(1)}` : ''}</span>
+                        </div>
+                      )}
+
+                      {/* Cancel Order Button */}
+                      {order.status === 'pending' && (
+                        <div className="pt-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setCancelOrderId(order.id);
+                              setCancelDialogOpen(true);
+                            }}
+                            className="border-red-900/30 text-red-400/60 hover:border-red-600/40 hover:text-red-400 text-xs"
+                          >
+                            <XCircle className="mr-1 h-3 w-3" />
+                            Cancel Order
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
@@ -217,6 +354,50 @@ export function OrderHistory() {
           ))}
         </div>
       )}
+
+      {/* Cancel Order Dialog */}
+      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100">Cancel Order</DialogTitle>
+            <DialogDescription className="text-amber-200/50">
+              Are you sure you want to cancel this order? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div>
+              <label htmlFor="cancel-reason" className="text-sm text-amber-200/60">Reason for cancellation</label>
+              <Input
+                id="cancel-reason"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="Tell us why you're cancelling"
+                className="mt-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20"
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setCancelDialogOpen(false);
+                  setCancelReason('');
+                  setCancelOrderId(null);
+                }}
+                className="flex-1 border-amber-900/40 text-amber-200/60"
+              >
+                Keep Order
+              </Button>
+              <Button
+                onClick={handleCancelOrder}
+                disabled={cancelLoading}
+                className="flex-1 bg-red-600 text-white hover:bg-red-500"
+              >
+                {cancelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancel Order'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }

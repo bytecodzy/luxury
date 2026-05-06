@@ -35,6 +35,7 @@ import {
   Eye, ArrowUpRight, ArrowDownRight, TrendingUp, DollarSign, Box, UserCheck,
   Globe, ExternalLink, Image as ImageIcon, RefreshCw, Link2, ShoppingCart,
   Handshake, Building2, Megaphone, ThumbsUp, ThumbsDown, Users as UsersIcon,
+  FolderOpen, BarChart3, Download, Truck as TruckIcon,
 } from 'lucide-react'
 
 /* ─── style constants ─── */
@@ -122,6 +123,7 @@ export function AdminDashboard() {
   const tabItems = [
     { value: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { value: 'products', icon: Package, label: 'Products' },
+    { value: 'categories', icon: FolderOpen, label: 'Categories' },
     { value: 'inventory', icon: Warehouse, label: 'Inventory' },
     { value: 'orders', icon: ShoppingBag, label: 'Orders' },
     { value: 'invoices', icon: FileText, label: 'Invoices' },
@@ -132,6 +134,7 @@ export function AdminDashboard() {
     { value: 'sharedocs', icon: Share2, label: 'Share Docs' },
     { value: 'offers', icon: Tag, label: 'Offers' },
     { value: 'import', icon: Import, label: 'Import' },
+    { value: 'reports', icon: BarChart3, label: 'Reports' },
     { value: 'integrations', icon: Globe, label: 'Integrations' },
     { value: 'partners', icon: Handshake, label: 'Partners' },
     { value: 'corporate', icon: Building2, label: 'Corporate' },
@@ -166,8 +169,9 @@ export function AdminDashboard() {
 
         <TabsContent value="dashboard"><DashboardTab token={authToken} /></TabsContent>
         <TabsContent value="products"><ProductsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
+        <TabsContent value="categories"><CategoriesTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="inventory"><InventoryTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="orders"><OrdersTab token={authToken} /></TabsContent>
+        <TabsContent value="orders"><OrdersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="invoices"><InvoicesTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="accounting"><AccountingTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="vendors"><VendorsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
@@ -176,6 +180,7 @@ export function AdminDashboard() {
         <TabsContent value="sharedocs"><ShareDocsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="offers"><OffersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="import"><ImportTab token={authToken} onMutate={invalidateAll} /></TabsContent>
+        <TabsContent value="reports"><ReportsTab token={authToken} /></TabsContent>
         <TabsContent value="integrations"><IntegrationsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="partners"><PartnersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="corporate"><CorporateTab token={authToken} onMutate={invalidateAll} /></TabsContent>
@@ -729,67 +734,127 @@ function StockAdjustForm({ token, onClose, onSaved }: { token: string | null; on
 /* ════════════════════════════════════════════
    4. ORDERS TAB
    ════════════════════════════════════════════ */
-function OrdersTab({ token }: { token: string | null }) {
+function OrdersTab({ token, onMutate }: { token: string | null; onMutate: () => void }) {
+  const qc = useQueryClient()
   const [page, setPage] = useState(1)
+  const [statusFilter, setStatusFilter] = useState('')
   const [viewOrder, setViewOrder] = useState<any>(null)
+  const [showTracking, setShowTracking] = useState<any>(null)
+  const [showRefund, setShowRefund] = useState<any>(null)
 
-  // Using the orders endpoint - need admin access for all orders
   const { data, isLoading } = useQuery({
-    queryKey: ['admin-orders', page],
-    queryFn: async () => {
-      const res = await fetch('/api/orders?email=all', { headers: authH(token) })
-      if (res.status === 401) { window.dispatchEvent(new Event('auth:unauthorized')); throw new Error('Unauthorized') }
-      return res.json()
-    },
+    queryKey: ['admin-orders', page, statusFilter],
+    queryFn: () => apiFetch(`/api/admin/orders?page=${page}&limit=20${statusFilter ? `&status=${statusFilter}` : ''}`, undefined, token),
   })
 
   const orders = data?.orders || []
+  const stats = data?.stats
+  const pagination = data?.pagination
+
+  const statusMut = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      apiFetch(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-orders'] }); onMutate(); setViewOrder(null) },
+  })
+
+  const trackingMut = useMutation({
+    mutationFn: ({ id, trackingNumber, trackingUrl }: { id: string; trackingNumber: string; trackingUrl: string }) =>
+      apiFetch(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify({ trackingNumber, trackingUrl }) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-orders'] }); onMutate(); setShowTracking(null) },
+  })
+
+  const refundMut = useMutation({
+    mutationFn: ({ id, amount, reason }: { id: string; amount: string; reason: string }) =>
+      apiFetch(`/api/orders/${id}/refund`, { method: 'POST', body: JSON.stringify({ amount, reason }) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-orders'] }); onMutate(); setShowRefund(null) },
+  })
+
+  const [trackingForm, setTrackingForm] = useState({ trackingNumber: '', trackingUrl: '' })
+  const [refundForm, setRefundForm] = useState({ amount: '', reason: '' })
 
   return (
     <div className="space-y-4">
-      <Card className={cardCls}>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-amber-900/20 hover:bg-transparent">
-                  <TableHead className="text-amber-200/50">Order #</TableHead>
-                  <TableHead className="text-amber-200/50">Customer</TableHead>
-                  <TableHead className="text-amber-200/50">Total</TableHead>
-                  <TableHead className="text-amber-200/50">Status</TableHead>
-                  <TableHead className="text-amber-200/50">Payment</TableHead>
-                  <TableHead className="text-amber-200/50">Date</TableHead>
-                  <TableHead className="text-amber-200/50">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {orders.map((o: any) => (
-                  <TableRow key={o.id} className="border-amber-900/10 hover:bg-amber-900/5">
-                    <TableCell className="text-sm font-medium text-amber-100">{o.orderNumber}</TableCell>
-                    <TableCell>
-                      <p className="text-sm text-amber-100">{o.firstName} {o.lastName}</p>
-                      <p className="text-xs text-amber-200/40">{o.email}</p>
-                    </TableCell>
-                    <TableCell className="text-sm font-medium text-amber-100">{fmt(o.total)}</TableCell>
-                    <TableCell><Badge className={statusColor(o.status)}>{o.status}</Badge></TableCell>
-                    <TableCell><Badge className={statusColor(o.paymentStatus)}>{o.paymentStatus}</Badge></TableCell>
-                    <TableCell className="text-xs text-amber-200/60">{fmtDate(o.createdAt)}</TableCell>
-                    <TableCell>
-                      <Button size="sm" variant="ghost" className="h-7 text-amber-200/40 hover:text-amber-400" onClick={() => setViewOrder(o)}>
-                        <Eye className="mr-1 h-3.5 w-3.5" />View
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {orders.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-amber-200/40">No orders found</TableCell></TableRow>}
-              </TableBody>
-            </Table>
+      <div className="flex flex-wrap items-center gap-3">
+        <Select value={statusFilter} onValueChange={v => { setStatusFilter(v === 'all' ? '' : v); setPage(1) }}>
+          <SelectTrigger className={`${selCls} w-40`}><SelectValue placeholder="Filter status" /></SelectTrigger>
+          <SelectContent className={selContentCls}>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="processing">Processing</SelectItem>
+            <SelectItem value="shipped">Shipped</SelectItem>
+            <SelectItem value="delivered">Delivered</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
+          </SelectContent>
+        </Select>
+        {stats && (
+          <div className="flex flex-wrap gap-2">
+            <Badge className="bg-yellow-600/20 text-yellow-400 border-yellow-600/30">Pending: {stats.pending}</Badge>
+            <Badge className="bg-blue-600/20 text-blue-400 border-blue-600/30">Processing: {stats.processing}</Badge>
+            <Badge className="bg-purple-600/20 text-purple-400 border-purple-600/30">Shipped: {stats.shipped}</Badge>
+            <Badge className="bg-green-600/20 text-green-400 border-green-600/30">Delivered: {stats.delivered}</Badge>
           </div>
-        </CardContent>
-      </Card>
+        )}
+      </div>
 
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+      ) : (
+        <Card className={cardCls}>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-amber-900/20 hover:bg-transparent">
+                    <TableHead className="text-amber-200/50">Order #</TableHead>
+                    <TableHead className="text-amber-200/50">Customer</TableHead>
+                    <TableHead className="text-amber-200/50">Total</TableHead>
+                    <TableHead className="text-amber-200/50">Status</TableHead>
+                    <TableHead className="text-amber-200/50">Payment</TableHead>
+                    <TableHead className="text-amber-200/50">Date</TableHead>
+                    <TableHead className="text-amber-200/50">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {orders.map((o: any) => (
+                    <TableRow key={o.id} className="border-amber-900/10 hover:bg-amber-900/5 cursor-pointer" onClick={() => setViewOrder(o)}>
+                      <TableCell className="text-sm font-medium text-amber-100">{o.orderNumber}</TableCell>
+                      <TableCell>
+                        <p className="text-sm text-amber-100">{o.firstName} {o.lastName}</p>
+                        <p className="text-xs text-amber-200/40">{o.email}</p>
+                      </TableCell>
+                      <TableCell className="text-sm font-medium text-amber-100">{fmt(o.total)}</TableCell>
+                      <TableCell><Badge className={statusColor(o.status)}>{o.status}</Badge></TableCell>
+                      <TableCell><Badge className={statusColor(o.paymentStatus)}>{o.paymentStatus}</Badge></TableCell>
+                      <TableCell className="text-xs text-amber-200/60">{fmtDate(o.createdAt)}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-amber-200/40 hover:text-amber-400" onClick={() => setViewOrder(o)}>
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {orders.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-amber-200/40">No orders found</TableCell></TableRow>}
+                </TableBody>
+              </Table>
+            </div>
+            {pagination && pagination.pages > 1 && (
+              <div className="flex items-center justify-between border-t border-amber-900/20 px-4 py-3">
+                <p className="text-xs text-amber-200/40">Page {pagination.page} of {pagination.pages} ({pagination.total} total)</p>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className={btnOutline} disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
+                  <Button size="sm" variant="outline" className={btnOutline} disabled={page >= pagination.pages} onClick={() => setPage(p => p + 1)}>Next</Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Order Detail Dialog */}
       <Dialog open={!!viewOrder} onOpenChange={() => setViewOrder(null)}>
-        <DialogContent className="max-h-[80vh] overflow-y-auto border-amber-900/30 bg-stone-950 sm:max-w-lg">
+        <DialogContent className="max-h-[85vh] overflow-y-auto border-amber-900/30 bg-stone-950 sm:max-w-2xl">
           <DialogHeader><DialogTitle className="text-amber-100">Order {viewOrder?.orderNumber}</DialogTitle></DialogHeader>
           {viewOrder && (
             <div className="space-y-4">
@@ -803,6 +868,12 @@ function OrdersTab({ token }: { token: string | null }) {
                 <div><p className={lblCls}>Tax</p><p className="text-sm text-amber-100">{fmt(viewOrder.tax)}</p></div>
                 <div><p className={lblCls}>Total</p><p className="text-sm font-bold text-amber-100">{fmt(viewOrder.total)}</p></div>
               </div>
+              {viewOrder.trackingNumber && (
+                <div className="grid grid-cols-2 gap-3 rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                  <div><p className={lblCls}>Tracking Number</p><p className="text-sm text-amber-100">{viewOrder.trackingNumber}</p></div>
+                  {viewOrder.trackingUrl && <div><p className={lblCls}>Tracking URL</p><a href={viewOrder.trackingUrl} target="_blank" rel="noopener" className="text-sm text-amber-400 underline">{viewOrder.trackingUrl}</a></div>}
+                </div>
+              )}
               <Separator className="bg-amber-900/20" />
               <div>
                 <p className={`mb-2 ${lblCls}`}>Address</p>
@@ -823,8 +894,68 @@ function OrdersTab({ token }: { token: string | null }) {
                   ))}
                 </div>
               )}
+              <Separator className="bg-amber-900/20" />
+              {/* Action Buttons */}
+              <div className="flex flex-wrap gap-2">
+                {viewOrder.status !== 'delivered' && viewOrder.status !== 'cancelled' && (
+                  <Select onValueChange={(v) => { statusMut.mutate({ id: viewOrder.id, status: v }) }} disabled={statusMut.isPending}>
+                    <SelectTrigger className={`${selCls} w-44`}>
+                      <SelectValue placeholder="Update Status" />
+                    </SelectTrigger>
+                    <SelectContent className={selContentCls}>
+                      {viewOrder.status === 'pending' && <SelectItem value="processing">→ Processing</SelectItem>}
+                      {(viewOrder.status === 'pending' || viewOrder.status === 'processing') && <SelectItem value="shipped">→ Shipped</SelectItem>}
+                      {(viewOrder.status === 'pending' || viewOrder.status === 'processing' || viewOrder.status === 'shipped') && <SelectItem value="delivered">→ Delivered</SelectItem>}
+                      {viewOrder.status !== 'cancelled' && <SelectItem value="cancelled">→ Cancelled</SelectItem>}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button className={btnOutline} onClick={() => { setTrackingForm({ trackingNumber: viewOrder.trackingNumber || '', trackingUrl: viewOrder.trackingUrl || '' }); setShowTracking(viewOrder) }}>
+                  <TruckIcon className="mr-1 h-4 w-4" /> Add Tracking
+                </Button>
+                {viewOrder.paymentStatus !== 'refunded' && (
+                  <Button className="border-red-900/40 text-red-400 hover:bg-red-900/20" onClick={() => { setRefundForm({ amount: String(viewOrder.total), reason: '' }); setShowRefund(viewOrder) }}>
+                    <DollarSign className="mr-1 h-4 w-4" /> Process Refund
+                  </Button>
+                )}
+              </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Tracking Dialog */}
+      <Dialog open={!!showTracking} onOpenChange={() => setShowTracking(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-amber-100">Add Tracking — {showTracking?.orderNumber}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label className={lblCls}>Tracking Number</Label><Input className={`${inputCls} mt-1`} value={trackingForm.trackingNumber} onChange={e => setTrackingForm(f => ({ ...f, trackingNumber: e.target.value }))} placeholder="Enter tracking number" /></div>
+            <div><Label className={lblCls}>Tracking URL</Label><Input className={`${inputCls} mt-1`} value={trackingForm.trackingUrl} onChange={e => setTrackingForm(f => ({ ...f, trackingUrl: e.target.value }))} placeholder="https://..." /></div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" className={btnOutline} onClick={() => setShowTracking(null)}>Cancel</Button>
+              <Button className={btnPrimary} onClick={() => trackingMut.mutate({ id: showTracking.id, ...trackingForm })} disabled={trackingMut.isPending}>
+                {trackingMut.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Refund Dialog */}
+      <Dialog open={!!showRefund} onOpenChange={() => setShowRefund(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-amber-100">Process Refund — {showRefund?.orderNumber}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-amber-200/60">Order total: <strong className="text-amber-100">{fmt(showRefund?.total || 0)}</strong></p>
+            <div><Label className={lblCls}>Refund Amount</Label><Input type="number" className={`${inputCls} mt-1`} value={refundForm.amount} onChange={e => setRefundForm(f => ({ ...f, amount: e.target.value }))} /></div>
+            <div><Label className={lblCls}>Reason</Label><Textarea className={`${inputCls} mt-1`} rows={2} value={refundForm.reason} onChange={e => setRefundForm(f => ({ ...f, reason: e.target.value }))} placeholder="Reason for refund" /></div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" className={btnOutline} onClick={() => setShowRefund(null)}>Cancel</Button>
+              <Button className="bg-red-600 text-white hover:bg-red-500" onClick={() => refundMut.mutate({ id: showRefund.id, ...refundForm })} disabled={refundMut.isPending}>
+                {refundMut.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Process Refund
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
@@ -1758,75 +1889,94 @@ function ShareDocsTab({ token, onMutate }: { token: string | null; onMutate: () 
    11. OFFERS TAB
    ════════════════════════════════════════════ */
 function OffersTab({ token, onMutate }: { token: string | null; onMutate: () => void }) {
-  const [offers, setOffers] = useState<any[]>([])
+  const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [editOffer, setEditOffer] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const [showDelete, setShowDelete] = useState<any>(null)
 
-  const { data: productsData } = useQuery({ queryKey: ['admin-products-quick'], queryFn: () => apiFetch('/api/admin/products?limit=1', undefined, token) })
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-offers'],
+    queryFn: () => apiFetch('/api/offers?limit=50', undefined, token),
+  })
 
-  // Since there's no dedicated offers API endpoint, maintain local state
-  useEffect(() => { setLoading(false) }, [])
+  const offers = data?.offers || []
 
   const [form, setForm] = useState({
     title: '', description: '', code: '', type: 'percentage', value: '',
     minOrder: '', maxDiscount: '', validFrom: '', validTo: '', isActive: true, usageLimit: '',
   })
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  useEffect(() => {
-    if (editOffer) {
-      setForm({
-        title: editOffer.title || '', description: editOffer.description || '',
-        code: editOffer.code || '', type: editOffer.type || 'percentage',
-        value: String(editOffer.value || ''), minOrder: String(editOffer.minOrder || ''),
-        maxDiscount: String(editOffer.maxDiscount || ''),
-        validFrom: editOffer.validFrom ? new Date(editOffer.validFrom).toISOString().split('T')[0] : '',
-        validTo: editOffer.validTo ? new Date(editOffer.validTo).toISOString().split('T')[0] : '',
-        isActive: editOffer.isActive ?? true, usageLimit: String(editOffer.usageLimit || ''),
-      })
-    }
-  }, [editOffer])
+  const openEdit = (o: any) => {
+    setEditOffer(o)
+    setForm({
+      title: o.title || '', description: o.description || '',
+      code: o.code || '', type: o.type || 'percentage',
+      value: String(o.value || ''), minOrder: String(o.minOrder || ''),
+      maxDiscount: String(o.maxDiscount || ''),
+      validFrom: o.validFrom ? new Date(o.validFrom).toISOString().split('T')[0] : '',
+      validTo: o.validTo ? new Date(o.validTo).toISOString().split('T')[0] : '',
+      isActive: o.isActive ?? true, usageLimit: String(o.usageLimit || ''),
+    })
+    setShowForm(true)
+  }
 
-  const handleSave = async () => {
+  const createMut = useMutation({
+    mutationFn: (body: any) => apiFetch('/api/offers', { method: 'POST', body: JSON.stringify(body) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-offers'] }); onMutate(); setShowForm(false); setEditOffer(null) },
+  })
+
+  const updateMut = useMutation({
+    mutationFn: (body: any) => apiFetch('/api/offers', { method: 'PUT', body: JSON.stringify(body) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-offers'] }); onMutate(); setShowForm(false); setEditOffer(null) },
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => apiFetch('/api/offers', { method: 'DELETE', body: JSON.stringify({ id }) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-offers'] }); onMutate(); setShowDelete(null) },
+  })
+
+  const toggleMut = useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) => apiFetch('/api/offers', { method: 'PUT', body: JSON.stringify({ id, isActive }) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-offers'] }); onMutate() },
+  })
+
+  const handleSave = () => {
     if (!form.title || !form.code || !form.value) { setError('Title, code, and value are required'); return }
-    setSaving(true); setError('')
-    try {
-      const offerData = {
-        ...form,
-        value: parseFloat(form.value),
-        minOrder: form.minOrder ? parseFloat(form.minOrder) : null,
-        maxDiscount: form.maxDiscount ? parseFloat(form.maxDiscount) : null,
-        usageLimit: form.usageLimit ? parseInt(form.usageLimit) : null,
-        validFrom: form.validFrom ? new Date(form.validFrom).toISOString() : new Date().toISOString(),
-        validTo: form.validTo ? new Date(form.validTo).toISOString() : new Date(Date.now() + 30 * 86400000).toISOString(),
-      }
+    setError('')
+    const offerData = {
+      ...form,
+      value: parseFloat(form.value),
+      minOrder: form.minOrder ? parseFloat(form.minOrder) : null,
+      maxDiscount: form.maxDiscount ? parseFloat(form.maxDiscount) : null,
+      usageLimit: form.usageLimit ? parseInt(form.usageLimit) : null,
+      validFrom: form.validFrom ? new Date(form.validFrom).toISOString() : new Date().toISOString(),
+      validTo: form.validTo ? new Date(form.validTo).toISOString() : new Date(Date.now() + 30 * 86400000).toISOString(),
+    }
 
-      if (editOffer) {
-        setOffers(prev => prev.map(o => o.id === editOffer.id ? { ...editOffer, ...offerData, updatedAt: new Date().toISOString() } : o))
-      } else {
-        const newOffer = { id: `offer-${Date.now()}`, ...offerData, usedCount: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-        setOffers(prev => [newOffer, ...prev])
-      }
-      setShowForm(false); setEditOffer(null)
-      setForm({ title: '', description: '', code: '', type: 'percentage', value: '', minOrder: '', maxDiscount: '', validFrom: '', validTo: '', isActive: true, usageLimit: '' })
-    } catch (e: any) { setError(e.message) } finally { setSaving(false) }
+    if (editOffer) {
+      updateMut.mutate({ id: editOffer.id, ...offerData }, { onError: (e: any) => setError(e.message) })
+    } else {
+      createMut.mutate(offerData, { onError: (e: any) => setError(e.message) })
+    }
   }
 
-  const toggleActive = (id: string) => {
-    setOffers(prev => prev.map(o => o.id === id ? { ...o, isActive: !o.isActive } : o))
+  const resetForm = () => {
+    setForm({ title: '', description: '', code: '', type: 'percentage', value: '', minOrder: '', maxDiscount: '', validFrom: '', validTo: '', isActive: true, usageLimit: '' })
+    setEditOffer(null)
   }
+
+  const isPending = createMut.isPending || updateMut.isPending
 
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <Button className={btnPrimary} onClick={() => { setEditOffer(null); setForm({ title: '', description: '', code: '', type: 'percentage', value: '', minOrder: '', maxDiscount: '', validFrom: '', validTo: '', isActive: true, usageLimit: '' }); setShowForm(true) }}>
+        <Button className={btnPrimary} onClick={() => { resetForm(); setShowForm(true) }}>
           <Plus className="mr-1 h-4 w-4" /> Create Offer
         </Button>
       </div>
 
-      <Dialog open={showForm} onOpenChange={setShowForm}>
+      <Dialog open={showForm} onOpenChange={(v) => { setShowForm(v); if (!v) resetForm() }}>
         <DialogContent className="max-h-[80vh] overflow-y-auto border-amber-900/30 bg-stone-950 sm:max-w-lg">
           <DialogHeader><DialogTitle className="text-amber-100">{editOffer ? 'Edit Offer' : 'Create Offer'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -1857,49 +2007,423 @@ function OffersTab({ token, onMutate }: { token: string | null; onMutate: () => 
               <Label className={lblCls}>Active</Label>
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" className={btnOutline} onClick={() => { setShowForm(false); setEditOffer(null) }}>Cancel</Button>
-              <Button className={btnPrimary} onClick={handleSave} disabled={saving}>{saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{editOffer ? 'Update' : 'Create'}</Button>
+              <Button variant="outline" className={btnOutline} onClick={() => { setShowForm(false); resetForm() }}>Cancel</Button>
+              <Button className={btnPrimary} onClick={handleSave} disabled={isPending}>{isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{editOffer ? 'Update' : 'Create'}</Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
+      {/* Delete Confirmation */}
+      <Dialog open={!!showDelete} onOpenChange={() => setShowDelete(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-amber-100">Delete Offer</DialogTitle></DialogHeader>
+          <p className="text-sm text-amber-200/60">Are you sure you want to delete <strong className="text-amber-100">{showDelete?.title}</strong>?</p>
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="outline" className={btnOutline} onClick={() => setShowDelete(null)}>Cancel</Button>
+            <Button className="bg-red-600 text-white hover:bg-red-500" onClick={() => deleteMut.mutate(showDelete.id)} disabled={deleteMut.isPending}>
+              {deleteMut.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+      ) : (
+        <Card className={cardCls}>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-amber-900/20 hover:bg-transparent">
+                  <TableHead className="text-amber-200/50">Offer</TableHead>
+                  <TableHead className="text-amber-200/50">Code</TableHead>
+                  <TableHead className="text-amber-200/50">Type</TableHead>
+                  <TableHead className="text-amber-200/50">Value</TableHead>
+                  <TableHead className="text-amber-200/50">Used</TableHead>
+                  <TableHead className="text-amber-200/50">Status</TableHead>
+                  <TableHead className="text-amber-200/50">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {offers.map((o: any) => (
+                  <TableRow key={o.id} className="border-amber-900/10 hover:bg-amber-900/5">
+                    <TableCell>
+                      <p className="text-sm font-medium text-amber-100">{o.title}</p>
+                      <p className="text-xs text-amber-200/40">{o.description}</p>
+                    </TableCell>
+                    <TableCell><code className="rounded bg-amber-600/10 px-2 py-0.5 text-xs text-amber-400">{o.code}</code></TableCell>
+                    <TableCell className="text-sm text-amber-200/60 capitalize">{o.type}</TableCell>
+                    <TableCell className="text-sm font-medium text-amber-100">{o.type === 'percentage' ? `${o.value}%` : fmt(o.value)}</TableCell>
+                    <TableCell className="text-sm text-amber-200/60">{o.usedCount || 0}{o.usageLimit ? ` / ${o.usageLimit}` : ''}</TableCell>
+                    <TableCell>
+                      <Switch checked={o.isActive} onCheckedChange={() => toggleMut.mutate({ id: o.id, isActive: !o.isActive })} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-amber-200/40 hover:text-amber-400" onClick={() => openEdit(o)}>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-400/40 hover:text-red-400" onClick={() => setShowDelete(o)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {offers.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-amber-200/40">No offers yet</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════
+   11b. CATEGORIES TAB
+   ════════════════════════════════════════════ */
+function CategoriesTab({ token, onMutate }: { token: string | null; onMutate: () => void }) {
+  const qc = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+  const [editCategory, setEditCategory] = useState<any>(null)
+  const [showDelete, setShowDelete] = useState<any>(null)
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin-categories'],
+    queryFn: () => apiFetch('/api/admin/categories', undefined, token),
+  })
+
+  const categories = data?.categories || []
+
+  const [form, setForm] = useState({ name: '', description: '', image: '' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (editCategory) {
+      setForm({ name: editCategory.name || '', description: editCategory.description || '', image: editCategory.image || '' })
+    }
+  }, [editCategory])
+
+  const createMut = useMutation({
+    mutationFn: (body: any) => apiFetch('/api/admin/categories', { method: 'POST', body: JSON.stringify(body) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-categories'] }); onMutate(); setShowForm(false); setEditCategory(null) },
+  })
+
+  const updateMut = useMutation({
+    mutationFn: (body: any) => apiFetch('/api/admin/categories', { method: 'PUT', body: JSON.stringify(body) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-categories'] }); onMutate(); setShowForm(false); setEditCategory(null) },
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => apiFetch('/api/admin/categories', { method: 'DELETE', body: JSON.stringify({ id }) }, token),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-categories'] }); onMutate(); setShowDelete(null) },
+  })
+
+  const handleSave = async () => {
+    if (!form.name) { setError('Category name is required'); return }
+    setSaving(true); setError('')
+    try {
+      if (editCategory) {
+        updateMut.mutate({ id: editCategory.id, ...form })
+      } else {
+        createMut.mutate(form)
+      }
+    } catch (e: any) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  const resetForm = () => { setForm({ name: '', description: '', image: '' }); setEditCategory(null) }
+  const isPending = createMut.isPending || updateMut.isPending
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <Button className={btnPrimary} onClick={() => { resetForm(); setShowForm(true) }}>
+          <Plus className="mr-1 h-4 w-4" /> Add Category
+        </Button>
+      </div>
+
+      <Dialog open={showForm} onOpenChange={(v) => { setShowForm(v); if (!v) resetForm() }}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto border-amber-900/30 bg-stone-950 sm:max-w-lg">
+          <DialogHeader><DialogTitle className="text-amber-100">{editCategory ? 'Edit Category' : 'Add Category'}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
+            <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Category name" /></div>
+            <div><Label className={lblCls}>Description</Label><Textarea className={`${inputCls} mt-1`} rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Category description" /></div>
+            <div><Label className={lblCls}>Image URL</Label><Input className={`${inputCls} mt-1`} value={form.image} onChange={e => setForm(f => ({ ...f, image: e.target.value }))} placeholder="https://..." /></div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" className={btnOutline} onClick={() => { setShowForm(false); resetForm() }}>Cancel</Button>
+              <Button className={btnPrimary} onClick={handleSave} disabled={isPending}>{isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{editCategory ? 'Update' : 'Create'}</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!showDelete} onOpenChange={() => setShowDelete(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader><DialogTitle className="text-amber-100">Delete Category</DialogTitle></DialogHeader>
+          <p className="text-sm text-amber-200/60">Are you sure you want to delete <strong className="text-amber-100">{showDelete?.name}</strong>?</p>
+          {showDelete?.productCount > 0 && (
+            <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">Cannot delete: {showDelete.productCount} product(s) in this category.</div>
+          )}
+          <div className="flex justify-end gap-2 pt-4">
+            <Button variant="outline" className={btnOutline} onClick={() => setShowDelete(null)}>Cancel</Button>
+            <Button className="bg-red-600 text-white hover:bg-red-500" onClick={() => deleteMut.mutate(showDelete.id)} disabled={deleteMut.isPending || showDelete?.productCount > 0}>
+              {deleteMut.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {categories.map((c: any) => (
+            <Card key={c.id} className={cardCls}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    {c.image ? <img src={c.image} alt={c.name} className="h-10 w-10 rounded-lg object-cover" /> : (
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600/10">
+                        <FolderOpen className="h-5 w-5 text-amber-400" />
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-sm font-medium text-amber-100">{c.name}</p>
+                      <p className="text-xs text-amber-200/40">{c.slug}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-amber-200/40 hover:text-amber-400" onClick={() => { setEditCategory(c); setShowForm(true) }}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-400/40 hover:text-red-400" onClick={() => setShowDelete(c)}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+                {c.description && <p className="mt-2 text-xs text-amber-200/50 line-clamp-2">{c.description}</p>}
+                <div className="mt-3 flex items-center gap-2">
+                  <Badge className="bg-amber-600/20 text-amber-400 border-amber-600/30">{c.productCount || 0} products</Badge>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {categories.length === 0 && (
+            <div className="col-span-full py-8 text-center text-amber-200/40">No categories found</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════
+   13b. REPORTS TAB
+   ════════════════════════════════════════════ */
+function ReportsTab({ token }: { token: string | null }) {
+  const { data: ordersData, isLoading: ordersLoading } = useQuery({
+    queryKey: ['admin-orders-report'],
+    queryFn: () => apiFetch('/api/admin/orders?limit=200', undefined, token),
+  })
+
+  const { data: productsData, isLoading: productsLoading } = useQuery({
+    queryKey: ['admin-products-report'],
+    queryFn: () => apiFetch('/api/admin/products?limit=200', undefined, token),
+  })
+
+  const orders: any[] = ordersData?.orders || []
+  const products: any[] = productsData?.products || []
+
+  // ── Revenue Summary ──
+  const totalRevenue = orders.reduce((s: number, o: any) => s + (o.total || 0), 0)
+  const totalOrders = orders.length
+  const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+  const refundedAmount = orders
+    .filter((o: any) => o.paymentStatus === 'refunded')
+    .reduce((s: number, o: any) => s + (o.refundAmount || o.total || 0), 0)
+
+  // ── Orders by Status Breakdown ──
+  const statusCounts: Record<string, number> = {}
+  orders.forEach((o: any) => { statusCounts[o.status] = (statusCounts[o.status] || 0) + 1 })
+
+  // ── Orders per Day — Last 7 Days (div-based bar chart) ──
+  const last7Days: { date: string; count: number }[] = []
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+    const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    const dayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+    const count = orders.filter((o: any) => {
+      const od = new Date(o.createdAt)
+      return od >= dayStart && od < dayEnd
+    }).length
+    last7Days.push({ date: label, count })
+  }
+  const maxOrdersPerDay = Math.max(...last7Days.map(d => d.count), 1)
+
+  // ── Top 10 Products by Popularity ──
+  // Build a map of product sales from order items
+  const productSales: Record<string, { name: string; sold: number; rating: number; stock: number }> = {}
+  orders.forEach((o: any) => {
+    (o.items || []).forEach((item: any) => {
+      const key = item.productId || item.name
+      if (!productSales[key]) productSales[key] = { name: item.name || key, sold: 0, rating: 0, stock: 0 }
+      productSales[key].sold += item.quantity || 0
+    })
+  })
+  // Merge product info (rating, stock)
+  products.forEach((p: any) => {
+    if (productSales[p.id]) {
+      productSales[p.id].rating = p.rating || 0
+      productSales[p.id].stock = p.stock || 0
+    } else {
+      // Products with no sales but with rating (show as "0 sold" with rating)
+      productSales[p.id] = { name: p.name, sold: 0, rating: p.rating || 0, stock: p.stock || 0 }
+    }
+  })
+  // Sort by sold (popularity), tiebreak by rating
+  const topProducts = Object.values(productSales)
+    .sort((a, b) => b.sold - a.sold || b.rating - a.rating)
+    .slice(0, 10)
+
+  // ── CSV Export ──
+  const exportCSV = () => {
+    const rows = [['Date', 'Order #', 'Customer', 'Status', 'Total', 'Payment Status']]
+    orders.forEach((o: any) => {
+      rows.push([
+        new Date(o.createdAt).toLocaleDateString(),
+        o.orderNumber,
+        `${o.firstName} ${o.lastName}`,
+        o.status,
+        String(o.total),
+        o.paymentStatus,
+      ])
+    })
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'orders-report.csv'; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (ordersLoading || productsLoading) {
+    return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-amber-400" /></div>
+  }
+
+  const summaryCards = [
+    { title: 'Total Revenue', value: fmt(totalRevenue), icon: DollarSign, color: 'text-green-400', bg: 'bg-green-600/10' },
+    { title: 'Avg Order Value', value: fmt(avgOrderValue), icon: TrendingUp, color: 'text-blue-400', bg: 'bg-blue-600/10' },
+    { title: 'Total Orders', value: totalOrders.toString(), icon: ShoppingBag, color: 'text-purple-400', bg: 'bg-purple-600/10' },
+    { title: 'Refunded Amount', value: fmt(refundedAmount), icon: ArrowDownRight, color: 'text-red-400', bg: 'bg-red-600/10' },
+  ]
+
+  return (
+    <div className="space-y-6">
+      {/* Export */}
+      <div className="flex items-center gap-3">
+        <Button className={btnOutline} onClick={exportCSV}>
+          <Download className="mr-1 h-4 w-4" /> Export CSV
+        </Button>
+      </div>
+
+      {/* Revenue Summary Cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {summaryCards.map((c, i) => (
+          <motion.div key={c.title} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}>
+            <Card className={cardCls}>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${c.bg}`}>
+                    <c.icon className={`h-5 w-5 ${c.color}`} />
+                  </div>
+                  <div>
+                    <p className={lblCls}>{c.title}</p>
+                    <p className={`text-lg font-bold ${c.title === 'Refunded Amount' ? 'text-red-400' : 'text-amber-100'}`}>{c.value}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Orders by Status — Colored Badges */}
       <Card className={cardCls}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold text-amber-100">Orders by Status</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4">
+            {Object.entries(statusCounts).map(([status, count]) => (
+              <div key={status} className="flex items-center gap-2">
+                <Badge className={statusColor(status)}>{status}</Badge>
+                <span className="text-sm font-medium text-amber-100">{count}</span>
+              </div>
+            ))}
+            {Object.keys(statusCounts).length === 0 && (
+              <p className="text-sm text-amber-200/40">No orders yet</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Orders per Day — Last 7 Days (div-based bar chart) */}
+      <Card className={cardCls}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold text-amber-100 flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-amber-400" /> Orders per Day (Last 7 Days)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-end gap-3" style={{ height: 200 }}>
+            {last7Days.map((d, i) => (
+              <div key={i} className="flex flex-1 flex-col items-center gap-1">
+                <span className="text-xs font-medium text-amber-200/60">{d.count}</span>
+                <div
+                  className="w-full rounded-t-md bg-amber-600/80 transition-all duration-300 hover:bg-amber-500"
+                  style={{ height: `${Math.max((d.count / maxOrdersPerDay) * 100, d.count > 0 ? 8 : 2)}%` }}
+                />
+                <span className="mt-1 text-[10px] text-amber-200/40 leading-tight">{d.date}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Top 10 Products by Popularity */}
+      <Card className={cardCls}>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold text-amber-100">Top 10 Products by Popularity</CardTitle>
+        </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow className="border-amber-900/20 hover:bg-transparent">
-                <TableHead className="text-amber-200/50">Offer</TableHead>
-                <TableHead className="text-amber-200/50">Code</TableHead>
-                <TableHead className="text-amber-200/50">Type</TableHead>
-                <TableHead className="text-amber-200/50">Value</TableHead>
-                <TableHead className="text-amber-200/50">Used</TableHead>
-                <TableHead className="text-amber-200/50">Status</TableHead>
-                <TableHead className="text-amber-200/50">Actions</TableHead>
+                <TableHead className="text-amber-200/50">#</TableHead>
+                <TableHead className="text-amber-200/50">Product</TableHead>
+                <TableHead className="text-amber-200/50">Qty Sold</TableHead>
+                <TableHead className="text-amber-200/50">Rating</TableHead>
+                <TableHead className="text-amber-200/50">Stock Left</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {offers.map((o: any) => (
-                <TableRow key={o.id} className="border-amber-900/10 hover:bg-amber-900/5">
-                  <TableCell>
-                    <p className="text-sm font-medium text-amber-100">{o.title}</p>
-                    <p className="text-xs text-amber-200/40">{o.description}</p>
-                  </TableCell>
-                  <TableCell><code className="rounded bg-amber-600/10 px-2 py-0.5 text-xs text-amber-400">{o.code}</code></TableCell>
-                  <TableCell className="text-sm text-amber-200/60 capitalize">{o.type}</TableCell>
-                  <TableCell className="text-sm font-medium text-amber-100">{o.type === 'percentage' ? `${o.value}%` : fmt(o.value)}</TableCell>
-                  <TableCell className="text-sm text-amber-200/60">{o.usedCount || 0}{o.usageLimit ? ` / ${o.usageLimit}` : ''}</TableCell>
-                  <TableCell>
-                    <Switch checked={o.isActive} onCheckedChange={() => toggleActive(o.id)} />
-                  </TableCell>
-                  <TableCell>
-                    <Button size="sm" variant="ghost" className="h-7 text-amber-200/40 hover:text-amber-400" onClick={() => { setEditOffer(o); setShowForm(true) }}>
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
+              {topProducts.map((p: any, i: number) => (
+                <TableRow key={i} className="border-amber-900/10 hover:bg-amber-900/5">
+                  <TableCell className="text-xs text-amber-200/40">{i + 1}</TableCell>
+                  <TableCell className="text-sm text-amber-100">{p.name}</TableCell>
+                  <TableCell className="text-sm text-amber-200/60">{p.sold}</TableCell>
+                  <TableCell className="text-sm text-amber-200/60">{p.rating > 0 ? `⭐ ${p.rating.toFixed(1)}` : '—'}</TableCell>
+                  <TableCell className="text-sm text-amber-200/60">{p.stock}</TableCell>
                 </TableRow>
               ))}
-              {offers.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-amber-200/40">No offers yet</TableCell></TableRow>}
+              {topProducts.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-amber-200/40">No product data available</TableCell></TableRow>}
             </TableBody>
           </Table>
         </CardContent>

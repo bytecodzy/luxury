@@ -29,6 +29,13 @@ export async function GET(request: NextRequest) {
     const source = searchParams.get('source') // 'own' or 'external'
     const isExternalParam = searchParams.get('isExternal') // 'true', 'false', or 'all'
 
+    // Gift-centric filters
+    const occasion = searchParams.get('occasion')
+    const recipient = searchParams.get('recipient')
+    const relationship = searchParams.get('relationship')
+    const priceMin = searchParams.get('priceMin')
+    const priceMax = searchParams.get('priceMax')
+
     const skip = (page - 1) * limit
 
     // Build where clause
@@ -45,10 +52,13 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    if (minPrice || maxPrice) {
+    // Price range (legacy + new params)
+    const effectiveMinPrice = priceMin || minPrice
+    const effectiveMaxPrice = priceMax || maxPrice
+    if (effectiveMinPrice || effectiveMaxPrice) {
       where.price = {}
-      if (minPrice) (where.price as Record<string, unknown>).gte = parseFloat(minPrice)
-      if (maxPrice) (where.price as Record<string, unknown>).lte = parseFloat(maxPrice)
+      if (effectiveMinPrice) (where.price as Record<string, unknown>).gte = parseFloat(effectiveMinPrice)
+      if (effectiveMaxPrice) (where.price as Record<string, unknown>).lte = parseFloat(effectiveMaxPrice)
     }
 
     // Platform filter: filter by platform slug
@@ -70,6 +80,21 @@ export async function GET(request: NextRequest) {
       where.isExternal = false
     }
     // 'all' or undefined = no filter (show both)
+
+    // Occasion filter: products whose occasions JSON array contains the value
+    if (occasion) {
+      where.occasions = { contains: occasion }
+    }
+
+    // Recipient filter: products whose recipientTypes JSON array contains the value
+    if (recipient) {
+      where.recipientTypes = { contains: recipient }
+    }
+
+    // Relationship filter: products whose relationships JSON array contains the value
+    if (relationship) {
+      where.relationships = { contains: relationship }
+    }
 
     // Build orderBy
     let orderBy: Record<string, unknown> | Array<Record<string, unknown>> = { createdAt: 'desc' }
@@ -119,6 +144,10 @@ export async function GET(request: NextRequest) {
       reviewCount: p.reviewCount,
       featured: p.featured,
       tags: JSON.parse(p.tags || '[]') as string[],
+      occasions: JSON.parse(p.occasions || '[]') as string[],
+      recipientTypes: JSON.parse(p.recipientTypes || '[]') as string[],
+      relationships: JSON.parse(p.relationships || '[]') as string[],
+      deliveryEstimate: p.deliveryEstimate || null,
       // Platform aggregation fields
       platform: p.platform,
       isExternal: p.isExternal,

@@ -6,8 +6,29 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Loader2, CreditCard, Lock } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  ArrowLeft,
+  Loader2,
+  CreditCard,
+  Lock,
+  Truck,
+  Gift,
+  Tag,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle,
+  XCircle,
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useState } from 'react';
 
 interface CheckoutResponse {
@@ -18,13 +39,74 @@ interface CheckoutResponse {
   createdAt: string;
 }
 
+interface CouponResult {
+  valid: boolean;
+  discount?: number;
+  error?: string;
+  offer?: {
+    id: string;
+    title: string;
+    code: string;
+    type: string;
+    value: number;
+  };
+}
+
+const DELIVERY_OPTIONS = [
+  {
+    id: 'standard',
+    label: 'Standard Delivery',
+    description: 'Free over $500',
+    price: 0,
+    estimatedDays: '5-7 business days',
+  },
+  {
+    id: 'express',
+    label: 'Express Delivery',
+    description: '$25',
+    price: 25,
+    estimatedDays: '2-3 business days',
+  },
+  {
+    id: 'same-day',
+    label: 'Same-Day Delivery',
+    description: '$50',
+    price: 50,
+    estimatedDays: '1 business day',
+  },
+];
+
+const GIFT_WRAP_STYLES = [
+  { value: 'classic', label: 'Classic', description: 'Elegant gold wrapping with ribbon' },
+  { value: 'premium', label: 'Premium', description: 'Luxury velvet box with silk ribbon' },
+  { value: 'luxury', label: 'Luxury', description: 'Hand-crafted wooden box with wax seal' },
+];
+
 export function CheckoutView() {
   const { cartItems, setView, setLastOrderId } = useStore();
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const shipping = subtotal > 500 ? 0 : 15;
+
+  const [deliveryType, setDeliveryType] = useState('standard');
+  const [giftWrapping, setGiftWrapping] = useState(false);
+  const [giftWrapStyle, setGiftWrapStyle] = useState('classic');
+  const [greetingMessage, setGreetingMessage] = useState('');
+  const [hidePrice, setHidePrice] = useState(false);
+  const [giftOptionsOpen, setGiftOptionsOpen] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const [discount, setDiscount] = useState(0);
+  const [couponResult, setCouponResult] = useState<CouponResult | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+
+  const selectedDelivery = DELIVERY_OPTIONS.find((d) => d.id === deliveryType) || DELIVERY_OPTIONS[0];
+  const deliveryCost = selectedDelivery.price;
+
+  // Shipping is based on delivery type
+  const shipping = deliveryType === 'standard'
+    ? (subtotal > 500 ? 0 : 15)
+    : deliveryCost;
   const tax = subtotal * 0.08;
-  const total = subtotal + shipping + tax;
+  const total = subtotal + shipping + tax - discount;
 
   const [form, setForm] = useState({
     email: '',
@@ -60,6 +142,37 @@ export function CheckoutView() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleApplyCoupon = async () => {
+    if (!couponCode.trim()) return;
+    setCouponLoading(true);
+    setCouponResult(null);
+    try {
+      const res = await fetch('/api/offers/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: couponCode.trim(), subtotal }),
+      });
+      const data: CouponResult = await res.json();
+      setCouponResult(data);
+      if (data.valid && data.discount) {
+        setDiscount(data.discount);
+      } else {
+        setDiscount(0);
+      }
+    } catch {
+      setCouponResult({ valid: false, error: 'Failed to validate coupon' });
+      setDiscount(0);
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setCouponCode('');
+    setCouponResult(null);
+    setDiscount(0);
+  };
+
   const mutation = useMutation({
     mutationFn: async (): Promise<CheckoutResponse> => {
       const res = await fetch('/api/checkout', {
@@ -78,6 +191,13 @@ export function CheckoutView() {
           shipping: shipping.toFixed(2),
           tax: tax.toFixed(2),
           total: total.toFixed(2),
+          deliveryType,
+          giftWrapping,
+          giftWrapStyle: giftWrapping ? giftWrapStyle : undefined,
+          greetingMessage: greetingMessage || undefined,
+          hidePrice,
+          couponCode: couponResult?.valid ? couponCode : undefined,
+          discount,
         }),
       });
       if (!res.ok) {
@@ -249,6 +369,224 @@ export function CheckoutView() {
               </div>
             </div>
 
+            {/* Delivery Type */}
+            <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
+              <div className="flex items-center gap-2">
+                <Truck className="h-5 w-5 text-amber-400" />
+                <h3 className="text-lg font-semibold text-amber-100">Delivery Type</h3>
+              </div>
+              <div className="mt-4 space-y-3">
+                {DELIVERY_OPTIONS.map((option) => (
+                  <label
+                    key={option.id}
+                    className={`flex cursor-pointer items-center justify-between rounded-lg border p-4 transition-all ${
+                      deliveryType === option.id
+                        ? 'border-amber-500/50 bg-amber-900/20'
+                        : 'border-amber-900/20 bg-stone-800/30 hover:border-amber-900/40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="radio"
+                        name="deliveryType"
+                        value={option.id}
+                        checked={deliveryType === option.id}
+                        onChange={() => setDeliveryType(option.id)}
+                        className="h-4 w-4 accent-amber-600"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-amber-100">{option.label}</p>
+                        <p className="text-xs text-amber-200/40">{option.estimatedDays}</p>
+                      </div>
+                    </div>
+                    <span className={`text-sm font-semibold ${
+                      option.id === 'standard' && subtotal > 500
+                        ? 'text-emerald-400'
+                        : option.price > 0
+                        ? 'text-amber-200/60'
+                        : 'text-amber-200/60'
+                    }`}>
+                      {option.id === 'standard'
+                        ? (subtotal > 500 ? 'Free' : '$15')
+                        : `$${option.price}`}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Gift Options */}
+            <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
+              <button
+                type="button"
+                onClick={() => setGiftOptionsOpen(!giftOptionsOpen)}
+                className="flex w-full items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <Gift className="h-5 w-5 text-amber-400" />
+                  <h3 className="text-lg font-semibold text-amber-100">Gift Options</h3>
+                </div>
+                {giftOptionsOpen ? (
+                  <ChevronUp className="h-5 w-5 text-amber-200/40" />
+                ) : (
+                  <ChevronDown className="h-5 w-5 text-amber-200/40" />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {giftOptionsOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-4 space-y-4">
+                      {/* Gift Wrapping Toggle */}
+                      <div className="flex items-center gap-3">
+                        <Checkbox
+                          id="giftWrapping"
+                          checked={giftWrapping}
+                          onCheckedChange={(checked) => {
+                            setGiftWrapping(checked as boolean);
+                            if (!checked) setGiftWrapStyle('classic');
+                          }}
+                          className="border-amber-600 data-[state=checked]:bg-amber-600 data-[state=checked]:border-amber-600"
+                        />
+                        <Label htmlFor="giftWrapping" className="text-sm text-amber-100">
+                          Gift Wrapping
+                        </Label>
+                      </div>
+
+                      {/* Gift Wrap Style */}
+                      {giftWrapping && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="pl-7"
+                        >
+                          <Label className="text-xs text-amber-200/50">Wrap Style</Label>
+                          <Select value={giftWrapStyle} onValueChange={setGiftWrapStyle}>
+                            <SelectTrigger className="mt-1 w-full border-amber-900/40 bg-stone-800/50 text-amber-50">
+                              <SelectValue placeholder="Select style" />
+                            </SelectTrigger>
+                            <SelectContent className="border-amber-900/30 bg-stone-900">
+                              {GIFT_WRAP_STYLES.map((style) => (
+                                <SelectItem key={style.value} value={style.value}>
+                                  <div>
+                                    <span className="text-amber-100">{style.label}</span>
+                                    <span className="ml-2 text-xs text-amber-200/40">— {style.description}</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </motion.div>
+                      )}
+
+                      {/* Greeting Message */}
+                      <div className="pl-7">
+                        <Label htmlFor="greetingMessage" className="text-xs text-amber-200/50">
+                          Greeting Message (optional)
+                        </Label>
+                        <Textarea
+                          id="greetingMessage"
+                          value={greetingMessage}
+                          onChange={(e) => {
+                            if (e.target.value.length <= 200) {
+                              setGreetingMessage(e.target.value);
+                            }
+                          }}
+                          placeholder="Write a personal message..."
+                          rows={3}
+                          className="mt-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20 resize-none"
+                        />
+                        <p className="mt-1 text-xs text-amber-200/30">
+                          {greetingMessage.length}/200 characters
+                        </p>
+                      </div>
+
+                      {/* Hide Price Toggle */}
+                      <div className="flex items-center gap-3 pl-7">
+                        <Checkbox
+                          id="hidePrice"
+                          checked={hidePrice}
+                          onCheckedChange={(checked) => setHidePrice(checked as boolean)}
+                          className="border-amber-600 data-[state=checked]:bg-amber-600 data-[state=checked]:border-amber-600"
+                        />
+                        <Label htmlFor="hidePrice" className="text-sm text-amber-100">
+                          Hide price on gift receipt
+                        </Label>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Coupon Code */}
+            <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
+              <div className="flex items-center gap-2">
+                <Tag className="h-5 w-5 text-amber-400" />
+                <h3 className="text-lg font-semibold text-amber-100">Coupon Code</h3>
+              </div>
+              <div className="mt-4">
+                {couponResult?.valid ? (
+                  <div className="flex items-center justify-between rounded-lg border border-emerald-600/30 bg-emerald-900/20 p-3">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-emerald-400" />
+                      <div>
+                        <p className="text-sm font-medium text-emerald-300">
+                          {couponResult.offer?.title || couponCode}
+                        </p>
+                        <p className="text-xs text-emerald-400/60">
+                          Discount: ${discount.toFixed(2)} off
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleRemoveCoupon}
+                      className="text-amber-200/40 hover:text-red-400"
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Input
+                      value={couponCode}
+                      onChange={(e) => {
+                        setCouponCode(e.target.value);
+                        if (couponResult && !couponResult.valid) setCouponResult(null);
+                      }}
+                      placeholder="Enter coupon code"
+                      className="flex-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleApplyCoupon}
+                      disabled={couponLoading || !couponCode.trim()}
+                      className="border-amber-900/40 text-amber-200/60 hover:bg-amber-900/20 hover:text-amber-400"
+                    >
+                      {couponLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        'Apply'
+                      )}
+                    </Button>
+                  </div>
+                )}
+                {couponResult && !couponResult.valid && (
+                  <p className="mt-2 text-xs text-red-400">{couponResult.error}</p>
+                )}
+              </div>
+            </div>
+
             {/* Payment */}
             <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
               <div className="flex items-center gap-2">
@@ -322,7 +660,7 @@ export function CheckoutView() {
                 <span className="text-amber-100">${subtotal.toLocaleString()}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-amber-200/50">Shipping</span>
+                <span className="text-amber-200/50">Shipping ({selectedDelivery.label})</span>
                 <span className="text-amber-100">
                   {shipping === 0 ? (
                     <span className="text-emerald-400">Free</span>
@@ -331,10 +669,22 @@ export function CheckoutView() {
                   )}
                 </span>
               </div>
+              {discount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-amber-200/50">Discount</span>
+                  <span className="text-emerald-400">-${discount.toFixed(2)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-amber-200/50">Tax</span>
                 <span className="text-amber-100">${tax.toFixed(2)}</span>
               </div>
+              {giftWrapping && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-amber-200/50">Gift Wrapping ({giftWrapStyle})</span>
+                  <span className="text-amber-400 text-xs">Included</span>
+                </div>
+              )}
               <Separator className="bg-amber-900/30" />
               <div className="flex justify-between">
                 <span className="font-semibold text-amber-100">Total</span>

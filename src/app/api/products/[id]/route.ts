@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
+// Platform slug to logo URL mapping
+const PLATFORM_LOGO_MAP: Record<string, string> = {
+  myntra: '/logos/myntra.png',
+  nykaa: '/logos/nykaa.png',
+  amazon: '/logos/amazon.png',
+  flipkart: '/logos/flipkart.png',
+  caratlane: '/logos/caratlane.png',
+  tanishq: '/logos/tanishq.png',
+  bluestone: '/logos/bluestone.png',
+  voylla: '/logos/voylla.png',
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -36,6 +48,13 @@ export async function GET(
       reviewCount: product.reviewCount,
       featured: product.featured,
       tags: JSON.parse(product.tags || '[]') as string[],
+      deliveryEstimate: product.deliveryEstimate || '3-5 business days',
+      // Platform fields
+      platform: product.platform,
+      isExternal: product.isExternal,
+      sourceUrl: product.sourceUrl,
+      affiliateUrl: product.affiliateUrl,
+      platformLogo: product.platform ? (PLATFORM_LOGO_MAP[product.platform] || null) : null,
     }
 
     return NextResponse.json({ product: transformed })

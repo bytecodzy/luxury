@@ -82,15 +82,61 @@ const PLATFORM_OPTIONS = [
   { value: 'voylla', label: 'Voylla' },
 ];
 
+const OCCASION_OPTIONS = [
+  { value: 'birthday', label: 'Birthday' },
+  { value: 'anniversary', label: 'Anniversary' },
+  { value: 'wedding', label: 'Wedding' },
+  { value: 'diwali', label: 'Diwali' },
+  { value: 'christmas', label: 'Christmas' },
+  { value: 'valentines', label: "Valentine's" },
+  { value: 'housewarming', label: 'Housewarming' },
+  { value: 'thank-you', label: 'Thank You' },
+  { value: 'congratulations', label: 'Congratulations' },
+  { value: 'just-because', label: 'Just Because' },
+];
+
+const RECIPIENT_OPTIONS = [
+  { value: 'him', label: 'Him' },
+  { value: 'her', label: 'Her' },
+  { value: 'couple', label: 'Couple' },
+  { value: 'kids', label: 'Kids' },
+  { value: 'parents', label: 'Parents' },
+  { value: 'friend', label: 'Friend' },
+  { value: 'colleague', label: 'Colleague' },
+];
+
+const RELATIONSHIP_OPTIONS = [
+  { value: 'spouse', label: 'Spouse/Partner' },
+  { value: 'parent', label: 'Parent' },
+  { value: 'sibling', label: 'Sibling' },
+  { value: 'friend', label: 'Friend' },
+  { value: 'colleague', label: 'Colleague' },
+  { value: 'boss', label: 'Boss' },
+];
+
+const PRICE_RANGE_OPTIONS = [
+  { value: 'under-50', label: 'Under $50', min: 0, max: 50 },
+  { value: '50-100', label: '$50 - $100', min: 50, max: 100 },
+  { value: '100-250', label: '$100 - $250', min: 100, max: 250 },
+  { value: '250-500', label: '$250 - $500', min: 250, max: 500 },
+  { value: '500+', label: '$500+', min: 500, max: null },
+];
+
 export function ProductGrid() {
   const { searchQuery, selectedCategory, setCategory } = useStore();
   const [sort, setSort] = useState('featured');
   const [showFilters, setShowFilters] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [platformFilter, setPlatformFilter] = useState<string>('all');
+  const [occasionFilter, setOccasionFilter] = useState<string>('all');
+  const [recipientFilter, setRecipientFilter] = useState<string>('all');
+  const [relationshipFilter, setRelationshipFilter] = useState<string>('all');
+  const [priceRangeFilter, setPriceRangeFilter] = useState<string>('all');
+
+  const priceRange = PRICE_RANGE_OPTIONS.find((o) => o.value === priceRangeFilter);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', searchQuery, selectedCategory, sort, sourceFilter, platformFilter],
+    queryKey: ['products', searchQuery, selectedCategory, sort, sourceFilter, platformFilter, occasionFilter, recipientFilter, relationshipFilter, priceRangeFilter],
     queryFn: () => {
       const params = new URLSearchParams();
       if (searchQuery) params.set('search', searchQuery);
@@ -99,6 +145,13 @@ export function ProductGrid() {
       params.set('limit', '50');
       if (sourceFilter && sourceFilter !== 'all') params.set('source', sourceFilter);
       if (platformFilter && platformFilter !== 'all') params.set('platform', platformFilter);
+      if (occasionFilter && occasionFilter !== 'all') params.set('occasion', occasionFilter);
+      if (recipientFilter && recipientFilter !== 'all') params.set('recipient', recipientFilter);
+      if (relationshipFilter && relationshipFilter !== 'all') params.set('relationship', relationshipFilter);
+      if (priceRange) {
+        params.set('priceMin', String(priceRange.min));
+        if (priceRange.max !== null) params.set('priceMax', String(priceRange.max));
+      }
       return fetch(`/api/products?${params}`).then((r) => r.json());
     },
   });
@@ -123,9 +176,13 @@ export function ProductGrid() {
     useStore.getState().setSearch('');
     setSourceFilter('all');
     setPlatformFilter('all');
+    setOccasionFilter('all');
+    setRecipientFilter('all');
+    setRelationshipFilter('all');
+    setPriceRangeFilter('all');
   };
 
-  const hasActiveFilters = selectedCategory || searchQuery || sourceFilter !== 'all' || platformFilter !== 'all';
+  const hasActiveFilters = selectedCategory || searchQuery || sourceFilter !== 'all' || platformFilter !== 'all' || occasionFilter !== 'all' || recipientFilter !== 'all' || relationshipFilter !== 'all' || priceRangeFilter !== 'all';
 
   return (
     <section className="py-8">
@@ -191,13 +248,77 @@ export function ProductGrid() {
         <div className="flex items-center gap-2">
           <span className="text-xs text-amber-200/40">Source:</span>
           <Select value={sourceFilter} onValueChange={setSourceFilter}>
-            <SelectTrigger className="w-[160px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
+            <SelectTrigger className="w-[140px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
               <SelectValue placeholder="All Sources" />
             </SelectTrigger>
             <SelectContent className="border-amber-900/30 bg-stone-900">
               <SelectItem value="all">All Products</SelectItem>
               <SelectItem value="own">Our Collection</SelectItem>
               <SelectItem value="external">External Platforms</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Occasion Filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-amber-200/40">Occasion:</span>
+          <Select value={occasionFilter} onValueChange={setOccasionFilter}>
+            <SelectTrigger className="w-[140px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
+              <SelectValue placeholder="All Occasions" />
+            </SelectTrigger>
+            <SelectContent className="border-amber-900/30 bg-stone-900">
+              <SelectItem value="all">All Occasions</SelectItem>
+              {OCCASION_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Recipient Filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-amber-200/40">Recipient:</span>
+          <Select value={recipientFilter} onValueChange={setRecipientFilter}>
+            <SelectTrigger className="w-[120px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
+              <SelectValue placeholder="All" />
+            </SelectTrigger>
+            <SelectContent className="border-amber-900/30 bg-stone-900">
+              <SelectItem value="all">All Recipients</SelectItem>
+              {RECIPIENT_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Relationship Filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-amber-200/40">For:</span>
+          <Select value={relationshipFilter} onValueChange={setRelationshipFilter}>
+            <SelectTrigger className="w-[130px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
+              <SelectValue placeholder="Any" />
+            </SelectTrigger>
+            <SelectContent className="border-amber-900/30 bg-stone-900">
+              <SelectItem value="all">Any Relationship</SelectItem>
+              {RELATIONSHIP_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Price Range Filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-amber-200/40">Price:</span>
+          <Select value={priceRangeFilter} onValueChange={setPriceRangeFilter}>
+            <SelectTrigger className="w-[130px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
+              <SelectValue placeholder="Any Price" />
+            </SelectTrigger>
+            <SelectContent className="border-amber-900/30 bg-stone-900">
+              <SelectItem value="all">Any Price</SelectItem>
+              {PRICE_RANGE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

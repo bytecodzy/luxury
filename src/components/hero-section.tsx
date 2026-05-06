@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
 import Image from 'next/image';
 import { useMemo } from 'react';
+import { Gift, Sparkles } from 'lucide-react';
 
 export function HeroSection() {
-  const { setView, setCategory } = useStore();
+  const { setView, setCategory, toggleGiftBuilder } = useStore();
 
   // Generate stable golden particles configuration
   const particles = useMemo(() => [
@@ -202,6 +203,16 @@ export function HeroSection() {
               className="border-amber-700/50 text-amber-200 hover:bg-amber-900/20 hover:text-amber-100"
             >
               Explore Collection
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={toggleGiftBuilder}
+              className="border-amber-500/50 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-100 hover:border-amber-500/60 gap-2"
+            >
+              <Gift className="h-4 w-4" />
+              Gift Builder
+              <Sparkles className="h-3 w-3 text-amber-400/70" />
             </Button>
           </motion.div>
         </motion.div>

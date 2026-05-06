@@ -15,6 +15,13 @@ export async function POST(request: NextRequest) {
       country,
       phone,
       items,
+      deliveryType = 'standard',
+      giftWrapping = false,
+      giftWrapStyle,
+      greetingMessage,
+      hidePrice = false,
+      couponCode,
+      discount = 0,
     } = body
 
     // Validate required fields
@@ -75,10 +82,67 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Calculate shipping, tax, and total
-    const shipping = subtotal > 500 ? 0 : 15
+    // Validate coupon if provided
+    let validatedDiscount = 0
+    if (couponCode) {
+      const offer = await db.offer.findUnique({
+        where: { code: couponCode.toUpperCase() },
+      })
+
+      if (offer && offer.isActive) {
+        const now = new Date()
+        const isValid = offer.validFrom <= now && offer.validTo >= now
+          && (offer.usageLimit === null || offer.usedCount < offer.usageLimit)
+          && (offer.minOrder === null || subtotal >= offer.minOrder)
+
+        if (isValid) {
+          // Calculate discount
+          if (offer.type === 'percentage') {
+            validatedDiscount = (subtotal * offer.value) / 100
+            if (offer.maxDiscount !== null) {
+              validatedDiscount = Math.min(validatedDiscount, offer.maxDiscount)
+            }
+          } else if (offer.type === 'fixed') {
+            validatedDiscount = offer.value
+          }
+          validatedDiscount = Math.min(validatedDiscount, subtotal)
+          validatedDiscount = Math.round(validatedDiscount * 100) / 100
+
+          // Increment used count
+          await db.offer.update({
+            where: { id: offer.id },
+            data: { usedCount: { increment: 1 } },
+          })
+        }
+      }
+    } else if (discount > 0) {
+      validatedDiscount = Math.min(discount, subtotal)
+    }
+
+    // Calculate shipping based on delivery type
+    let shipping: number
+    if (deliveryType === 'express') {
+      shipping = 25
+    } else if (deliveryType === 'same-day') {
+      shipping = 50
+    } else {
+      // Standard: free over $500, otherwise $15
+      shipping = subtotal > 500 ? 0 : 15
+    }
+
     const tax = Math.round(subtotal * 0.08 * 100) / 100
-    const total = subtotal + shipping + tax
+    const total = subtotal + shipping + tax - validatedDiscount
+
+    // Calculate estimated delivery based on delivery type
+    const now = new Date()
+    let estimatedDelivery: Date | undefined
+    if (deliveryType === 'same-day') {
+      estimatedDelivery = new Date(now.getTime() + 1 * 24 * 60 * 60 * 1000)
+    } else if (deliveryType === 'express') {
+      estimatedDelivery = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000)
+    } else {
+      estimatedDelivery = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000)
+    }
 
     // Generate order number
     const timestamp = Date.now()
@@ -101,10 +165,18 @@ export async function POST(request: NextRequest) {
         subtotal,
         shipping,
         tax,
+        discount: validatedDiscount,
         total,
         status: 'pending',
         paymentMethod: 'card',
         paymentStatus: 'paid',
+        deliveryType,
+        giftWrapping,
+        giftWrapStyle: giftWrapping ? (giftWrapStyle || null) : null,
+        greetingMessage: greetingMessage || null,
+        hidePrice,
+        couponCode: couponCode || null,
+        estimatedDelivery,
         items: {
           create: orderItemsData,
         },
