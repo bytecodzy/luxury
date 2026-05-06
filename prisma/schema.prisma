@@ -32,6 +32,7 @@ model Product {
   categoryId     String
   category       Category  @relation(fields: [categoryId], references: [id])
   stock          Int       @default(0)
+  stockStatus    String    @default("in_stock") // in_stock, low_stock, out_of_stock, preorder
   reorderLevel   Int       @default(5)
   rating         Float     @default(0)
   reviewCount    Int       @default(0)
@@ -61,6 +62,36 @@ model Product {
   campaigns      CorporateCampaign[]
   recipients     CampaignRecipient[]
   reviews        Review[]
+  variants       ProductVariant[]
+  productImages  ProductImage[]
+}
+
+model ProductVariant {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name        String   // e.g. "Red / Large", "Gold Plated"
+  sku         String?  // variant-specific SKU
+  price       Float    // variant price (overrides product price if > 0)
+  compareAtPrice Float? // variant compare-at price
+  stock       Int      @default(0)
+  stockStatus String   @default("in_stock") // in_stock, low_stock, out_of_stock, preorder
+  attributes  String   // JSON: {"color": "Red", "size": "Large", "material": "Gold Plated"}
+  image       String?  // variant-specific image URL
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  sort      Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 }
 
 model PlatformIntegration {
@@ -102,20 +133,26 @@ model SyncLog {
 }
 
 model Cart {
-  id        String     @id @default(cuid())
-  sessionId String     @unique
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  items     CartItem[]
+  id          String     @id @default(cuid())
+  sessionId   String     @unique
+  userId      String?    // link to authenticated user
+  couponCode  String?    // applied coupon code
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  items       CartItem[]
 }
 
 model CartItem {
-  id        String  @id @default(cuid())
-  cartId    String
-  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product @relation(fields: [productId], references: [id])
-  quantity  Int     @default(1)
+  id             String  @id @default(cuid())
+  cartId         String
+  cart           Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product @relation(fields: [productId], references: [id])
+  quantity       Int     @default(1)
+  variantId      String? // selected product variant
+  giftWrapping   Boolean @default(false)
+  greetingMessage String?
+  hidePrice      Boolean @default(false)
 }
 
 model Order {
@@ -138,7 +175,9 @@ model Order {
   status          String      @default("pending") // pending, processing, shipped, delivered, cancelled
   paymentMethod   String      @default("card")
   paymentStatus   String      @default("pending") // pending, paid, failed, refunded
-  deliveryType    String      @default("standard") // standard, express, same-day
+  deliveryType    String      @default("standard") // standard, express, same-day, scheduled
+  scheduledDate   DateTime?   // for scheduled delivery
+  occasion        String?     // birthday, anniversary, wedding, etc.
   giftWrapping    Boolean     @default(false)
   giftWrapStyle   String?     // classic, premium, luxury
   greetingMessage String?
@@ -152,22 +191,71 @@ model Order {
   refundStatus    String?     // pending, processed, denied
   refundAmount    Float?
   refundedAt      DateTime?
+  userId          String?     // link to authenticated user
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   items           OrderItem[]
   reviews         Review[]
+  trackingEvents  OrderTrackingEvent[]
+  paymentSessions PaymentSession[]
+  invoice         OrderInvoice?
 }
 
 model OrderItem {
-  id        String  @id @default(cuid())
-  orderId   String
-  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product @relation(fields: [productId], references: [id])
-  name      String
-  price     Float
-  quantity  Int
-  image     String?
+  id          String  @id @default(cuid())
+  orderId     String
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product @relation(fields: [productId], references: [id])
+  name        String
+  price       Float
+  quantity    Int
+  image       String?
+  variantId   String?  // selected variant
+  variantName String?  // variant display name
+  giftWrapping Boolean @default(false)
+  greetingMessage String?
+  hidePrice   Boolean @default(false)
+}
+
+model OrderTrackingEvent {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status      String   // pending, confirmed, processing, shipped, out_for_delivery, delivered, cancelled
+  description String?  // e.g. "Package picked up from warehouse"
+  location    String?  // e.g. "Mumbai Hub"
+  timestamp   DateTime @default(now())
+}
+
+model PaymentSession {
+  id              String   @id @default(cuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider        String   // razorpay, stripe
+  providerSessionId String? // Razorpay order ID or Stripe session ID
+  amount          Float
+  currency        String   @default("INR")
+  status          String   @default("created") // created, attempted, paid, failed, expired
+  paymentId       String?  // provider payment ID after success
+  method          String?  // card, upi, netbanking, wallet
+  metadata        String?  // JSON: additional provider-specific data
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model OrderInvoice {
+  id            String   @id @default(cuid())
+  orderId       String   @unique
+  order         Order    @relation(fields: [orderId], references: [id])
+  invoiceNumber String   @unique
+  amount        Float
+  tax           Float    @default(0)
+  total         Float
+  status        String   @default("generated") // generated, sent, paid
+  pdfUrl        String?  // generated PDF URL
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 model User {
@@ -176,6 +264,8 @@ model User {
   name               String
   password           String?
   role               String            @default("user") // admin, user, agent, team, corporate
+  adminRole          String?           // super_admin, product_manager, order_manager, inventory_manager, finance_manager, support_agent, corporate_account_manager
+  corporateRole      String?           // corporate_admin, finance_user, campaign_manager
   avatar             String?
   phone              String?
   isActive           Boolean           @default(true)
@@ -183,21 +273,28 @@ model User {
   phoneVerified      Boolean           @default(false)
   twoFactorSecret    String?
   twoFactorEnabled   Boolean           @default(false)
-  approvalStatus     String            @default("pending") // pending, approved, rejected
+  twoFactorRequired  Boolean           @default(false) // admin-enforced 2FA
+  approvalStatus     String            @default("pending") // pending, approved, rejected, suspended
   socialProvider     String?           // google, facebook, linkedin
   socialId           String?
   resetToken         String?
   resetTokenExpiry   DateTime?
+  otpCode            String?           // OTP for phone login / forgot password
+  otpExpiry          DateTime?         // OTP expiry time
   emailVerifyToken   String?
   emailVerifyExpiry  DateTime?
   phoneVerifyCode    String?
   phoneVerifyExpiry  DateTime?
+  lastLoginAt        DateTime?
+  lastLoginIp        String?
+  lastLoginDevice    String?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
   permissions        UserPermission[]
   sessions           Session[]
   wishlistItems      WishlistItem[]
   corporateAccount   CorporateAccount?
+  auditLogs          AuditLog[]
 }
 
 model UserPermission {
@@ -211,12 +308,29 @@ model UserPermission {
 }
 
 model Session {
-  id        String   @id @default(cuid())
-  token     String   @unique
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
-  expiresAt DateTime
+  id           String   @id @default(cuid())
+  token        String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress    String?
+  userAgent    String?
+  deviceInfo   String?  // parsed device info
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  lastActivity DateTime @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String   // login, logout, password_change, role_change, approval_change, mfa_setup, etc.
+  entity      String?  // user, order, product, corporate, campaign, etc.
+  entityId    String?  // ID of the affected entity
+  details     String?  // JSON: additional details
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
 }
 
 model Vendor {
@@ -394,6 +508,11 @@ model CorporateAccount {
   website         String?
   gstNumber       String?
   panNumber       String?
+  billingAddress  String?   // structured billing address
+  billingCity     String?
+  billingState    String?
+  billingZipCode  String?
+  billingCountry  String    @default("India")
   contactName     String
   contactEmail    String
   contactPhone    String?
@@ -405,7 +524,7 @@ model CorporateAccount {
   logo            String?
   userId          String    @unique  // linked User account
   user            User      @relation(fields: [userId], references: [id])
-  approvalStatus  String    @default("pending") // pending, approved, rejected
+  approvalStatus  String    @default("pending") // pending, approved, rejected, suspended
   isActive        Boolean   @default(true)
   creditLimit     Float     @default(0)
   creditUsed      Float     @default(0)
@@ -415,6 +534,24 @@ model CorporateAccount {
   updatedAt       DateTime  @updatedAt
   campaigns       CorporateCampaign[]
   branding        CorporateBranding?
+  members         CorporateMember[]
+}
+
+model CorporateMember {
+  id            String          @id @default(cuid())
+  corporateId   String
+  corporate     CorporateAccount @relation(fields: [corporateId], references: [id], onDelete: Cascade)
+  userId        String?         // linked User account (nullable until they accept invite)
+  email         String
+  name          String?
+  role          String          @default("campaign_manager") // corporate_admin, finance_user, campaign_manager
+  status        String          @default("pending") // pending, active, suspended
+  invitedAt     DateTime        @default(now())
+  joinedAt      DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([corporateId, email])
 }
 
 model CorporateBranding {

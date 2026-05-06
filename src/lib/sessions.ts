@@ -27,13 +27,21 @@ export interface SessionUser {
   twoFactorEnabled: boolean;
 }
 
+export interface SessionMetadata {
+  ipAddress?: string;
+  userAgent?: string;
+  deviceInfo?: string;
+}
+
 /**
  * Create a new session for a user.
  * Persists to DB and in-memory cache.
+ * Optionally tracks IP address, user agent, and device info.
  */
 export async function createSession(
   token: string,
-  user: SessionUser
+  user: SessionUser,
+  metadata?: SessionMetadata
 ): Promise<void> {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
@@ -42,6 +50,9 @@ export async function createSession(
       token,
       userId: user.id,
       expiresAt,
+      ipAddress: metadata?.ipAddress || null,
+      userAgent: metadata?.userAgent || null,
+      deviceInfo: metadata?.deviceInfo || null,
     },
   });
 

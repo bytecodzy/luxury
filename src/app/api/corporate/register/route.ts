@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { db } from '@/lib/db';
-import { createSession, generateToken, getSessionAsync } from '@/lib/sessions';
+import { validatePassword } from '@/lib/password-validator';
 
 function slugify(text: string): string {
   return text
@@ -35,6 +36,13 @@ export async function POST(request: NextRequest) {
       contactName,
       contactPhone,
       gstNumber,
+      panNumber,
+      // Billing address fields
+      billingAddress,
+      billingCity,
+      billingState,
+      billingZipCode,
+      billingCountry,
     } = body;
 
     // Validate required fields
@@ -54,10 +62,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate password length
-    if (password.length < 6) {
+    // Validate password strength
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
       return NextResponse.json(
-        { error: 'Password must be at least 6 characters long' },
+        { error: 'Password does not meet security requirements', passwordErrors: passwordValidation.errors },
         { status: 400 }
       );
     }
@@ -88,6 +97,10 @@ export async function POST(request: NextRequest) {
     const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // Generate email verification token
+    const emailVerifyToken = crypto.randomBytes(32).toString('hex');
+    const emailVerifyExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
     // Create User with role "corporate" and CorporateAccount in a transaction
     const result = await db.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -96,11 +109,14 @@ export async function POST(request: NextRequest) {
           name: name.trim(),
           password: hashedPassword,
           role: 'corporate',
+          corporateRole: 'corporate_admin',
           approvalStatus: 'pending',
           isActive: true,
           emailVerified: false,
           phoneVerified: false,
           twoFactorEnabled: false,
+          emailVerifyToken,
+          emailVerifyExpiry,
         },
       });
 
@@ -111,12 +127,34 @@ export async function POST(request: NextRequest) {
           industry: industry?.trim() || null,
           website: website?.trim() || null,
           gstNumber: gstNumber?.trim() || null,
+          panNumber: panNumber?.trim() || null,
+          // Billing address
+          billingAddress: billingAddress?.trim() || null,
+          billingCity: billingCity?.trim() || null,
+          billingState: billingState?.trim() || null,
+          billingZipCode: billingZipCode?.trim() || null,
+          billingCountry: billingCountry?.trim() || 'India',
+          // Contact info
           contactName: contactName.trim(),
           contactEmail: email.toLowerCase().trim(),
           contactPhone: contactPhone?.trim() || null,
           userId: user.id,
           approvalStatus: 'pending',
           isActive: true,
+        },
+      });
+
+      // Create the corporate account creator as a CorporateMember with role "corporate_admin"
+      await tx.corporateMember.create({
+        data: {
+          corporateId: corporateAccount.id,
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          role: 'corporate_admin',
+          status: 'active',
+          invitedAt: new Date(),
+          joinedAt: new Date(),
         },
       });
 
@@ -128,13 +166,15 @@ export async function POST(request: NextRequest) {
     // Since corporate accounts need approval, return pending message
     return NextResponse.json(
       {
-        message: 'Registration successful. Your corporate account is pending admin approval.',
+        message: 'Registration successful. Your corporate account is pending admin approval. Please verify your email.',
         user: {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
+          corporateRole: user.corporateRole,
           approvalStatus: user.approvalStatus,
+          emailVerified: user.emailVerified,
           createdAt: user.createdAt,
         },
         corporateAccount: {
@@ -142,8 +182,15 @@ export async function POST(request: NextRequest) {
           companyName: corporateAccount.companyName,
           slug: corporateAccount.slug,
           approvalStatus: corporateAccount.approvalStatus,
+          billingAddress: corporateAccount.billingAddress,
+          billingCity: corporateAccount.billingCity,
+          billingState: corporateAccount.billingState,
+          billingZipCode: corporateAccount.billingZipCode,
+          billingCountry: corporateAccount.billingCountry,
         },
         approvalStatus: 'pending',
+        // Return the verification token for MVP testing
+        emailVerifyToken,
       },
       { status: 201 }
     );

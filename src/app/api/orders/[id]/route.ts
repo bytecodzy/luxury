@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAdmin } from '@/lib/auth-helper'
 
-// GET /api/orders/[id] - Get single order detail with items
+// GET /api/orders/[id] - Get single order detail with items, tracking, payments, invoice
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -21,6 +21,13 @@ export async function GET(
           },
         },
         reviews: true,
+        trackingEvents: {
+          orderBy: { timestamp: 'asc' },
+        },
+        paymentSessions: {
+          orderBy: { createdAt: 'desc' },
+        },
+        invoice: true,
       },
     })
 
@@ -48,8 +55,8 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
-    const { error } = await requireAdmin(request)
-    if (error) return error
+    const { error: authError } = await requireAdmin(request)
+    if (authError) return authError
 
     const body = await request.json()
     const { status, trackingNumber, trackingUrl, estimatedDelivery } = body
@@ -90,6 +97,59 @@ export async function PATCH(
         },
       },
     })
+
+    // Create a new OrderTrackingEvent when status is updated
+    if (status !== undefined && status !== order.status) {
+      const statusDescriptions: Record<string, string> = {
+        pending: 'Order status updated to pending',
+        processing: 'Order is now being processed',
+        shipped: 'Order has been shipped',
+        delivered: 'Order has been delivered',
+        cancelled: 'Order has been cancelled',
+      }
+
+      const locationMap: Record<string, string> = {
+        pending: 'System',
+        processing: 'Warehouse',
+        shipped: 'Shipping Partner',
+        delivered: 'Destination',
+        cancelled: 'System',
+      }
+
+      await db.orderTrackingEvent.create({
+        data: {
+          orderId: id,
+          status,
+          description: statusDescriptions[status] || `Order status changed to ${status}`,
+          location: locationMap[status] || 'System',
+        },
+      })
+
+      // If status is shipped and tracking number provided, add a shipped event
+      if (status === 'shipped' && trackingNumber) {
+        await db.orderTrackingEvent.create({
+          data: {
+            orderId: id,
+            status: 'shipped',
+            description: `Package shipped with tracking number: ${trackingNumber}`,
+            location: 'Fulfillment Center',
+          },
+        })
+      }
+
+      // If delivered, update invoice status
+      if (status === 'delivered') {
+        const invoice = await db.orderInvoice.findUnique({
+          where: { orderId: id },
+        })
+        if (invoice && invoice.status !== 'paid') {
+          await db.orderInvoice.update({
+            where: { id: invoice.id },
+            data: { status: 'paid' },
+          })
+        }
+      }
+    }
 
     return NextResponse.json({ order: updatedOrder })
   } catch (err) {
@@ -171,6 +231,18 @@ export async function DELETE(
             },
           },
         },
+      },
+    })
+
+    // Create tracking event for cancellation
+    await db.orderTrackingEvent.create({
+      data: {
+        orderId: id,
+        status: 'cancelled',
+        description: reason
+          ? `Order cancelled. Reason: ${reason}`
+          : 'Order has been cancelled',
+        location: 'System',
       },
     })
 
