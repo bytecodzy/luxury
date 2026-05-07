@@ -1,6 +1,7 @@
 'use client';
 
 import { useStore } from '@/lib/store';
+import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
@@ -8,9 +9,11 @@ import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gi
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
+import { LocaleSwitcher, LocaleSwitcherMobile } from '@/components/locale-switcher';
 
 export function Header() {
   const { searchQuery, setSearch, setView, cartItems, setCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder } = useStore();
+  const { t } = useTranslation();
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -84,7 +87,7 @@ export function Header() {
               <Input
                 value={localSearch}
                 onChange={(e) => setLocalSearch(e.target.value)}
-                placeholder="Search luxury items..."
+                placeholder={t('common.searchPlaceholder')}
                 className="w-full border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
               />
               {localSearch && (
@@ -104,13 +107,16 @@ export function Header() {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
+            {/* Locale Switcher (Desktop) */}
+            <LocaleSwitcher />
+
             {/* Orders */}
             <Button
               variant="ghost"
               size="icon"
               onClick={() => setView('orders')}
               className="text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
-              aria-label="View orders"
+              aria-label={t('common.orders')}
             >
               <Package className="h-5 w-5" />
             </Button>
@@ -123,7 +129,7 @@ export function Header() {
               className="hidden sm:flex items-center gap-1.5 text-amber-300/80 hover:bg-amber-900/20 hover:text-amber-300 border border-amber-600/30 hover:border-amber-500/50"
             >
               <Gift className="h-4 w-4" />
-              <span className="text-xs font-medium">Gift Builder</span>
+              <span className="text-xs font-medium">{t('nav.giftBuilder')}</span>
               <Sparkles className="h-3 w-3 text-amber-400/60" />
             </Button>
 
@@ -149,7 +155,7 @@ export function Header() {
                   size="icon"
                   onClick={handleDashboard}
                   className="sm:hidden text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
-                  aria-label="My Dashboard"
+                  aria-label={t('common.myDashboard')}
                 >
                   <Shield className="h-5 w-5" />
                 </Button>
@@ -158,7 +164,7 @@ export function Header() {
                   size="icon"
                   onClick={() => { clearAuth(); setView('home') }}
                   className="text-amber-200/40 hover:bg-red-900/20 hover:text-red-400"
-                  aria-label="Sign out"
+                  aria-label={t('common.signOut')}
                 >
                   <LogOut className="h-4 w-4" />
                 </Button>
@@ -169,10 +175,10 @@ export function Header() {
                 size="default"
                 onClick={() => setAuthView('login')}
                 className="border-amber-600/50 bg-amber-900/20 text-amber-300 hover:bg-amber-600/30 hover:text-amber-100 hover:border-amber-500/60 gap-2 px-4 py-2 font-medium shadow-sm shadow-amber-900/20"
-                aria-label="Sign in"
+                aria-label={t('common.signIn')}
               >
                 <LogIn className="h-5 w-5" />
-                <span className="text-sm">Sign In</span>
+                <span className="text-sm">{t('common.signIn')}</span>
               </Button>
             )}
 
@@ -182,7 +188,7 @@ export function Header() {
               size="icon"
               onClick={() => setView('cart')}
               className="relative text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
-              aria-label="View cart"
+              aria-label={t('common.viewCart')}
             >
               <ShoppingCart className="h-5 w-5" />
               <AnimatePresence>
@@ -233,7 +239,7 @@ export function Header() {
                       <Input
                         value={localSearch}
                         onChange={(e) => setLocalSearch(e.target.value)}
-                        placeholder="Search luxury items..."
+                        placeholder={t('common.searchPlaceholder')}
                         className="w-full border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30"
                       />
                     </div>
@@ -248,7 +254,7 @@ export function Header() {
                     }}
                     className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
                   >
-                    Home
+                    {t('nav.home')}
                   </button>
                   {authUser ? (
                     <>
@@ -261,7 +267,7 @@ export function Header() {
                       >
                         <span className="flex items-center gap-2">
                           <User className="h-4 w-4" />
-                          My Dashboard ({authUser.role})
+                          {t('common.myDashboard')} ({authUser.role})
                         </span>
                       </button>
                       <button
@@ -274,7 +280,7 @@ export function Header() {
                       >
                         <span className="flex items-center gap-2">
                           <LogOut className="h-4 w-4" />
-                          Sign Out
+                          {t('common.signOut')}
                         </span>
                       </button>
                     </>
@@ -288,7 +294,7 @@ export function Header() {
                     >
                       <span className="flex items-center gap-2">
                         <LogIn className="h-5 w-5" />
-                        Sign In
+                        {t('common.signIn')}
                       </span>
                     </button>
                   )}
@@ -299,7 +305,7 @@ export function Header() {
                     }}
                     className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
                   >
-                    Cart ({totalItems})
+                    {t('common.cart')} ({totalItems})
                   </button>
                   <button
                     onClick={() => {
@@ -308,7 +314,7 @@ export function Header() {
                     }}
                     className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
                   >
-                    Orders
+                    {t('common.orders')}
                   </button>
                   <button
                     onClick={() => {
@@ -318,9 +324,12 @@ export function Header() {
                     className="rounded-md px-4 py-2 text-left text-amber-300/90 transition-colors hover:bg-amber-900/20 hover:text-amber-300 flex items-center gap-2"
                   >
                     <Gift className="h-4 w-4" />
-                    Gift Builder
+                    {t('nav.giftBuilder')}
                     <Sparkles className="h-3 w-3 text-amber-400/60" />
                   </button>
+
+                  {/* Mobile Locale Switcher */}
+                  <LocaleSwitcherMobile />
                 </div>
               </SheetContent>
             </Sheet>

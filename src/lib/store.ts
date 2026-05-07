@@ -17,6 +17,21 @@ export interface CartItem {
   quantity: number
 }
 
+export interface CurrencyInfo {
+  code: string
+  name: string
+  symbol: string
+  rate: number
+}
+
+interface GeoInfo {
+  country: string
+  countryName: string
+  currency: string
+  language: string
+  flagEmoji: string
+}
+
 interface AppState {
   view: View
   selectedProductId: string | null
@@ -30,6 +45,14 @@ interface AppState {
   authTwoFAStep: boolean
   authPendingUserId: string | null
   giftBuilderView: boolean
+
+  // Multi-currency & i18n
+  locale: string
+  currency: string
+  currencySymbol: string
+  currencyRates: Record<string, CurrencyInfo>
+  geoInfo: GeoInfo | null
+  geoDetected: boolean
 
   setView: (view: View) => void
   selectProduct: (productId: string) => void
@@ -46,6 +69,10 @@ interface AppState {
   setAuthTwoFAStep: (step: boolean) => void
   setAuthPendingUserId: (id: string | null) => void
   toggleGiftBuilder: () => void
+  setLocale: (locale: string) => void
+  setCurrency: (code: string) => void
+  setCurrencyRates: (rates: Record<string, CurrencyInfo>) => void
+  setGeoInfo: (info: GeoInfo) => void
 }
 
 function loadAuthFromStorage(): { user: AuthUser | null; token: string | null } {
@@ -62,9 +89,27 @@ function loadAuthFromStorage(): { user: AuthUser | null; token: string | null } 
   return { user: null, token: null }
 }
 
+function loadLocaleFromStorage(): string {
+  if (typeof window === 'undefined') return 'en'
+  try {
+    return localStorage.getItem('3boxes_locale') || 'en'
+  } catch {
+    return 'en'
+  }
+}
+
+function loadCurrencyFromStorage(): string {
+  if (typeof window === 'undefined') return 'INR'
+  try {
+    return localStorage.getItem('3boxes_currency') || 'INR'
+  } catch {
+    return 'INR'
+  }
+}
+
 const initialAuth = loadAuthFromStorage()
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   view: 'home',
   selectedProductId: null,
   searchQuery: '',
@@ -77,6 +122,14 @@ export const useStore = create<AppState>((set) => ({
   authTwoFAStep: false,
   authPendingUserId: null,
   giftBuilderView: false,
+
+  // Multi-currency & i18n
+  locale: typeof window !== 'undefined' ? loadLocaleFromStorage() : 'en',
+  currency: typeof window !== 'undefined' ? loadCurrencyFromStorage() : 'INR',
+  currencySymbol: '₹',
+  currencyRates: {},
+  geoInfo: null,
+  geoDetected: false,
 
   setView: (view) => set({ view }),
   selectProduct: (productId) => set({ selectedProductId: productId, view: 'product' }),
@@ -131,4 +184,54 @@ export const useStore = create<AppState>((set) => ({
   setAuthTwoFAStep: (step) => set({ authTwoFAStep: step }),
   setAuthPendingUserId: (id) => set({ authPendingUserId: id }),
   toggleGiftBuilder: () => set((state) => ({ giftBuilderView: !state.giftBuilderView })),
+  setLocale: (locale) => {
+    try {
+      localStorage.setItem('3boxes_locale', locale)
+    } catch {
+      // ignore storage errors
+    }
+    set({ locale })
+  },
+  setCurrency: (code) => {
+    const rates = get().currencyRates
+    const info = rates[code]
+    try {
+      localStorage.setItem('3boxes_currency', code)
+    } catch {
+      // ignore storage errors
+    }
+    set({ currency: code, currencySymbol: info?.symbol || '₹' })
+  },
+  setCurrencyRates: (rates) => {
+    const currentCode = get().currency
+    const info = rates[currentCode]
+    set({
+      currencyRates: rates,
+      currencySymbol: info?.symbol || '₹',
+    })
+  },
+  setGeoInfo: (info) => {
+    const currentCurrency = get().currency
+    // Only auto-set currency and language if user hasn't manually changed them
+    const storedCurrency = typeof window !== 'undefined' ? localStorage.getItem('3boxes_currency') : null
+    const storedLocale = typeof window !== 'undefined' ? localStorage.getItem('3boxes_locale') : null
+
+    const updates: Partial<AppState> = { geoInfo: info, geoDetected: true }
+
+    // Auto-detect currency from geo if user hasn't set one manually
+    if (!storedCurrency && info.currency) {
+      try { localStorage.setItem('3boxes_currency', info.currency) } catch {}
+      updates.currency = info.currency
+    }
+
+    // Auto-detect language from geo if user hasn't set one manually
+    // Default language is English for all locations, but suggest the local language
+    if (!storedLocale) {
+      // Keep English as default, but store detected language for suggestion
+      try { localStorage.setItem('3boxes_locale', 'en') } catch {}
+      updates.locale = 'en'
+    }
+
+    set(updates as AppState)
+  },
 }))

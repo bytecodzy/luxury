@@ -8,6 +8,7 @@ import {
   Ribbon, ToyBrick, Heart, HeartHandshake,
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useTranslation } from '@/hooks/useTranslation';
 
 interface Category {
   id: string;
@@ -46,6 +47,7 @@ const categoryColors: Record<string, string> = {
 
 export function CategoryGrid() {
   const { setCategory, setView } = useStore();
+  const { t } = useTranslation();
 
   const { data, isLoading } = useQuery<{ categories: Category[] }>({
     queryKey: ['categories'],
@@ -58,7 +60,7 @@ export function CategoryGrid() {
     return (
       <section className="py-12">
         <h2 className="mb-8 text-center text-2xl font-bold text-amber-100 sm:text-3xl">
-          Shop by Category
+          {t('categories.title')}
         </h2>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           {Array.from({ length: 10 }).map((_, i) => (
@@ -72,7 +74,7 @@ export function CategoryGrid() {
   return (
     <section className="py-12">
       <h2 className="mb-8 text-center text-2xl font-bold text-amber-100 sm:text-3xl">
-        Shop by Category
+        {t('categories.title')}
       </h2>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         {categories.map((cat, i) => (
@@ -92,7 +94,7 @@ export function CategoryGrid() {
             </div>
             <h3 className="text-sm font-semibold text-amber-100/90">{cat.name}</h3>
             <p className="mt-1 text-xs text-amber-200/40">
-              {cat.productCount} items
+              {cat.productCount} {t('categories.items')}
             </p>
           </motion.button>
         ))}

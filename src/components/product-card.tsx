@@ -2,6 +2,8 @@
 
 import { useStore } from '@/lib/store';
 import { useAffiliateClick } from '@/hooks/useAffiliateClick';
+import { useCurrency } from '@/lib/currency';
+import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { motion } from 'framer-motion';
@@ -81,6 +83,8 @@ const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
 export function ProductCard({ product }: { product: Product }) {
   const { selectProduct, addItem } = useStore();
   const { trackClick } = useAffiliateClick();
+  const { format } = useCurrency();
+  const { t } = useTranslation();
   const [isAdding, setIsAdding] = useState(false);
   const [imageError, setImageError] = useState(false);
 
@@ -158,12 +162,12 @@ export function ProductCard({ product }: { product: Product }) {
         <div className="absolute left-2 top-2 flex flex-col gap-1">
           {product.featured && (
             <span className="rounded bg-amber-600 px-2 py-0.5 text-[10px] font-bold uppercase text-stone-950">
-              Featured
+              {t('common.featured')}
             </span>
           )}
           {discount > 0 && (
             <span className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
-              -{discount}%
+              {t('products.discount', { percent: String(discount) })}
             </span>
           )}
         </div>
@@ -179,13 +183,13 @@ export function ProductCard({ product }: { product: Product }) {
         {/* Stock badge */}
         {product.stock <= 3 && product.stock > 0 && !isExternal && (
           <span className="absolute right-2 bottom-2 rounded bg-red-900/80 px-2 py-0.5 text-[10px] font-medium text-red-200">
-            Only {product.stock} left
+            {t('common.onlyLeft', { count: String(product.stock) })}
           </span>
         )}
         {product.stock === 0 && !isExternal && (
           <div className="absolute inset-0 flex items-center justify-center bg-stone-950/70">
             <span className="rounded bg-stone-900 px-4 py-2 text-sm font-bold text-amber-200/60">
-              Sold Out
+              {t('common.soldOut')}
             </span>
           </div>
         )}
@@ -231,11 +235,11 @@ export function ProductCard({ product }: { product: Product }) {
         {/* Price */}
         <div className="mt-2 flex items-baseline gap-2">
           <span className="text-lg font-bold text-amber-400">
-            ${product.price.toLocaleString()}
+            {format(product.price)}
           </span>
           {product.compareAtPrice && (
             <span className="text-xs text-amber-200/30 line-through">
-              ${product.compareAtPrice.toLocaleString()}
+              {format(product.compareAtPrice)}
             </span>
           )}
         </div>
@@ -245,7 +249,7 @@ export function ProductCard({ product }: { product: Product }) {
           <div className="mt-3 space-y-1.5">
             <p className={`text-[11px] font-medium ${PLATFORM_TEXT_COLORS[platformSlug] || 'text-emerald-400'} flex items-center gap-1`}>
               <ExternalLink className="h-3 w-3" />
-              Available on {platformName}
+              {t('products.availableOn', { platform: platformName })}
             </p>
             <Button
               onClick={handleShopOnPlatform}
@@ -253,7 +257,7 @@ export function ProductCard({ product }: { product: Product }) {
               size="sm"
             >
               <ExternalLink className="h-3.5 w-3.5" />
-              Shop on {platformName}
+              {t('products.shopOn', { platform: platformName })}
             </Button>
           </div>
         ) : (
@@ -268,7 +272,7 @@ export function ProductCard({ product }: { product: Product }) {
             size="sm"
           >
             <ShoppingCart className="mr-1.5 h-3.5 w-3.5" />
-            {isAdding ? 'Added!' : product.stock === 0 ? 'Sold Out' : 'Add to Cart'}
+            {isAdding ? t('common.added') : product.stock === 0 ? t('common.soldOut') : t('common.addToCart')}
           </Button>
         )}
       </div>

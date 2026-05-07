@@ -14,6 +14,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { X, SlidersHorizontal } from 'lucide-react';
 import { useState, useMemo } from 'react';
+import { useTranslation } from '@/hooks/useTranslation';
 
 interface Product {
   id: string;
@@ -124,6 +125,7 @@ const PRICE_RANGE_OPTIONS = [
 
 export function ProductGrid() {
   const { searchQuery, selectedCategory, setCategory } = useStore();
+  const { t } = useTranslation();
   const [sort, setSort] = useState('featured');
   const [showFilters, setShowFilters] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<string>('all');
@@ -191,14 +193,14 @@ export function ProductGrid() {
         <div>
           <h2 className="text-xl font-bold text-amber-100 sm:text-2xl">
             {searchQuery
-              ? `Results for "${searchQuery}"`
+              ? t('products.resultsFor', { query: searchQuery })
               : selectedCategory
               ? `${selectedCategory.replace('-', ' ').replace(/\b\w/g, (l) => l.toUpperCase())}`
-              : 'All Products'}
+              : t('products.allProducts')}
           </h2>
           {!isLoading && (
             <p className="mt-1 text-sm text-amber-200/40">
-              {data?.total ?? 0} items
+              {data?.total ?? 0} {t('categories.items')}
             </p>
           )}
         </div>
@@ -213,7 +215,7 @@ export function ProductGrid() {
               className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
             >
               <X className="mr-1 h-3 w-3" />
-              Clear
+              {t('common.clear')}
             </Button>
           )}
 
@@ -380,16 +382,16 @@ export function ProductGrid() {
       ) : products.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <span className="text-4xl">🔍</span>
-          <h3 className="mt-4 text-lg font-semibold text-amber-100">No products found</h3>
+          <h3 className="mt-4 text-lg font-semibold text-amber-100">{t('products.noProductsFound')}</h3>
           <p className="mt-2 text-sm text-amber-200/40">
-            Try adjusting your search or filter criteria
+            {t('products.tryAdjusting')}
           </p>
           <Button
             onClick={clearFilters}
             variant="outline"
             className="mt-4 border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
           >
-            View All Products
+            {t('products.viewAllProducts')}
           </Button>
         </div>
       ) : (

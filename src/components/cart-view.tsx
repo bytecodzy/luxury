@@ -1,6 +1,8 @@
 'use client';
 
 import { useStore } from '@/lib/store';
+import { useCurrency } from '@/lib/currency';
+import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,6 +10,8 @@ import { Minus, Plus, Trash2, ShoppingBag, ArrowLeft } from 'lucide-react';
 
 export function CartView() {
   const { cartItems, updateQuantity, removeItem, setView } = useStore();
+  const { format } = useCurrency();
+  const { t } = useTranslation();
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const shipping = subtotal > 500 ? 0 : 15;
@@ -26,25 +30,25 @@ export function CartView() {
         className="mb-6 text-amber-200/60 hover:bg-amber-900/20 hover:text-amber-400"
       >
         <ArrowLeft className="mr-2 h-4 w-4" />
-        Continue Shopping
+        {t('common.continueShopping')}
       </Button>
 
-      <h2 className="text-2xl font-bold text-amber-100">Shopping Cart</h2>
+      <h2 className="text-2xl font-bold text-amber-100">{t('cart.title')}</h2>
 
       {cartItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16">
           <ShoppingBag className="h-16 w-16 text-amber-700/30" />
           <h3 className="mt-4 text-lg font-semibold text-amber-100">
-            Your cart is empty
+            {t('cart.empty')}
           </h3>
           <p className="mt-2 text-sm text-amber-200/40">
-            Discover our luxury collection and add items to your cart
+            {t('cart.emptyDescription')}
           </p>
           <Button
             onClick={() => setView('home')}
             className="mt-6 bg-amber-600 text-stone-950 hover:bg-amber-500"
           >
-            Shop Now
+            {t('cart.shopNow')}
           </Button>
         </div>
       ) : (
@@ -80,7 +84,7 @@ export function CartView() {
                         {item.name}
                       </h4>
                       <p className="mt-1 text-sm text-amber-400">
-                        ${item.price.toLocaleString()}
+                        {format(item.price)}
                       </p>
                     </div>
 
@@ -110,7 +114,7 @@ export function CartView() {
 
                       <div className="flex items-center gap-3">
                         <span className="text-sm font-semibold text-amber-100">
-                          ${(item.price * item.quantity).toLocaleString()}
+                          {format(item.price * item.quantity)}
                         </span>
                         <button
                           onClick={() => removeItem(item.productId)}
@@ -128,44 +132,44 @@ export function CartView() {
 
           {/* Order Summary */}
           <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6 h-fit">
-            <h3 className="text-lg font-semibold text-amber-100">Order Summary</h3>
+            <h3 className="text-lg font-semibold text-amber-100">{t('cart.orderSummary')}</h3>
 
             <div className="mt-4 space-y-3">
               <div className="flex justify-between text-sm">
-                <span className="text-amber-200/50">Subtotal</span>
+                <span className="text-amber-200/50">{t('cart.subtotal')}</span>
                 <span className="text-amber-100">
-                  ${subtotal.toLocaleString()}
+                  {format(subtotal)}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-amber-200/50">Shipping</span>
+                <span className="text-amber-200/50">{t('cart.shipping')}</span>
                 <span className="text-amber-100">
                   {shipping === 0 ? (
-                    <span className="text-emerald-400">Free</span>
+                    <span className="text-emerald-400">{t('common.free')}</span>
                   ) : (
-                    `$${shipping}`
+                    format(shipping)
                   )}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-amber-200/50">Tax</span>
+                <span className="text-amber-200/50">{t('cart.tax')}</span>
                 <span className="text-amber-100">
-                  ${tax.toFixed(2)}
+                  {format(tax)}
                 </span>
               </div>
 
               <Separator className="bg-amber-900/30" />
 
               <div className="flex justify-between">
-                <span className="font-semibold text-amber-100">Total</span>
+                <span className="font-semibold text-amber-100">{t('cart.total')}</span>
                 <span className="text-lg font-bold text-amber-400">
-                  ${total.toFixed(2)}
+                  {format(total)}
                 </span>
               </div>
 
               {shipping === 0 && (
                 <p className="text-xs text-emerald-400/60">
-                  🎉 Free shipping on orders over $500
+                  🎉 {t('cart.freeShippingOver', { amount: format(500) })}
                 </p>
               )}
             </div>
@@ -175,7 +179,7 @@ export function CartView() {
               className="mt-6 w-full bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
               size="lg"
             >
-              Proceed to Checkout
+              {t('common.proceedToCheckout')}
             </Button>
           </div>
         </div>

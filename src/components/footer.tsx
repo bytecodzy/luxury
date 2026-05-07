@@ -1,8 +1,11 @@
 'use client';
 
 import Image from 'next/image';
+import { useTranslation } from '@/hooks/useTranslation';
 
 export function Footer() {
+  const { t } = useTranslation();
+
   return (
     <footer className="mt-auto border-t border-amber-900/30 bg-stone-950">
       <div className="container mx-auto px-4 py-8">
@@ -24,18 +27,18 @@ export function Footer() {
               </h3>
             </div>
             <p className="mt-2 text-sm text-amber-200/50">
-              Discover timeless elegance. Curated luxury goods from the world&apos;s finest makers.
+              {t('footer.description')}
             </p>
           </div>
 
           {/* Shop */}
           <div>
             <h4 className="text-sm font-semibold uppercase tracking-wider text-amber-400/80">
-              Shop
+              {t('footer.shop')}
             </h4>
             <ul className="mt-3 space-y-2">
-              {['Watches', 'Jewelry', 'Leather Goods', 'Fragrances', 'Fashion', 'Home & Living', 'Sarees', "Men's Shirts & T-Shirts"].map((item) => (
-                <li key={item}>
+              {[t('categories.watches'), t('categories.jewelry'), t('categories.leatherGoods'), t('categories.fragrances'), t('categories.fashion'), t('categories.homeLiving'), t('categories.sarees'), t('categories.fashion')].map((item, i) => (
+                <li key={i}>
                   <span className="text-sm text-amber-200/50 transition-colors hover:text-amber-400 cursor-pointer">
                     {item}
                   </span>
@@ -47,11 +50,11 @@ export function Footer() {
           {/* Company */}
           <div>
             <h4 className="text-sm font-semibold uppercase tracking-wider text-amber-400/80">
-              Company
+              {t('footer.company')}
             </h4>
             <ul className="mt-3 space-y-2">
-              {['About Us', 'Careers', 'Press', 'Sustainability'].map((item) => (
-                <li key={item}>
+              {[t('footer.aboutUs'), t('footer.careers'), t('footer.press'), t('footer.sustainability')].map((item, i) => (
+                <li key={i}>
                   <span className="text-sm text-amber-200/50 transition-colors hover:text-amber-400 cursor-pointer">
                     {item}
                   </span>
@@ -63,11 +66,11 @@ export function Footer() {
           {/* Support */}
           <div>
             <h4 className="text-sm font-semibold uppercase tracking-wider text-amber-400/80">
-              Support
+              {t('footer.support')}
             </h4>
             <ul className="mt-3 space-y-2">
-              {['Contact Us', 'Shipping & Returns', 'FAQ', 'Size Guide'].map((item) => (
-                <li key={item}>
+              {[t('footer.contactUs'), t('footer.shippingReturns'), t('footer.faq'), t('footer.sizeGuide')].map((item, i) => (
+                <li key={i}>
                   <span className="text-sm text-amber-200/50 transition-colors hover:text-amber-400 cursor-pointer">
                     {item}
                   </span>
@@ -80,10 +83,10 @@ export function Footer() {
         <div className="mt-8 border-t border-amber-900/20 pt-6">
           <div className="flex flex-col items-center justify-between gap-2 sm:flex-row">
             <p className="text-xs text-amber-200/40">
-              &copy; {new Date().getFullYear()} 3 BOXES LUXURY. All rights reserved.
+              &copy; {new Date().getFullYear()} 3 BOXES LUXURY. {t('footer.rights')}
             </p>
             <p className="text-xs text-amber-200/30">
-              Crafted with elegance &amp; precision
+              {t('footer.crafted')}
             </p>
           </div>
         </div>

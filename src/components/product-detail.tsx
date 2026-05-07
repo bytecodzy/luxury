@@ -1,6 +1,8 @@
 'use client';
 
 import { useStore } from '@/lib/store';
+import { useCurrency } from '@/lib/currency';
+import { useTranslation } from '@/hooks/useTranslation';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -767,7 +769,7 @@ function TryOnDialog({
                         </div>
                         <p className="text-[10px] font-medium text-amber-200/70 truncate">{s.name}</p>
                         <div className="flex items-center justify-between mt-0.5">
-                          <p className="text-[10px] font-bold text-amber-400">${s.price.toLocaleString()}</p>
+                          <p className="text-[10px] font-bold text-amber-400">{format(s.price)}</p>
                           <p className="text-[8px] text-amber-200/25">{s.category}</p>
                         </div>
                         <button
@@ -949,7 +951,7 @@ function TryOnDialog({
                         </div>
                         <p className="text-[8px] font-medium text-amber-200/60 truncate">{s.name}</p>
                         <div className="flex items-center justify-between mt-0.5">
-                          <p className="text-[8px] font-bold text-amber-400">${s.price.toLocaleString()}</p>
+                          <p className="text-[8px] font-bold text-amber-400">{format(s.price)}</p>
                         </div>
                         <button
                           className="mt-1 w-full rounded bg-amber-600/80 text-[8px] font-bold text-stone-950 py-0.5 hover:bg-amber-500 transition-colors"
@@ -996,6 +998,8 @@ function TryOnDialog({
 export function ProductDetail() {
   const { selectedProductId, setView, addItem, setCategory, authUser, authToken } = useStore();
   const { trackClick } = useAffiliateClick();
+  const { format } = useCurrency();
+  const { t } = useTranslation();
   const [quantity, setQuantity] = useState(1);
   const [selectedImage, setSelectedImage] = useState(0);
   const [isAdding, setIsAdding] = useState(false);
@@ -1286,16 +1290,16 @@ export function ProductDetail() {
           {/* Price */}
           <div className="flex items-baseline gap-3">
             <span className="text-3xl font-bold text-amber-400">
-              ${product.price.toLocaleString()}
+              {format(product.price)}
             </span>
             {product.compareAtPrice && (
               <span className="text-lg text-amber-200/30 line-through">
-                ${product.compareAtPrice.toLocaleString()}
+                {format(product.compareAtPrice)}
               </span>
             )}
             {discount > 0 && (
               <Badge variant="outline" className="border-emerald-600/50 text-emerald-400">
-                Save ${(product.compareAtPrice! - product.price).toLocaleString()}
+                {t('productDetail.save')} {format(product.compareAtPrice! - product.price)}
               </Badge>
             )}
           </div>
@@ -1455,7 +1459,7 @@ export function ProductDetail() {
                 ) : product.stock === 0 ? (
                   'Out of Stock'
                 ) : (
-                  `Add to Cart - $${(product.price * quantity).toLocaleString()}`
+                  `Add to Cart - ${format(product.price * quantity)}`
                 )}
               </Button>
               <Button

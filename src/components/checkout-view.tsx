@@ -1,6 +1,8 @@
 'use client';
 
 import { useStore } from '@/lib/store';
+import { useCurrency } from '@/lib/currency';
+import { useTranslation } from '@/hooks/useTranslation';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,38 +54,10 @@ interface CouponResult {
   };
 }
 
-const DELIVERY_OPTIONS = [
-  {
-    id: 'standard',
-    label: 'Standard Delivery',
-    description: 'Free over $500',
-    price: 0,
-    estimatedDays: '5-7 business days',
-  },
-  {
-    id: 'express',
-    label: 'Express Delivery',
-    description: '$25',
-    price: 25,
-    estimatedDays: '2-3 business days',
-  },
-  {
-    id: 'same-day',
-    label: 'Same-Day Delivery',
-    description: '$50',
-    price: 50,
-    estimatedDays: '1 business day',
-  },
-];
-
-const GIFT_WRAP_STYLES = [
-  { value: 'classic', label: 'Classic', description: 'Elegant gold wrapping with ribbon' },
-  { value: 'premium', label: 'Premium', description: 'Luxury velvet box with silk ribbon' },
-  { value: 'luxury', label: 'Luxury', description: 'Hand-crafted wooden box with wax seal' },
-];
-
 export function CheckoutView() {
   const { cartItems, setView, setLastOrderId } = useStore();
+  const { format } = useCurrency();
+  const { t } = useTranslation();
 
   const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
@@ -98,10 +72,39 @@ export function CheckoutView() {
   const [couponResult, setCouponResult] = useState<CouponResult | null>(null);
   const [couponLoading, setCouponLoading] = useState(false);
 
+  const DELIVERY_OPTIONS = [
+    {
+      id: 'standard',
+      label: t('checkout.standardDelivery'),
+      description: t('checkout.freeOverAmount', { amount: format(500) }),
+      price: 0,
+      estimatedDays: t('checkout.businessDays', { days: '5-7' }),
+    },
+    {
+      id: 'express',
+      label: t('checkout.expressDelivery'),
+      description: format(25),
+      price: 25,
+      estimatedDays: t('checkout.businessDays', { days: '2-3' }),
+    },
+    {
+      id: 'same-day',
+      label: t('checkout.sameDayDelivery'),
+      description: format(50),
+      price: 50,
+      estimatedDays: t('checkout.businessDays', { days: '1' }),
+    },
+  ];
+
+  const GIFT_WRAP_STYLES = [
+    { value: 'classic', label: t('checkout.classic'), description: t('checkout.classicDesc') },
+    { value: 'premium', label: t('checkout.premium'), description: t('checkout.premiumDesc') },
+    { value: 'luxury', label: t('checkout.luxury'), description: t('checkout.luxuryDesc') },
+  ];
+
   const selectedDelivery = DELIVERY_OPTIONS.find((d) => d.id === deliveryType) || DELIVERY_OPTIONS[0];
   const deliveryCost = selectedDelivery.price;
 
-  // Shipping is based on delivery type
   const shipping = deliveryType === 'standard'
     ? (subtotal > 500 ? 0 : 15)
     : deliveryCost;
@@ -234,12 +237,12 @@ export function CheckoutView() {
   if (cartItems.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16">
-        <p className="text-amber-200/60">Your cart is empty</p>
+        <p className="text-amber-200/60">{t('cart.empty')}</p>
         <Button
           onClick={() => setView('home')}
           className="mt-4 bg-amber-600 text-stone-950 hover:bg-amber-500"
         >
-          Shop Now
+          {t('cart.shopNow')}
         </Button>
       </div>
     );
@@ -257,10 +260,10 @@ export function CheckoutView() {
         className="mb-6 text-amber-200/60 hover:bg-amber-900/20 hover:text-amber-400"
       >
         <ArrowLeft className="mr-2 h-4 w-4" />
-        Back to Cart
+        {t('checkout.backToCart')}
       </Button>
 
-      <h2 className="text-2xl font-bold text-amber-100">Checkout</h2>
+      <h2 className="text-2xl font-bold text-amber-100">{t('checkout.title')}</h2>
 
       <form onSubmit={handleSubmit}>
         <div className="mt-6 grid gap-8 lg:grid-cols-3">
@@ -268,9 +271,9 @@ export function CheckoutView() {
           <div className="lg:col-span-2 space-y-8">
             {/* Contact */}
             <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
-              <h3 className="text-lg font-semibold text-amber-100">Contact Information</h3>
+              <h3 className="text-lg font-semibold text-amber-100">{t('checkout.contactInfo')}</h3>
               <div className="mt-4">
-                <Label htmlFor="email" className="text-amber-200/60">Email</Label>
+                <Label htmlFor="email" className="text-amber-200/60">{t('checkout.email')}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -285,10 +288,10 @@ export function CheckoutView() {
 
             {/* Shipping */}
             <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
-              <h3 className="text-lg font-semibold text-amber-100">Shipping Address</h3>
+              <h3 className="text-lg font-semibold text-amber-100">{t('checkout.shippingAddress')}</h3>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
-                  <Label htmlFor="firstName" className="text-amber-200/60">First Name</Label>
+                  <Label htmlFor="firstName" className="text-amber-200/60">{t('checkout.firstName')}</Label>
                   <Input
                     id="firstName"
                     value={form.firstName}
@@ -298,7 +301,7 @@ export function CheckoutView() {
                   {errors.firstName && <p className="mt-1 text-xs text-red-400">{errors.firstName}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="lastName" className="text-amber-200/60">Last Name</Label>
+                  <Label htmlFor="lastName" className="text-amber-200/60">{t('checkout.lastName')}</Label>
                   <Input
                     id="lastName"
                     value={form.lastName}
@@ -308,7 +311,7 @@ export function CheckoutView() {
                   {errors.lastName && <p className="mt-1 text-xs text-red-400">{errors.lastName}</p>}
                 </div>
                 <div className="sm:col-span-2">
-                  <Label htmlFor="address" className="text-amber-200/60">Address</Label>
+                  <Label htmlFor="address" className="text-amber-200/60">{t('checkout.address')}</Label>
                   <Input
                     id="address"
                     value={form.address}
@@ -318,7 +321,7 @@ export function CheckoutView() {
                   {errors.address && <p className="mt-1 text-xs text-red-400">{errors.address}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="city" className="text-amber-200/60">City</Label>
+                  <Label htmlFor="city" className="text-amber-200/60">{t('checkout.city')}</Label>
                   <Input
                     id="city"
                     value={form.city}
@@ -328,7 +331,7 @@ export function CheckoutView() {
                   {errors.city && <p className="mt-1 text-xs text-red-400">{errors.city}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="state" className="text-amber-200/60">State</Label>
+                  <Label htmlFor="state" className="text-amber-200/60">{t('checkout.state')}</Label>
                   <Input
                     id="state"
                     value={form.state}
@@ -338,7 +341,7 @@ export function CheckoutView() {
                   {errors.state && <p className="mt-1 text-xs text-red-400">{errors.state}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="zipCode" className="text-amber-200/60">ZIP Code</Label>
+                  <Label htmlFor="zipCode" className="text-amber-200/60">{t('checkout.zipCode')}</Label>
                   <Input
                     id="zipCode"
                     value={form.zipCode}
@@ -348,7 +351,7 @@ export function CheckoutView() {
                   {errors.zipCode && <p className="mt-1 text-xs text-red-400">{errors.zipCode}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="country" className="text-amber-200/60">Country</Label>
+                  <Label htmlFor="country" className="text-amber-200/60">{t('checkout.country')}</Label>
                   <Input
                     id="country"
                     value={form.country}
@@ -357,7 +360,7 @@ export function CheckoutView() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="phone" className="text-amber-200/60">Phone (optional)</Label>
+                  <Label htmlFor="phone" className="text-amber-200/60">{t('checkout.phone')}</Label>
                   <Input
                     id="phone"
                     type="tel"
@@ -373,7 +376,7 @@ export function CheckoutView() {
             <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
               <div className="flex items-center gap-2">
                 <Truck className="h-5 w-5 text-amber-400" />
-                <h3 className="text-lg font-semibold text-amber-100">Delivery Type</h3>
+                <h3 className="text-lg font-semibold text-amber-100">{t('checkout.deliveryType')}</h3>
               </div>
               <div className="mt-4 space-y-3">
                 {DELIVERY_OPTIONS.map((option) => (
@@ -402,13 +405,12 @@ export function CheckoutView() {
                     <span className={`text-sm font-semibold ${
                       option.id === 'standard' && subtotal > 500
                         ? 'text-emerald-400'
-                        : option.price > 0
-                        ? 'text-amber-200/60'
                         : 'text-amber-200/60'
                     }`}>
                       {option.id === 'standard'
-                        ? (subtotal > 500 ? 'Free' : '$15')
-                        : `$${option.price}`}
+                        ? (subtotal > 500 ? t('common.free') : format(15))
+                        : format(option.price)
+                      }
                     </span>
                   </label>
                 ))}
@@ -424,7 +426,7 @@ export function CheckoutView() {
               >
                 <div className="flex items-center gap-2">
                   <Gift className="h-5 w-5 text-amber-400" />
-                  <h3 className="text-lg font-semibold text-amber-100">Gift Options</h3>
+                  <h3 className="text-lg font-semibold text-amber-100">{t('checkout.giftOptions')}</h3>
                 </div>
                 {giftOptionsOpen ? (
                   <ChevronUp className="h-5 w-5 text-amber-200/40" />
@@ -455,7 +457,7 @@ export function CheckoutView() {
                           className="border-amber-600 data-[state=checked]:bg-amber-600 data-[state=checked]:border-amber-600"
                         />
                         <Label htmlFor="giftWrapping" className="text-sm text-amber-100">
-                          Gift Wrapping
+                          {t('checkout.giftWrapping')}
                         </Label>
                       </div>
 
@@ -466,7 +468,7 @@ export function CheckoutView() {
                           animate={{ opacity: 1, y: 0 }}
                           className="pl-7"
                         >
-                          <Label className="text-xs text-amber-200/50">Wrap Style</Label>
+                          <Label className="text-xs text-amber-200/50">{t('checkout.wrapStyle')}</Label>
                           <Select value={giftWrapStyle} onValueChange={setGiftWrapStyle}>
                             <SelectTrigger className="mt-1 w-full border-amber-900/40 bg-stone-800/50 text-amber-50">
                               <SelectValue placeholder="Select style" />
@@ -488,7 +490,7 @@ export function CheckoutView() {
                       {/* Greeting Message */}
                       <div className="pl-7">
                         <Label htmlFor="greetingMessage" className="text-xs text-amber-200/50">
-                          Greeting Message (optional)
+                          {t('checkout.greetingMessage')}
                         </Label>
                         <Textarea
                           id="greetingMessage"
@@ -498,12 +500,12 @@ export function CheckoutView() {
                               setGreetingMessage(e.target.value);
                             }
                           }}
-                          placeholder="Write a personal message..."
+                          placeholder={t('checkout.greetingPlaceholder')}
                           rows={3}
                           className="mt-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20 resize-none"
                         />
                         <p className="mt-1 text-xs text-amber-200/30">
-                          {greetingMessage.length}/200 characters
+                          {t('checkout.charactersCount', { count: String(greetingMessage.length) })}
                         </p>
                       </div>
 
@@ -516,7 +518,7 @@ export function CheckoutView() {
                           className="border-amber-600 data-[state=checked]:bg-amber-600 data-[state=checked]:border-amber-600"
                         />
                         <Label htmlFor="hidePrice" className="text-sm text-amber-100">
-                          Hide price on gift receipt
+                          {t('checkout.hidePrice')}
                         </Label>
                       </div>
                     </div>
@@ -529,7 +531,7 @@ export function CheckoutView() {
             <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
               <div className="flex items-center gap-2">
                 <Tag className="h-5 w-5 text-amber-400" />
-                <h3 className="text-lg font-semibold text-amber-100">Coupon Code</h3>
+                <h3 className="text-lg font-semibold text-amber-100">{t('checkout.couponCode')}</h3>
               </div>
               <div className="mt-4">
                 {couponResult?.valid ? (
@@ -541,7 +543,7 @@ export function CheckoutView() {
                           {couponResult.offer?.title || couponCode}
                         </p>
                         <p className="text-xs text-emerald-400/60">
-                          Discount: ${discount.toFixed(2)} off
+                          {t('checkout.discountLabel', { amount: format(discount) })}
                         </p>
                       </div>
                     </div>
@@ -563,7 +565,7 @@ export function CheckoutView() {
                         setCouponCode(e.target.value);
                         if (couponResult && !couponResult.valid) setCouponResult(null);
                       }}
-                      placeholder="Enter coupon code"
+                      placeholder={t('checkout.enterCode')}
                       className="flex-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20"
                     />
                     <Button
@@ -576,7 +578,7 @@ export function CheckoutView() {
                       {couponLoading ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        'Apply'
+                        t('checkout.apply')
                       )}
                     </Button>
                   </div>
@@ -591,15 +593,15 @@ export function CheckoutView() {
             <div className="rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
               <div className="flex items-center gap-2">
                 <CreditCard className="h-5 w-5 text-amber-400" />
-                <h3 className="text-lg font-semibold text-amber-100">Payment</h3>
+                <h3 className="text-lg font-semibold text-amber-100">{t('checkout.payment')}</h3>
               </div>
               <p className="mt-1 text-xs text-amber-200/30">
                 <Lock className="inline h-3 w-3 mr-1" />
-                This is a demo. No real payment will be processed.
+                {t('checkout.paymentNote')}
               </p>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div className="sm:col-span-2">
-                  <Label htmlFor="cardNumber" className="text-amber-200/60">Card Number</Label>
+                  <Label htmlFor="cardNumber" className="text-amber-200/60">{t('checkout.cardNumber')}</Label>
                   <Input
                     id="cardNumber"
                     value={form.cardNumber}
@@ -610,7 +612,7 @@ export function CheckoutView() {
                   {errors.cardNumber && <p className="mt-1 text-xs text-red-400">{errors.cardNumber}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="cardExpiry" className="text-amber-200/60">Expiry</Label>
+                  <Label htmlFor="cardExpiry" className="text-amber-200/60">{t('checkout.expiry')}</Label>
                   <Input
                     id="cardExpiry"
                     value={form.cardExpiry}
@@ -621,7 +623,7 @@ export function CheckoutView() {
                   {errors.cardExpiry && <p className="mt-1 text-xs text-red-400">{errors.cardExpiry}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="cardCvv" className="text-amber-200/60">CVV</Label>
+                  <Label htmlFor="cardCvv" className="text-amber-200/60">{t('checkout.cvv')}</Label>
                   <Input
                     id="cardCvv"
                     value={form.cardCvv}
@@ -637,7 +639,7 @@ export function CheckoutView() {
 
           {/* Order Summary Sidebar */}
           <div className="h-fit rounded-lg border border-amber-900/20 bg-stone-900/60 p-6">
-            <h3 className="text-lg font-semibold text-amber-100">Order Summary</h3>
+            <h3 className="text-lg font-semibold text-amber-100">{t('checkout.orderSummary')}</h3>
 
             <div className="mt-4 space-y-3 max-h-64 overflow-y-auto">
               {cartItems.map((item) => (
@@ -646,7 +648,7 @@ export function CheckoutView() {
                     {item.name} x{item.quantity}
                   </span>
                   <span className="text-amber-100 flex-shrink-0">
-                    ${(item.price * item.quantity).toLocaleString()}
+                    {format(item.price * item.quantity)}
                   </span>
                 </div>
               ))}
@@ -656,40 +658,40 @@ export function CheckoutView() {
 
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-amber-200/50">Subtotal</span>
-                <span className="text-amber-100">${subtotal.toLocaleString()}</span>
+                <span className="text-amber-200/50">{t('cart.subtotal')}</span>
+                <span className="text-amber-100">{format(subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-amber-200/50">Shipping ({selectedDelivery.label})</span>
+                <span className="text-amber-200/50">{t('cart.shipping')} ({selectedDelivery.label})</span>
                 <span className="text-amber-100">
                   {shipping === 0 ? (
-                    <span className="text-emerald-400">Free</span>
+                    <span className="text-emerald-400">{t('common.free')}</span>
                   ) : (
-                    `$${shipping}`
+                    format(shipping)
                   )}
                 </span>
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-amber-200/50">Discount</span>
-                  <span className="text-emerald-400">-${discount.toFixed(2)}</span>
+                  <span className="text-amber-200/50">{t('cart.discount')}</span>
+                  <span className="text-emerald-400">-{format(discount)}</span>
                 </div>
               )}
               <div className="flex justify-between text-sm">
-                <span className="text-amber-200/50">Tax</span>
-                <span className="text-amber-100">${tax.toFixed(2)}</span>
+                <span className="text-amber-200/50">{t('cart.tax')}</span>
+                <span className="text-amber-100">{format(tax)}</span>
               </div>
               {giftWrapping && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-amber-200/50">Gift Wrapping ({giftWrapStyle})</span>
-                  <span className="text-amber-400 text-xs">Included</span>
+                  <span className="text-amber-200/50">{t('checkout.giftWrappingLabel', { style: giftWrapStyle })}</span>
+                  <span className="text-amber-400 text-xs">{t('checkout.included')}</span>
                 </div>
               )}
               <Separator className="bg-amber-900/30" />
               <div className="flex justify-between">
-                <span className="font-semibold text-amber-100">Total</span>
+                <span className="font-semibold text-amber-100">{t('cart.total')}</span>
                 <span className="text-lg font-bold text-amber-400">
-                  ${total.toFixed(2)}
+                  {format(total)}
                 </span>
               </div>
             </div>
@@ -703,10 +705,10 @@ export function CheckoutView() {
               {mutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Processing...
+                  {t('checkout.processing')}
                 </>
               ) : (
-                `Place Order - $${total.toFixed(2)}`
+                `${t('checkout.placeOrder')} - ${format(total)}`
               )}
             </Button>
 

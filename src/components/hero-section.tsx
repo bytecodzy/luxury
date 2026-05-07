@@ -6,9 +6,11 @@ import { motion } from 'framer-motion';
 import Image from 'next/image';
 import { useMemo } from 'react';
 import { Gift, Sparkles } from 'lucide-react';
+import { useTranslation } from '@/hooks/useTranslation';
 
 export function HeroSection() {
   const { setView, setCategory, toggleGiftBuilder } = useStore();
+  const { t } = useTranslation();
 
   // Generate stable golden particles configuration
   const particles = useMemo(() => [
@@ -146,7 +148,7 @@ export function HeroSection() {
             transition={{ delay: 0.3, duration: 0.6 }}
             className="text-sm font-medium uppercase tracking-[0.3em] text-amber-400/80"
           >
-            Curated Luxury
+            {t('hero.curatedLuxury')}
           </motion.p>
 
           <motion.h1
@@ -165,7 +167,7 @@ export function HeroSection() {
             transition={{ delay: 0.6, duration: 0.8 }}
             className="mt-4 text-lg text-amber-100/70 sm:text-xl"
           >
-            Discover Timeless Elegance
+            {t('hero.subtitle')}
           </motion.p>
 
           <motion.p
@@ -191,7 +193,7 @@ export function HeroSection() {
               size="lg"
               className="bg-amber-600 text-stone-950 hover:bg-amber-500 transition-all duration-300 hover:shadow-lg hover:shadow-amber-600/25"
             >
-              Shop Now
+              {t('hero.shopNow')}
             </Button>
             <Button
               variant="outline"
@@ -202,7 +204,7 @@ export function HeroSection() {
               }}
               className="border-amber-700/50 text-amber-200 hover:bg-amber-900/20 hover:text-amber-100"
             >
-              Explore Collection
+              {t('hero.exploreCollection')}
             </Button>
             <Button
               variant="outline"
@@ -211,7 +213,7 @@ export function HeroSection() {
               className="border-amber-500/50 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-100 hover:border-amber-500/60 gap-2"
             >
               <Gift className="h-4 w-4" />
-              Gift Builder
+              {t('hero.giftBuilder')}
               <Sparkles className="h-3 w-3 text-amber-400/70" />
             </Button>
           </motion.div>
