@@ -7,6 +7,18 @@ import { Smartphone, Download } from 'lucide-react';
 export function Footer() {
   const { t } = useTranslation();
 
+  const handleInstallApp = () => {
+    // Try to trigger PWA install prompt
+    const event = new Event('trigger-pwa-install');
+    window.dispatchEvent(event);
+
+    // Fallback: scroll to the app download section
+    const downloadSection = document.getElementById('app-download-section');
+    if (downloadSection) {
+      downloadSection.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   return (
     <footer className="mt-auto border-t border-amber-900/30 bg-stone-950">
       <div className="container mx-auto px-4 py-8">
@@ -86,27 +98,22 @@ export function Footer() {
               Get the App
             </h4>
             <p className="mt-3 text-sm text-amber-200/50">
-              Experience luxury gifting on the go with our beautiful mobile app.
+              Install our Android app directly — no app store needed. Shop luxury gifts on the go.
             </p>
             <div className="mt-4 flex flex-col gap-2">
               <button
-                onClick={() => window.open('/app/', '_blank')}
+                onClick={handleInstallApp}
                 className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-600/10 px-3 py-2 text-sm text-amber-300 transition-colors hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/50"
               >
                 <Smartphone className="h-4 w-4" />
-                Open Web App
+                Install Android App
               </button>
               <button
-                onClick={() => {
-                  const a = document.createElement('a');
-                  a.href = '/downloads/3boxes-luxury-app.zip';
-                  a.download = '3boxes-luxury-app.zip';
-                  a.click();
-                }}
+                onClick={() => window.open('/app/', '_blank')}
                 className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-stone-900/50 px-3 py-2 text-sm text-amber-200/60 transition-colors hover:bg-stone-800/50 hover:text-amber-200 hover:border-amber-500/30"
               >
                 <Download className="h-4 w-4" />
-                Download (ZIP)
+                Flutter Web App
               </button>
             </div>
             <div className="mt-3 flex items-center gap-1.5">
@@ -114,7 +121,7 @@ export function Footer() {
                 <span className="text-lg">📱</span>
               </div>
               <div className="text-[10px] text-amber-200/30">
-                Available as<br />Web App & PWA
+                Progressive Web App<br />Works offline &amp; fullscreen
               </div>
             </div>
           </div>
