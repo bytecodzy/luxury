@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import { useTranslation } from '@/hooks/useTranslation';
+import { Smartphone, Download } from 'lucide-react';
 
 export function Footer() {
   const { t } = useTranslation();
@@ -9,7 +10,7 @@ export function Footer() {
   return (
     <footer className="mt-auto border-t border-amber-900/30 bg-stone-950">
       <div className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-5">
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2">
@@ -77,6 +78,45 @@ export function Footer() {
                 </li>
               ))}
             </ul>
+          </div>
+
+          {/* Get the App */}
+          <div>
+            <h4 className="text-sm font-semibold uppercase tracking-wider text-amber-400/80">
+              Get the App
+            </h4>
+            <p className="mt-3 text-sm text-amber-200/50">
+              Experience luxury gifting on the go with our beautiful mobile app.
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                onClick={() => window.open('/app/', '_blank')}
+                className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-600/10 px-3 py-2 text-sm text-amber-300 transition-colors hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/50"
+              >
+                <Smartphone className="h-4 w-4" />
+                Open Web App
+              </button>
+              <button
+                onClick={() => {
+                  const a = document.createElement('a');
+                  a.href = '/downloads/3boxes-luxury-app.zip';
+                  a.download = '3boxes-luxury-app.zip';
+                  a.click();
+                }}
+                className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-stone-900/50 px-3 py-2 text-sm text-amber-200/60 transition-colors hover:bg-stone-800/50 hover:text-amber-200 hover:border-amber-500/30"
+              >
+                <Download className="h-4 w-4" />
+                Download (ZIP)
+              </button>
+            </div>
+            <div className="mt-3 flex items-center gap-1.5">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-stone-800/50">
+                <span className="text-lg">📱</span>
+              </div>
+              <div className="text-[10px] text-amber-200/30">
+                Available as<br />Web App & PWA
+              </div>
+            </div>
           </div>
         </div>
 

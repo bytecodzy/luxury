@@ -20,6 +20,7 @@ import { TeamDashboard } from '@/components/team-dashboard';
 import { CorporateDashboard } from '@/components/corporate-dashboard';
 import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
+import { AppDownloadBanner } from '@/components/app-download-banner';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
 
@@ -89,6 +90,7 @@ function AppContent() {
       <AuthDialog />
       <GiftBuilder />
       <GiftAssistant />
+      <AppDownloadBanner />
     </div>
   );
 }

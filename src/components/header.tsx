@@ -5,7 +5,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles } from 'lucide-react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Smartphone, Download } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
@@ -107,6 +107,17 @@ export function Header() {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
+            {/* Get App Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open('/app/', '_blank')}
+              className="hidden lg:flex items-center gap-1.5 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/60"
+            >
+              <Smartphone className="h-4 w-4" />
+              <span className="text-xs font-medium">Get App</span>
+            </Button>
+
             {/* Locale Switcher (Desktop) */}
             <LocaleSwitcher />
 
@@ -326,6 +337,17 @@ export function Header() {
                     <Gift className="h-4 w-4" />
                     {t('nav.giftBuilder')}
                     <Sparkles className="h-3 w-3 text-amber-400/60" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      window.open('/app/', '_blank');
+                      setMobileMenuOpen(false);
+                    }}
+                    className="rounded-md px-4 py-3 text-left text-amber-100 font-medium transition-colors bg-amber-600/10 border border-amber-500/30 hover:bg-amber-600/20 flex items-center gap-2"
+                  >
+                    <Smartphone className="h-5 w-5" />
+                    Get the App
+                    <Download className="h-3 w-3 text-amber-400/60" />
                   </button>
 
                   {/* Mobile Locale Switcher */}
