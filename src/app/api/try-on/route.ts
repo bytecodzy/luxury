@@ -17,15 +17,72 @@ interface TryOnJob {
   strategy?: string
   suggestions?: any[]
   progress?: string
+  isComposite?: boolean
 }
 
 const jobs = new Map<string, TryOnJob>()
+
+// ── Global Request Queue ─────────────────────────────────────────────
+// Ensures only ONE API call is in-flight at a time, with minimum spacing
+let lastApiCallAt = 0
+const MIN_API_SPACING_MS = 10_000 // 10s between API calls
+let apiCallInProgress = false
+
+async function waitForApiSlot(): Promise<void> {
+  while (apiCallInProgress) {
+    await sleep(1000)
+  }
+  const elapsed = Date.now() - lastApiCallAt
+  if (elapsed < MIN_API_SPACING_MS) {
+    await sleep(MIN_API_SPACING_MS - elapsed)
+  }
+  apiCallInProgress = true
+}
+
+function releaseApiSlot() {
+  lastApiCallAt = Date.now()
+  apiCallInProgress = false
+}
+
+// ── Rate Limit State ──────────────────────────────────────────────────
+// Tracks if the API is rate-limited so we can fast-fallback to composite
+let consecutive429s = 0
+let rateLimitUntil = 0
+
+function isRateLimitActive(): { active: boolean; waitSeconds: number } {
+  if (rateLimitUntil === 0) return { active: false, waitSeconds: 0 }
+  const remaining = rateLimitUntil - Date.now()
+  if (remaining <= 0) {
+    rateLimitUntil = 0
+    return { active: false, waitSeconds: 0 }
+  }
+  return { active: true, waitSeconds: Math.ceil(remaining / 1000) }
+}
+
+function record429() {
+  consecutive429s++
+  // Progressive cooldown: 30s, 45s, 60s, max 90s
+  const cooldownMs = Math.min(90_000, 30_000 + (consecutive429s - 1) * 15_000)
+  rateLimitUntil = Date.now() + cooldownMs
+  console.log(`[try-on] 🔴 Rate limited! Cooldown: ${cooldownMs / 1000}s (consecutive: ${consecutive429s})`)
+}
+
+function recordApiSuccess() {
+  if (consecutive429s > 0) {
+    console.log(`[try-on] 🟢 API recovered after ${consecutive429s} rate limits`)
+  }
+  consecutive429s = 0
+  rateLimitUntil = 0
+}
+
+// How many 429s before we give up and use composite fallback
+const MAX_429S_BEFORE_FALLBACK = 3
 
 // Clean up old jobs every 5 minutes
 setInterval(() => {
   const now = Date.now()
   for (const [id, job] of jobs) {
-    if (now - job.createdAt > 15 * 60 * 1000) {
+    if (now - job.createdAt > 20 * 60 * 1000) {
       jobs.delete(id)
     }
   }
@@ -130,12 +187,16 @@ export async function POST(request: NextRequest) {
 
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 
+    const { active: rateLimited, waitSeconds } = isRateLimitActive()
+
     jobs.set(jobId, {
       status: 'processing',
       createdAt: Date.now(),
       categorySlug: product.category.slug,
       attempt: 1,
-      progress: 'Preparing your virtual try-on...',
+      progress: rateLimited
+        ? `AI service recovering, ~${waitSeconds}s wait...`
+        : 'Preparing your virtual try-on...',
     })
 
     // Start background processing
@@ -147,6 +208,8 @@ export async function POST(request: NextRequest) {
       status: 'processing',
       productName: product.name,
       categorySlug: product.category.slug,
+      rateLimited,
+      waitSeconds: rateLimited ? waitSeconds : undefined,
     })
   } catch (error) {
     console.error('[try-on] API error:', error)
@@ -179,6 +242,7 @@ export async function GET(request: NextRequest) {
     strategy: job.strategy,
     suggestions: job.suggestions,
     progress: job.progress,
+    isComposite: job.isComposite,
   })
 }
 
@@ -188,84 +252,99 @@ async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-// ── Single API call with quick retry ──────────────────────────────
+// ── Single API call attempt ──────────────────────────────────────────
+// Returns: { image: string } on success, { rateLimited: boolean } on 429, { error: string } on other error
 
-async function callApiWithRetry(
+async function tryApiCall(
   zai: ZAI,
   method: 'edit' | 'create',
   params: {
     prompt: string
-    image?: string  // For edit: single base64 data URL
+    image?: string
     size: ImageSize
   },
-  maxRetries: number = 2,
-  job?: TryOnJob,
-): Promise<string | null> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      if (attempt > 0) {
-        // Short delay: 3s, 6s
-        const delayMs = attempt * 3000
-        console.log(`[try-on] Retry ${attempt}/${maxRetries}, waiting ${delayMs / 1000}s...`)
-        if (job) job.progress = `Retrying generation (${attempt + 1}/${maxRetries + 1})...`
-        await sleep(delayMs)
-      }
+  job: TryOnJob,
+): Promise<{ image: string } | { rateLimited: boolean } | { error: string }> {
+  // Wait for API slot
+  await waitForApiSlot()
 
-      let response: any
+  try {
+    if (job) job.progress = method === 'edit'
+      ? 'AI is generating your virtual try-on...'
+      : 'AI is creating a visualization...'
 
-      if (method === 'edit' && params.image) {
-        // CORRECT SDK usage: edit takes { prompt, image (single string), size }
-        response = await zai.images.generations.edit({
-          prompt: params.prompt,
-          image: params.image,
-          size: params.size,
-        })
-      } else {
-        // Text-to-image generation
-        response = await zai.images.generations.create({
-          prompt: params.prompt,
-          size: params.size,
-        })
-      }
+    let response: any
 
-      const b64 = response?.data?.[0]?.base64
-      if (b64) {
-        console.log(`[try-on] ✅ ${method} succeeded on attempt ${attempt}`)
-        return `data:image/png;base64,${b64}`
-      }
-
-      // No image data but no error — log and retry
-      console.warn(`[try-on] No base64 in ${method} response (attempt ${attempt}). Response keys: ${Object.keys(response || {}).join(',')}`)
-    } catch (err: any) {
-      const msg = (err?.message || String(err)).substring(0, 500)
-      const status = err?.status || err?.statusCode || 0
-      const isRateLimit = status === 429 || msg.includes('429') || msg.includes('rate') || msg.includes('Too many') || msg.includes('busy') || msg.includes('quota')
-      const isServerError = status >= 500
-
-      console.error(`[try-on] ${method} error (attempt ${attempt}): status=${status} msg=${msg}`)
-
-      if (isRateLimit && attempt < maxRetries) {
-        // Rate limited: wait 10s and retry (not 3-10 minutes!)
-        if (job) job.progress = `AI service busy, retrying shortly...`
-        await sleep(10000)
-        continue
-      }
-
-      if (isServerError && attempt < maxRetries) {
-        // Server error: wait 5s and retry
-        if (job) job.progress = `Server error, retrying...`
-        await sleep(5000)
-        continue
-      }
-
-      // For other errors or final attempt, don't retry — just move to next strategy
-      if (!isRateLimit && !isServerError) {
-        console.error(`[try-on] Non-retryable error, moving to next strategy`)
-        break
-      }
+    if (method === 'edit' && params.image) {
+      response = await zai.images.generations.edit({
+        prompt: params.prompt,
+        image: params.image,
+        size: params.size,
+      })
+    } else {
+      response = await zai.images.generations.create({
+        prompt: params.prompt,
+        size: params.size,
+      })
     }
+
+    releaseApiSlot()
+
+    const b64 = response?.data?.[0]?.base64
+    if (b64) {
+      console.log(`[try-on] ✅ ${method} succeeded`)
+      recordApiSuccess()
+      return { image: `data:image/png;base64,${b64}` }
+    }
+
+    console.warn(`[try-on] No base64 in ${method} response`)
+    return { error: 'No image data in response' }
+  } catch (err: any) {
+    releaseApiSlot()
+    const msg = (err?.message || String(err)).substring(0, 500)
+    const isRateLimit = msg.includes('429') || msg.includes('Too many') || msg.includes('rate limit')
+
+    if (isRateLimit) {
+      record429()
+      return { rateLimited: true }
+    }
+
+    console.error(`[try-on] ${method} error: ${msg.substring(0, 200)}`)
+    return { error: msg }
   }
-  return null
+}
+
+// ── Wait for rate limit cooldown, returns false if deadline exceeded ──
+
+async function waitForRateLimit(job: TryOnJob, deadline: number): Promise<boolean> {
+  const { active, waitSeconds } = isRateLimitActive()
+  if (!active) return true
+
+  // Cap wait at 60 seconds per cycle, or remaining deadline
+  const maxWait = Math.min(60_000, deadline - Date.now())
+  if (maxWait <= 0) return false
+
+  if (job) job.progress = `AI service busy, waiting ~${Math.ceil(maxWait / 1000)}s...`
+  console.log(`[try-on] Waiting ${maxWait / 1000}s for rate limit cooldown...`)
+  await sleep(maxWait)
+  return true
+}
+
+// ── Composite fallback ────────────────────────────────────────────────
+
+function setCompositeResult(job: TryOnJob, selfieData: string, productImageBase64: string, productName: string, categorySlug: string) {
+  job.status = 'completed'
+  job.productName = productName
+  job.strategy = 'composite-preview'
+  job.isComposite = true
+  job.progress = 'Preview generated (AI busy — try again later for full try-on)'
+  job.imageUrl = JSON.stringify({
+    type: 'composite',
+    selfie: selfieData,
+    product: productImageBase64,
+    productName,
+    categorySlug,
+  })
 }
 
 // ── Main pipeline ──────────────────────────────────────────────────
@@ -279,8 +358,9 @@ async function backgroundProcess(
   if (!job) return
 
   const startTime = Date.now()
-  // Hard deadline: 5 minutes max
-  const deadline = startTime + 5 * 60 * 1000
+  // Hard deadline: 3 minutes (fast enough for good UX, long enough for rate limit waits)
+  const deadline = startTime + 3 * 60 * 1000
+  let total429s = 0
 
   try {
     // Step 1: Fetch suggestions in background
@@ -301,35 +381,77 @@ async function backgroundProcess(
     const placement = getProductPlacement(categorySlug, productName)
     const size = getImageSize(categorySlug)
 
-    // ── Strategy 1: Image EDIT with selfie as base + product prompt ──
-    // This is the PRIMARY strategy: take the user's selfie and edit it to add the product
-    if (Date.now() > deadline) throw new Error('Generation timed out')
-
-    if (job) { job.attempt = 1; job.progress = 'Generating your virtual try-on look...' }
-    console.log(`[try-on] Strategy 1: edit (selfie + prompt) for job ${jobId}`)
-
-    const editPrompt = `Professional fashion photograph: the person in this image is now ${placement}. The product is: ${productName}. Keep the exact same face, skin tone, hair, and features. Apply the product naturally onto this person. Studio lighting, photorealistic, 8K quality, editorial fashion photography.`
-
-    const result1 = await callApiWithRetry(zai, 'edit', {
-      prompt: editPrompt,
-      image: selfieData,
-      size,
-    }, 2, job)
-
-    if (result1) {
-      console.log(`[try-on] ✅ Strategy 1 (edit) succeeded for job ${jobId} in ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
-      if (job) {
-        job.status = 'completed'
-        job.imageUrl = result1
-        job.productName = productName
-        job.strategy = 'edit-selfie'
-        job.progress = 'Complete!'
-      }
+    // ── If API is deeply rate-limited, try one call then fallback fast ──
+    const { active: initiallyRateLimited } = isRateLimitActive()
+    if (initiallyRateLimited && consecutive429s >= MAX_429S_BEFORE_FALLBACK) {
+      console.log(`[try-on] API deeply rate-limited (${consecutive429s} consecutive 429s), using composite fallback`)
+      if (job) job.progress = 'AI service is busy — generating preview instead...'
+      await sleep(1000) // Brief pause for UX
+      setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug)
       return
     }
 
-    // ── Strategy 2: Text-to-image with detailed description (fallback) ──
-    if (Date.now() > deadline) throw new Error('Generation timed out')
+    // ── Strategy 1: Image EDIT with selfie ──
+    if (Date.now() > deadline) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
+
+    if (job) { job.attempt = 1; job.progress = 'Generating your virtual try-on look...' }
+    console.log(`[try-on] Strategy 1: edit for job ${jobId}`)
+
+    const editPrompt = `Professional fashion photograph: the person in this image is now ${placement}. The product is: ${productName}. Keep the exact same face, skin tone, hair, and features. Apply the product naturally onto this person. Studio lighting, photorealistic, 8K quality, editorial fashion photography.`
+
+    // Wait for rate limit if active
+    if (!await waitForRateLimit(job, deadline)) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
+
+    const result1 = await tryApiCall(zai, 'edit', {
+      prompt: editPrompt,
+      image: selfieData,
+      size,
+    }, job)
+
+    if ('image' in result1) {
+      console.log(`[try-on] ✅ Strategy 1 (edit) succeeded in ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
+      job.status = 'completed'
+      job.imageUrl = result1.image
+      job.productName = productName
+      job.strategy = 'edit-selfie'
+      job.progress = 'Complete!'
+      return
+    }
+
+    if ('rateLimited' in result1) {
+      total429s++
+      // Wait for cooldown and retry ONCE
+      if (!await waitForRateLimit(job, deadline)) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
+
+      const retry1 = await tryApiCall(zai, 'edit', {
+        prompt: editPrompt,
+        image: selfieData,
+        size,
+      }, job)
+
+      if ('image' in retry1) {
+        job.status = 'completed'
+        job.imageUrl = retry1.image
+        job.productName = productName
+        job.strategy = 'edit-selfie'
+        job.progress = 'Complete!'
+        return
+      }
+
+      if ('rateLimited' in retry1) total429s++
+    }
+
+    // ── Check if we should fast-fallback ──
+    if (total429s >= MAX_429S_BEFORE_FALLBACK) {
+      console.log(`[try-on] ${total429s} rate limits hit, using composite fallback`)
+      if (job) job.progress = 'AI service is busy — generating preview instead...'
+      await sleep(500)
+      setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug)
+      return
+    }
+
+    // ── Strategy 2: Text-to-image ──
+    if (Date.now() > deadline) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
 
     if (job) { job.attempt = 2; job.progress = 'Trying alternative generation approach...' }
     console.log(`[try-on] Strategy 2: text-to-image for job ${jobId}`)
@@ -342,32 +464,32 @@ async function backgroundProcess(
 
     const createPrompt = `${bodyType} of a beautiful person ${placement}. The product is ${productName}. Photorealistic, studio lighting, 8K, high detail, professional fashion photography, luxury editorial style.`
 
-    const result2 = await callApiWithRetry(zai, 'create', {
+    if (!await waitForRateLimit(job, deadline)) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
+
+    const result2 = await tryApiCall(zai, 'create', {
       prompt: createPrompt,
       size,
-    }, 2, job)
+    }, job)
 
-    if (result2) {
-      console.log(`[try-on] ✅ Strategy 2 (text-to-image) succeeded for job ${jobId} in ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
-      if (job) {
-        job.status = 'completed'
-        job.imageUrl = result2
-        job.productName = productName
-        job.strategy = 'text-to-image'
-        job.progress = 'Complete!'
-      }
+    if ('image' in result2) {
+      console.log(`[try-on] ✅ Strategy 2 (text-to-image) succeeded in ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
+      job.status = 'completed'
+      job.imageUrl = result2.image
+      job.productName = productName
+      job.strategy = 'text-to-image'
+      job.progress = 'Complete!'
       return
     }
 
-    // All strategies exhausted
-    console.error(`[try-on] ❌ All strategies failed for job ${jobId} after ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
-    throw new Error('AI generation could not complete. Please try again in a moment.')
+    if ('rateLimited' in result2) total429s++
+
+    // ── Final fallback: Composite ──
+    console.log(`[try-on] All API strategies exhausted (${total429s} rate limits), using composite fallback`)
+    setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug)
 
   } catch (error) {
     console.error(`[try-on] Job ${jobId} failed:`, error)
-    if (job) {
-      job.status = 'failed'
-      job.error = error instanceof Error ? error.message : 'Generation failed'
-    }
+    // Even on unexpected error, provide composite
+    setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug)
   }
 }

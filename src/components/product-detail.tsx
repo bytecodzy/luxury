@@ -124,6 +124,157 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
   });
 }
 
+// ── Canvas Composite Fallback ────────────────────────────────────
+// When AI is rate-limited, creates a professional side-by-side composite
+function createCanvasComposite(
+  selfieData: string,
+  productImageBase64: string,
+  productName: string,
+  categorySlug: string
+): Promise<string> {
+  return new Promise((resolve) => {
+    const selfieImg = document.createElement('img');
+    const productImg = document.createElement('img');
+    let selfieLoaded = false;
+    let productLoaded = false;
+
+    function tryComposite() {
+      if (!selfieLoaded || !productLoaded) return;
+
+      const canvas = document.createElement('canvas');
+      const W = 864;
+      const H = 1152;
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(selfieData); return; }
+
+      // Background
+      ctx.fillStyle = '#1c1917';
+      ctx.fillRect(0, 0, W, H);
+
+      // Draw selfie as main image (full left side, slightly overlapping)
+      const selfieAspect = selfieImg.width / selfieImg.height;
+      let sx = 0, sy = 0, sw = W * 0.7, sh = H;
+      if (selfieAspect > sw / sh) {
+        sh = sw / selfieAspect;
+        sy = (H - sh) / 2;
+      } else {
+        sw = sh * selfieAspect;
+        sx = (W * 0.7 - sw) / 2;
+      }
+
+      // Draw selfie with slight overlay gradient
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, W * 0.7, H);
+      ctx.clip();
+      ctx.drawImage(selfieImg, sx, sy, sw, sh);
+      ctx.restore();
+
+      // Right panel - dark with gradient
+      const gradient = ctx.createLinearGradient(W * 0.55, 0, W * 0.7, 0);
+      gradient.addColorStop(0, 'rgba(28, 25, 23, 0)');
+      gradient.addColorStop(1, 'rgba(28, 25, 23, 0.95)');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(W * 0.55, 0, W * 0.15, H);
+
+      ctx.fillStyle = 'rgba(28, 25, 23, 0.92)';
+      ctx.fillRect(W * 0.7, 0, W * 0.3, H);
+
+      // Product image (right side, centered)
+      const prodAspect = productImg.width / productImg.height;
+      const prodSize = W * 0.22;
+      let px = W * 0.7 + (W * 0.3 - prodSize) / 2;
+      let py = H * 0.25;
+      let pw = prodSize, ph = prodSize / prodAspect;
+      if (ph > prodSize) {
+        ph = prodSize;
+        pw = prodSize * prodAspect;
+        px = W * 0.7 + (W * 0.3 - pw) / 2;
+      }
+
+      // Product image shadow
+      ctx.shadowColor = 'rgba(212, 168, 67, 0.3)';
+      ctx.shadowBlur = 20;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 5;
+      ctx.drawImage(productImg, px, py, pw, ph);
+      ctx.shadowColor = 'transparent';
+
+      // Product name
+      ctx.fillStyle = '#D4A843';
+      ctx.font = 'bold 14px Georgia, serif';
+      ctx.textAlign = 'center';
+      const maxTextWidth = W * 0.26;
+      const displayName = productName.length > 25 ? productName.substring(0, 22) + '...' : productName;
+      ctx.fillText(displayName, W * 0.85, py + ph + 30, maxTextWidth);
+
+      // Category label
+      const catLabels: Record<string, string> = {
+        'jewelry': 'JEWELRY PREVIEW',
+        'sarees': 'SAREE PREVIEW',
+        'watches': 'WATCH PREVIEW',
+        'mens-shirts': 'SHIRT PREVIEW',
+        'fashion': 'FASHION PREVIEW',
+      };
+      ctx.fillStyle = 'rgba(212, 168, 67, 0.6)';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillText(catLabels[categorySlug] || 'STYLE PREVIEW', W * 0.85, py - 15);
+
+      // 3 BOXES branding
+      ctx.fillStyle = '#D4A843';
+      ctx.font = 'bold 18px Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('3 BOXES', W * 0.85, H * 0.65);
+      ctx.font = '12px Georgia, serif';
+      ctx.fillText('LUXURY', W * 0.85, H * 0.65 + 20);
+
+      // Preview badge
+      ctx.fillStyle = 'rgba(212, 168, 67, 0.15)';
+      const badgeW = W * 0.24;
+      const badgeH = 28;
+      const badgeX = W * 0.85 - badgeW / 2;
+      const badgeY = H * 0.72;
+      ctx.beginPath();
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(212, 168, 67, 0.8)';
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillText('✨ COMPOSITE PREVIEW', W * 0.85, badgeY + 18);
+
+      // Info text
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillText('AI try-on will be available', W * 0.85, H * 0.82);
+      ctx.fillText('when service recovers', W * 0.85, H * 0.82 + 16);
+
+      // Golden border accent
+      ctx.strokeStyle = 'rgba(212, 168, 67, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(W * 0.7, H * 0.05);
+      ctx.lineTo(W * 0.7, H * 0.95);
+      ctx.stroke();
+
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
+    }
+
+    selfieImg.onload = () => {
+      selfieLoaded = true;
+      tryComposite();
+    };
+    productImg.onload = () => {
+      productLoaded = true;
+      tryComposite();
+    };
+    selfieImg.onerror = () => resolve(selfieData);
+    productImg.onerror = () => resolve(selfieData);
+    selfieImg.src = selfieData;
+    productImg.src = productImageBase64;
+  });
+}
+
 // ── Logo Watermark Utility ─────────────────────────────────────
 function addLogoWatermark(imageDataUrl: string): Promise<string> {
   return new Promise((resolve) => {
@@ -400,8 +551,8 @@ function TryOnDialog({
       }
 
       // Step 2: Poll for completion
-      // 5-minute total timeout = 100 attempts × 3s each
-      const maxAttempts = 100;
+      // 8-minute total timeout = 160 attempts × 3s each (matches backend deadline)
+      const maxAttempts = 160;
       let attempts = 0;
       let consecutiveErrors = 0;
 
@@ -415,7 +566,36 @@ function TryOnDialog({
           if (pollData.progress) setProgressMsg(pollData.progress);
 
           if (pollData.status === 'completed' && pollData.imageUrl) {
-            // Add logo watermark to the result
+            // Check if this is a composite fallback (AI was rate-limited)
+            if (pollData.isComposite) {
+              try {
+                const compositeData = JSON.parse(pollData.imageUrl);
+                if (compositeData.type === 'composite') {
+                  // Render a client-side canvas composite
+                  const compositeImage = await createCanvasComposite(
+                    compositeData.selfie,
+                    compositeData.product,
+                    compositeData.productName,
+                    compositeData.categorySlug
+                  );
+                  const watermarked = await addLogoWatermark(compositeImage);
+                  setResultImage(compositeImage);
+                  setWatermarkedResult(watermarked);
+                  setStrategy('composite-preview');
+                  if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
+                  setStep('result');
+                  onBackgroundJob('result');
+                  if (pollingRef.current) {
+                    clearInterval(pollingRef.current);
+                    pollingRef.current = null;
+                  }
+                  return;
+                }
+              } catch (e) {
+                // Not a composite, treat as regular image
+              }
+            }
+            // Regular AI-generated image
             const watermarked = await addLogoWatermark(pollData.imageUrl);
             setResultImage(pollData.imageUrl);
             setWatermarkedResult(watermarked);
@@ -927,16 +1107,29 @@ function TryOnDialog({
                 <span className="text-[10px] text-amber-200/30">&#10003; Applied</span>
               </div>
 
-              {/* Info about 3 BOXES branding */}
-              <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-950/30 to-stone-900/40 p-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <Crown className="h-3.5 w-3.5 text-amber-400" />
-                  <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS</p>
+              {/* Composite preview notice or regular info */}
+              {strategy === 'composite-preview' ? (
+                <div className="rounded-lg border border-amber-500/30 bg-gradient-to-r from-amber-950/40 to-stone-900/40 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                    <p className="text-[10px] font-bold text-amber-300">COMPOSITE PREVIEW</p>
+                  </div>
+                  <p className="text-[10px] text-amber-200/50">
+                    The AI service is currently busy. This is a preview composite of you and the product. 
+                    Try again shortly for the full AI-powered virtual try-on experience.
+                  </p>
                 </div>
-                <p className="text-[10px] text-amber-200/40">
-                  AI uses multiple strategies and picks the best match. For best accuracy, use a clear, well-lit, front-facing selfie.
-                </p>
-              </div>
+              ) : (
+                <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-950/30 to-stone-900/40 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Crown className="h-3.5 w-3.5 text-amber-400" />
+                    <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS</p>
+                  </div>
+                  <p className="text-[10px] text-amber-200/40">
+                    AI uses multiple strategies and picks the best match. For best accuracy, use a clear, well-lit, front-facing selfie.
+                  </p>
+                </div>
+              )}
 
               {/* AI Style Suggestions in result too */}
               {suggestions.length > 0 && (
