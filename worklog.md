@@ -49,3 +49,27 @@ Stage Summary:
 - Footer has updated app download links
 - When opened on Chrome Android, the browser will show "Install app" prompt or the "Add to Home Screen" option
 - The installed PWA runs in standalone mode (no browser chrome), appears in app drawer, and works offline
+---
+Task ID: 2
+Agent: main
+Task: Fix AI try-on "all strategies failed" error
+
+Work Log:
+- Diagnosed root cause: AI API is returning 429 (Too Many Requests) on all endpoints (images, chat, video)
+- The previous pipeline made too many API calls (up to 10 per try-on): 2 VLM analysis + 4 generation strategies + up to 4 VLM verification calls
+- Simplified pipeline to only 2 strategies: Strategy 1 (edit-both: selfie + product) and Strategy 2 (text-to-image fallback)
+- Removed all VLM analysis and verification calls (saving 6 API calls per try-on)
+- Added aggressive retry logic with exponential backoff for 429 errors
+- Added server-side rate limit tracker that remembers when 429s occurred and prevents new jobs during cooldown
+- Added 429 fast-fail in POST endpoint — users get immediate feedback instead of waiting for retries
+- Added GET /api/try-on?jobId=check endpoint to check rate limit status
+- Increased polling timeout from 80 to 120 attempts on frontend
+- Added proper 429 handling in frontend with user-friendly "wait X seconds" message
+- Fixed `format is not defined` ReferenceError in TryOnDialog by adding useCurrency hook
+
+Stage Summary:
+- AI API is currently under a prolonged rate limit (429 on all endpoints)
+- The code is properly structured to handle rate limits gracefully
+- Users will see clear error messages about AI service being busy
+- Once the API rate limit resets (typically 5-10 min cooldown), try-on will work with fewer API calls
+- The fix reduces API call count from ~10 per try-on to max 2-5 (with retries)

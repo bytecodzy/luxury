@@ -387,6 +387,10 @@ function TryOnDialog({
 
       const postData = await postRes.json();
       if (!postRes.ok) {
+        // Handle rate limit with helpful message
+        if (postRes.status === 429 && postData.waitSeconds) {
+          throw new Error(`AI service is busy. Please wait about ${postData.waitSeconds} seconds and try again.`);
+        }
         throw new Error(postData.error || `Error: ${postRes.status}`);
       }
 
@@ -396,7 +400,7 @@ function TryOnDialog({
       }
 
       // Step 2: Poll for completion
-      const maxAttempts = 80;
+      const maxAttempts = 120;
       let attempts = 0;
 
       const poll = async () => {
@@ -445,7 +449,7 @@ function TryOnDialog({
           }
 
           if (attempts >= maxAttempts) {
-            setError('Generation timed out. The AI service may be busy — please try again.');
+            setError('Generation timed out. The AI service is very busy right now — please wait 1-2 minutes and try again.');
             setStep('preview');
             onResetBackground();
             if (pollingRef.current) {

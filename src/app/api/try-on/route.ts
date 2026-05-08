@@ -21,11 +21,45 @@ interface TryOnJob {
 
 const jobs = new Map<string, TryOnJob>()
 
+// ── Rate limit tracker ──────────────────────────────────────────────
+// Tracks when the API was last rate-limited to provide fast feedback
+let lastRateLimitAt = 0
+let rateLimitCooldownMs = 180_000 // Start with 3-minute cooldown
+let consecutiveRateLimits = 0
+let lastApiCheckAt = 0
+let lastApiCheckResult: 'ok' | 'rate-limited' = 'ok'
+
+function isRateLimitCoolingDown(): { cooling: boolean; waitSeconds: number } {
+  if (lastRateLimitAt === 0) return { cooling: false, waitSeconds: 0 }
+  const elapsed = Date.now() - lastRateLimitAt
+  if (elapsed >= rateLimitCooldownMs) {
+    // Cooldown has passed, but we don't reset until we confirm the API works
+    return { cooling: false, waitSeconds: 0 }
+  }
+  return { cooling: true, waitSeconds: Math.ceil((rateLimitCooldownMs - elapsed) / 1000) }
+}
+
+function recordRateLimit() {
+  lastRateLimitAt = Date.now()
+  lastApiCheckResult = 'rate-limited'
+  consecutiveRateLimits++
+  // Increase cooldown aggressively: 3min, 5min, 7min, max 10min
+  rateLimitCooldownMs = Math.min(600_000, 180_000 + (consecutiveRateLimits - 1) * 120_000)
+}
+
+function recordSuccess() {
+  consecutiveRateLimits = 0
+  rateLimitCooldownMs = 180_000
+  lastRateLimitAt = 0
+  lastApiCheckResult = 'ok'
+  lastApiCheckAt = Date.now()
+}
+
 // Clean up old jobs every 5 minutes
 setInterval(() => {
   const now = Date.now()
   for (const [id, job] of jobs) {
-    if (now - job.createdAt > 10 * 60 * 1000) {
+    if (now - job.createdAt > 15 * 60 * 1000) {
       jobs.delete(id)
     }
   }
@@ -89,6 +123,16 @@ function getPairingCategory(categorySlug: string): string[] {
 
 export async function POST(request: NextRequest) {
   try {
+    // Check if we're in a rate limit cooldown
+    const { cooling, waitSeconds } = isRateLimitCoolingDown()
+    if (cooling) {
+      return NextResponse.json({
+        error: `AI service is currently busy. Please wait about ${waitSeconds} seconds and try again.`,
+        rateLimited: true,
+        waitSeconds,
+      }, { status: 429 })
+    }
+
     const body = await request.json()
     const { productId, selfieData, productImageUrl } = body
 
@@ -115,7 +159,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Product image not available' }, { status: 400 })
     }
 
-    // Fetch AI suggestions in parallel with job creation
+    // Fetch AI suggestions in parallel
     const pairingCategories = getPairingCategory(product.category.slug)
     const suggestionsPromise = db.product.findMany({
       where: {
@@ -162,6 +206,13 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const jobId = searchParams.get('jobId')
+
+  // Special endpoint: check rate limit status
+  if (jobId === 'check') {
+    const { cooling, waitSeconds } = isRateLimitCoolingDown()
+    return NextResponse.json({ rateLimited: cooling, waitSeconds })
+  }
+
   if (!jobId) return NextResponse.json({ error: 'Job ID required' }, { status: 400 })
 
   const job = jobs.get(jobId)
@@ -183,26 +234,37 @@ export async function GET(request: NextRequest) {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-async function createZAI(): Promise<InstanceType<typeof ZAI>> {
-  return await ZAI.create()
-}
-
 async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-// ── Generation with retry ──────────────────────────────────────────
+// ── Single generation call with retry ──────────────────────────────
 
 async function generateWithRetry(
   zai: any,
-  params: { prompt: string; images?: { url: string }[]; size: ImageSize },
-  maxRetries: number = 2,
+  params: {
+    prompt: string
+    images?: { url: string }[]
+    size: ImageSize
+  },
+  maxRetries: number = 3,
+  job?: TryOnJob,
 ): Promise<string | null> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // Check if we're still in cooldown before attempting
+    const { cooling, waitSeconds } = isRateLimitCoolingDown()
+    if (cooling) {
+      console.log(`[try-on] In cooldown (${waitSeconds}s remaining). Waiting...`)
+      if (job) job.progress = `AI service recovering, ${waitSeconds}s remaining...`
+      await sleep(waitSeconds * 1000 + 2000) // Wait for cooldown + 2s buffer
+    }
+
     try {
       if (attempt > 0) {
-        console.log(`[try-on] Retry attempt ${attempt}/${maxRetries}, waiting ${attempt * 3}s...`)
-        await sleep(attempt * 3000)
+        const waitMs = attempt * 8000
+        console.log(`[try-on] Retry attempt ${attempt}/${maxRetries}, waiting ${waitMs / 1000}s...`)
+        if (job) job.progress = `Retrying generation (${attempt + 1}/${maxRetries + 1})...`
+        await sleep(waitMs)
       }
 
       let response: any
@@ -221,25 +283,35 @@ async function generateWithRetry(
 
       const b64 = response.data?.[0]?.base64
       if (b64) {
+        console.log(`[try-on] Generation succeeded on attempt ${attempt}`)
+        recordSuccess()
         return `data:image/png;base64,${b64}`
       }
       console.warn(`[try-on] No base64 in response (attempt ${attempt})`)
     } catch (err: any) {
       const msg = err?.message || String(err)
-      console.error(`[try-on] Generation error (attempt ${attempt}): ${msg.substring(0, 300)}`)
+      const isRateLimit = msg.includes('429') || msg.includes('rate') || msg.includes('Too many') || msg.includes('busy')
 
-      // If rate limited, wait longer
-      if (msg.includes('429') || msg.includes('rate') || msg.includes('Too many')) {
-        const waitTime = (attempt + 1) * 5000
-        console.log(`[try-on] Rate limited, waiting ${waitTime}ms...`)
-        await sleep(waitTime)
+      if (isRateLimit) {
+        recordRateLimit()
+        console.log(`[try-on] Rate limited on attempt ${attempt}. Cooldown set.`)
+
+        if (attempt < maxRetries) {
+          // Wait for the cooldown period + buffer
+          const waitMs = rateLimitCooldownMs + 5000
+          if (job) job.progress = `AI service busy, waiting ${Math.ceil(waitMs / 1000)}s before retry...`
+          await sleep(waitMs)
+          continue
+        }
+      } else {
+        console.error(`[try-on] Non-rate-limit error (attempt ${attempt}): ${msg.substring(0, 300)}`)
       }
     }
   }
   return null
 }
 
-// ── Main pipeline (simplified: max 2-3 API calls) ──────────────────
+// ── Main pipeline ──────────────────────────────────────────────────
 
 async function backgroundProcess(
   jobId: string, productName: string, categorySlug: string,
@@ -263,11 +335,12 @@ async function backgroundProcess(
     if (job) job.suggestions = formattedSuggestions
 
     // Step 2: Initialize SDK
-    const zai = await createZAI()
+    if (job) job.progress = 'Connecting to AI service...'
+    const zai = await ZAI.create()
     const placement = getProductPlacement(categorySlug, productName)
     const size = getImageSize(categorySlug)
 
-    // ── Strategy 1: Image edit with BOTH selfie + product (best combined result) ──
+    // ── Strategy 1: Image edit with BOTH selfie + product ──
     if (job) { job.attempt = 1; job.progress = 'Generating your virtual try-on look...' }
     console.log(`[try-on] Strategy 1: edit-both for job ${jobId}`)
 
@@ -277,10 +350,10 @@ async function backgroundProcess(
       prompt: promptBoth,
       images: [{ url: selfieData }, { url: productImageBase64 }],
       size,
-    })
+    }, 3, job)
 
     if (result1) {
-      console.log(`[try-on] Strategy 1 succeeded for job ${jobId}`)
+      console.log(`[try-on] Strategy 1 (edit-both) succeeded for job ${jobId}`)
       if (job) {
         job.status = 'completed'
         job.imageUrl = result1
@@ -291,33 +364,9 @@ async function backgroundProcess(
       return
     }
 
-    // ── Strategy 2: Image edit with selfie only (face preservation) ──
-    if (job) { job.attempt = 2; job.progress = 'Trying alternative approach...' }
-    console.log(`[try-on] Strategy 2: edit-selfie for job ${jobId}`)
-
-    const promptSelfie = `Professional fashion photograph of this person ${placement}. The product is: ${productName}. Keep the exact same face, skin tone, hair, and eye color. Studio lighting, photorealistic, 8K quality, editorial fashion photography.`
-
-    const result2 = await generateWithRetry(zai, {
-      prompt: promptSelfie,
-      images: [{ url: selfieData }],
-      size,
-    })
-
-    if (result2) {
-      console.log(`[try-on] Strategy 2 succeeded for job ${jobId}`)
-      if (job) {
-        job.status = 'completed'
-        job.imageUrl = result2
-        job.productName = productName
-        job.strategy = 'edit-selfie'
-        job.progress = 'Complete!'
-      }
-      return
-    }
-
-    // ── Strategy 3: Text-to-image generation (no reference images, pure prompt) ──
-    if (job) { job.attempt = 3; job.progress = 'Generating from description...' }
-    console.log(`[try-on] Strategy 3: text-to-image for job ${jobId}`)
+    // ── Strategy 2: Text-to-image generation (fallback, no reference images) ──
+    if (job) { job.attempt = 2; job.progress = 'Trying alternative generation approach...' }
+    console.log(`[try-on] Strategy 2: text-to-image for job ${jobId}`)
 
     const bodyType = ['sarees', 'fashion', 'mens-shirts'].includes(categorySlug)
       ? 'Full-body professional fashion photograph'
@@ -327,16 +376,16 @@ async function backgroundProcess(
 
     const promptCreate = `${bodyType} of a beautiful person ${placement}. The product is ${productName}. Photorealistic, studio lighting, 8K, high detail, professional fashion photography, luxury editorial style.`
 
-    const result3 = await generateWithRetry(zai, {
+    const result2 = await generateWithRetry(zai, {
       prompt: promptCreate,
       size,
-    })
+    }, 2, job)
 
-    if (result3) {
-      console.log(`[try-on] Strategy 3 succeeded for job ${jobId}`)
+    if (result2) {
+      console.log(`[try-on] Strategy 2 (text-to-image) succeeded for job ${jobId}`)
       if (job) {
         job.status = 'completed'
-        job.imageUrl = result3
+        job.imageUrl = result2
         job.productName = productName
         job.strategy = 'create'
         job.progress = 'Complete!'
@@ -345,7 +394,7 @@ async function backgroundProcess(
     }
 
     // All strategies exhausted
-    throw new Error('All generation strategies failed. The AI service may be temporarily busy — please try again in a moment.')
+    throw new Error('AI service is currently busy with too many requests. Please wait 2-3 minutes and try again.')
 
   } catch (error) {
     console.error(`[try-on] Job ${jobId} failed:`, error)
