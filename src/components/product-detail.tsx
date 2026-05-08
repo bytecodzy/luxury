@@ -400,13 +400,16 @@ function TryOnDialog({
       }
 
       // Step 2: Poll for completion
-      const maxAttempts = 120;
+      // 5-minute total timeout = 100 attempts × 3s each
+      const maxAttempts = 100;
       let attempts = 0;
+      let consecutiveErrors = 0;
 
       const poll = async () => {
         try {
           const pollRes = await fetch(`/api/try-on?jobId=${jobId}`);
           const pollData = await pollRes.json();
+          consecutiveErrors = 0; // Reset on successful fetch
 
           // Update progress message from server
           if (pollData.progress) setProgressMsg(pollData.progress);
@@ -449,7 +452,7 @@ function TryOnDialog({
           }
 
           if (attempts >= maxAttempts) {
-            setError('Generation timed out. The AI service is very busy right now — please wait 1-2 minutes and try again.');
+            setError('Generation is taking longer than expected. Please try again — the AI service may be busy.');
             setStep('preview');
             onResetBackground();
             if (pollingRef.current) {
@@ -459,9 +462,19 @@ function TryOnDialog({
           }
         } catch (err) {
           attempts++;
+          consecutiveErrors++;
           setPollCount(attempts);
-          if (attempts >= maxAttempts) {
-            setError('Connection lost during generation. Please try again.');
+          // If 5 consecutive fetch errors, stop polling
+          if (consecutiveErrors >= 5) {
+            setError('Connection lost during generation. Please check your internet and try again.');
+            setStep('preview');
+            onResetBackground();
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+          } else if (attempts >= maxAttempts) {
+            setError('Generation is taking longer than expected. Please try again.');
             setStep('preview');
             onResetBackground();
             if (pollingRef.current) {

@@ -1,75 +1,39 @@
+# Worklog
+
 ---
 Task ID: 1
-Agent: Main
-Task: Build Flutter app for 3 BOXES LUXURY website and add download option
+Agent: Main Agent
+Task: Fix AI Try-On "Generation timed out" and "All strategies failed" errors
 
 Work Log:
-- Installed Flutter SDK 3.41.9 (stable) at /home/z/flutter
-- Created Flutter project at flutter_app/ with proper package dependencies
-- Built complete app infrastructure: app_config.dart, app_models.dart, api_service.dart, app_providers.dart
-- Created 14 screen files covering all website features:
-  - Home, Category, Product Detail, Cart, Checkout, Auth
-  - User Dashboard, Admin Dashboard, Corporate Dashboard
-  - Gift Assistant, Gift Builder, Orders, Wishlist
-  - ProductCard reusable widget
-- Built Flutter web release with `flutter build web --release --base-href "/app/"`
-- Copied Flutter web build to public/app/ for serving
-- Created ZIP download at public/downloads/3boxes-luxury-app.zip (12MB)
-- Added "Get App" button to header (desktop + mobile)
-- Created AppDownloadBanner floating component with Open App / Download buttons
-- Added "Get the App" section to footer with Open Web App and Download ZIP buttons
-- Updated page.tsx to include AppDownloadBanner
-- All endpoints verified: /app/index.html (200), /downloads/3boxes-luxury-app.zip (200)
+- Read and analyzed `/home/z/my-project/src/app/api/try-on/route.ts` (the core API route)
+- Read the SDK type definitions at `/home/z/my-project/node_modules/z-ai-web-dev-sdk/dist/index.d.ts`
+- Discovered 3 critical bugs causing ALL generation to fail:
+
+**Bug 1: Wrong SDK API call format (ROOT CAUSE)**
+- The SDK's `edit` method signature is: `{ prompt: string, image?: string, size?: ImageSize }`
+- The old code was calling: `{ prompt, images: [{ url: selfieData }, { url: productImageBase64 }], size }` — passing `images` (array of objects) which DOES NOT EXIST in the SDK
+- This caused EVERY edit call to fail silently or throw errors
+- Fix: Changed to `{ prompt, image: selfieData, size }` — single string parameter
+
+**Bug 2: Aggressive global rate limit state blocking ALL users**
+- Old code had global variables: `lastRateLimitAt`, `rateLimitCooldownMs` (3-10 min!), `consecutiveRateLimits`
+- When ONE user hit a rate limit, ALL subsequent users were blocked for 3-10 minutes
+- This caused cascading failures for concurrent users
+- Fix: Removed all global rate limit state. Each request now handles its own retries independently
+
+**Bug 3: Excessive retry delays causing timeout**
+- Old code had: 8s * attempt backoff + 3-10 min cooldown on rate limits
+- Total processing could exceed 6+ minutes, hitting the frontend's polling timeout
+- Fix: Reduced to 3s * attempt backoff, 10s wait on rate limits, 5s on server errors, max 2 retries per strategy, 5-minute hard deadline
+
+Frontend improvements:
+- Changed maxAttempts from 120 to 100 (5 min total)
+- Added consecutive error tracking (stops after 5 consecutive fetch errors)
+- Improved timeout error messages
 
 Stage Summary:
-- Full Flutter app with 14 screens mirroring all website features
-- Flutter web app accessible at /app/ path
-- Download ZIP available at /downloads/3boxes-luxury-app.zip
-- Multiple entry points for app access: header button, floating banner, footer section
----
-Task ID: 1
-Agent: main
-Task: Convert 3 BOXES LUXURY website into installable Android PWA with download section
-
-Work Log:
-- Created `/public/manifest.json` - Full PWA manifest with name, short_name, icons (192 & 512, both regular and maskable), shortcuts for Shop and Gift Builder
-- Created `/public/sw.js` - Service worker with offline caching (cache-first for static assets, network-first for navigation, skips API calls)
-- Copied PWA icons to `/public/icons/` - icon-192.png, icon-512.png, icon-maskable-192.png, icon-maskable-512.png
-- Updated `/src/app/layout.tsx` - Added PWA meta tags (manifest, theme-color, apple-mobile-web-app-capable, apple-touch-icon, msapplication tiles) and service worker registration script
-- Created `/src/components/app-download-section.tsx` - Full-screen download section with phone mockup, feature grid (Lightning Fast, Secure, Multi-Currency, AI Powered), install button with beforeinstallprompt handler, step-by-step install instructions for Android and iOS
-- Updated `/src/components/app-download-banner.tsx` - Floating install prompt banner with beforeinstallprompt handler, scrolls to download section if no prompt available
-- Updated `/src/components/footer.tsx` - Updated "Get the App" section with PWA install button and Flutter Web App link
-- Updated `/src/app/page.tsx` - Added AppDownloadSection to homepage (after ProductGrid) and AppDownloadBanner as floating overlay
-
-Stage Summary:
-- Website is now a fully installable PWA on Android devices
-- PWA manifest, service worker, icons, and meta tags are all configured
-- AppDownloadSection appears on the homepage with phone mockup, features, and install button
-- Floating AppDownloadBanner provides persistent install prompt
-- Footer has updated app download links
-- When opened on Chrome Android, the browser will show "Install app" prompt or the "Add to Home Screen" option
-- The installed PWA runs in standalone mode (no browser chrome), appears in app drawer, and works offline
----
-Task ID: 2
-Agent: main
-Task: Fix AI try-on "all strategies failed" error
-
-Work Log:
-- Diagnosed root cause: AI API is returning 429 (Too Many Requests) on all endpoints (images, chat, video)
-- The previous pipeline made too many API calls (up to 10 per try-on): 2 VLM analysis + 4 generation strategies + up to 4 VLM verification calls
-- Simplified pipeline to only 2 strategies: Strategy 1 (edit-both: selfie + product) and Strategy 2 (text-to-image fallback)
-- Removed all VLM analysis and verification calls (saving 6 API calls per try-on)
-- Added aggressive retry logic with exponential backoff for 429 errors
-- Added server-side rate limit tracker that remembers when 429s occurred and prevents new jobs during cooldown
-- Added 429 fast-fail in POST endpoint — users get immediate feedback instead of waiting for retries
-- Added GET /api/try-on?jobId=check endpoint to check rate limit status
-- Increased polling timeout from 80 to 120 attempts on frontend
-- Added proper 429 handling in frontend with user-friendly "wait X seconds" message
-- Fixed `format is not defined` ReferenceError in TryOnDialog by adding useCurrency hook
-
-Stage Summary:
-- AI API is currently under a prolonged rate limit (429 on all endpoints)
-- The code is properly structured to handle rate limits gracefully
-- Users will see clear error messages about AI service being busy
-- Once the API rate limit resets (typically 5-10 min cooldown), try-on will work with fewer API calls
-- The fix reduces API call count from ~10 per try-on to max 2-5 (with retries)
+- Rewrote `/home/z/my-project/src/app/api/try-on/route.ts` with correct SDK usage
+- Updated polling in `/home/z/my-project/src/components/product-detail.tsx`
+- The SDK's `CreateImageEditBody` interface confirms: `image` is a single optional string, NOT an array
+- TypeScript type check on the skills/image-edit scripts confirms the same bug pattern: `error TS2561: Object literal may only specify known properties, but 'images' does not exist in type 'CreateImageEditBody'. Did you mean to write 'image'?`
