@@ -259,6 +259,7 @@ function TryOnDialog({
   onBackgroundJob: (step: 'generating' | 'result') => void;
   onResetBackground: () => void;
 }) {
+  const { format } = useCurrency();
   const [step, setStep] = useState<Step>('upload');
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const [selfieData, setSelfieData] = useState<string | null>(null);
