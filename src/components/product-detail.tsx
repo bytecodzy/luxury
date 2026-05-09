@@ -169,7 +169,8 @@ function TryOnDialog({
   const [strategy, setStrategy] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
-  const [faceAnalysis, setFaceAnalysis] = useState<{ photoType: string; confidence: number } | null>(null);
+  const [faceScore, setFaceScore] = useState<number | null>(null);
+  const [productScore, setProductScore] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
@@ -182,7 +183,9 @@ function TryOnDialog({
     setStrategy(null);
     setSuggestions([]);
     setAddedIds(new Set());
-    setFaceAnalysis(null);
+    setFaceScore(null);
+    setProductScore(null);
+    setProgressMessage('');
     onResetBackground();
   }, [onResetBackground]);
 
@@ -218,13 +221,17 @@ function TryOnDialog({
     setTimeout(() => setAddedIds(prev => { const n = new Set(prev); n.delete(s.id); return n; }), 1500);
   }, []);
 
+  const [progressMessage, setProgressMessage] = useState<string>('');
+
   const handleGenerate = useCallback(async () => {
     if (!selfieData) return;
     setStep('generating');
     setError(null);
+    setProgressMessage('Starting AI style preview...');
     onBackgroundJob('generating');
 
     try {
+      // Step 1: POST to create a job
       const postRes = await fetch('/api/try-on', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -240,17 +247,50 @@ function TryOnDialog({
         throw new Error(postData.error || `Error: ${postRes.status}`);
       }
 
-      if (postData.status === 'completed' && postData.imageUrl) {
-        setResultImage(postData.imageUrl);
-        setWatermarkedResult(postData.imageUrl); // Server already added branding
-        setStrategy(postData.strategy || 'smart-composite');
-        if (postData.faceAnalysis) setFaceAnalysis(postData.faceAnalysis);
-        if (postData.suggestions?.length) setSuggestions(postData.suggestions);
-        setStep('result');
-        onBackgroundJob('result');
-      } else {
-        throw new Error('Unexpected response from server');
+      const jobId = postData.jobId;
+      if (!jobId) {
+        throw new Error('No job ID returned from server');
       }
+
+      // Step 2: Poll for job completion
+      const maxPolls = 120; // 120 * 2s = 4 minutes max
+      let pollCount = 0;
+
+      const pollJob = async (): Promise<void> => {
+        pollCount++;
+        if (pollCount > maxPolls) {
+          throw new Error('Generation timed out. Please try again.');
+        }
+
+        const pollRes = await fetch(`/api/try-on?jobId=${jobId}`);
+        const pollData = await pollRes.json();
+
+        if (pollData.progress) {
+          setProgressMessage(pollData.progress);
+        }
+
+        if (pollData.status === 'completed' && pollData.imageUrl) {
+          setResultImage(pollData.imageUrl);
+          setWatermarkedResult(pollData.imageUrl);
+          setStrategy(pollData.strategy || 'ai-generation');
+          if (pollData.faceScore) setFaceScore(pollData.faceScore);
+          if (pollData.productScore) setProductScore(pollData.productScore);
+          if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
+          setStep('result');
+          onBackgroundJob('result');
+          return;
+        }
+
+        if (pollData.status === 'failed') {
+          throw new Error(pollData.error || 'Generation failed');
+        }
+
+        // Still processing, poll again after 2 seconds
+        await new Promise(r => setTimeout(r, 2000));
+        return pollJob();
+      };
+
+      await pollJob();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
       setStep('preview');
@@ -283,20 +323,6 @@ function TryOnDialog({
     }
   };
 
-  // Get display label for photo type
-  const getPhotoTypeLabel = (photoType: string) => {
-    switch (photoType) {
-      case 'closeup':
-        return 'Close-up photo detected';
-      case 'waist-up':
-        return 'Waist-up photo detected';
-      case 'full-body':
-        return 'Full-body photo detected';
-      default:
-        return `${photoType} photo detected`;
-    }
-  };
-
   return (
     <Dialog
       open={open}
@@ -317,7 +343,7 @@ function TryOnDialog({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl font-bold text-amber-100">
               <Sparkles className="h-5 w-5 text-amber-400" />
-              Style Preview
+              AI Virtual Try-On
             </DialogTitle>
             <DialogDescription className="text-amber-200/50">
               Upload your selfie and{' '}
@@ -474,10 +500,10 @@ function TryOnDialog({
                   </div>
                 </div>
                 <h3 className="mt-4 text-base font-semibold text-amber-100">
-                  Analyzing your photo...
+                  {progressMessage || 'Analyzing your photo...'}
                 </h3>
                 <p className="mt-1 text-center text-xs text-amber-200/40">
-                  Creating your style preview with {productName}
+                  Creating your AI style preview with {productName}
                 </p>
               </div>
 
@@ -533,17 +559,22 @@ function TryOnDialog({
                 <p className="text-center text-[10px] font-medium text-amber-400">Style Preview</p>
               </div>
 
-              {/* Photo type detected */}
-              {faceAnalysis && (
+              {/* AI Match Scores */}
+              {strategy && (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
-                  <Camera className="h-3.5 w-3.5 text-amber-400/60" />
+                  <Crown className="h-3.5 w-3.5 text-amber-400/60" />
                   <div className="flex-1">
                     <p className="text-[10px] font-semibold text-amber-200/70">
-                      {getPhotoTypeLabel(faceAnalysis.photoType)}
+                      AI Strategy: {strategy === 'edit-both' ? 'Dual-Image Edit' : strategy === 'edit-selfie' ? 'Selfie-Edit' : strategy === 'edit-product' ? 'Product-Edit' : strategy === 'create-detailed' ? 'AI Generate' : strategy}
                     </p>
-                    <p className="text-[9px] text-amber-200/40">
-                      Confidence: {Math.round(faceAnalysis.confidence * 100)}%
-                    </p>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      {faceScore !== null && (
+                        <span className="text-[9px] text-amber-200/40">Face Match: {faceScore}/10</span>
+                      )}
+                      {productScore !== null && (
+                        <span className="text-[9px] text-amber-200/40">Product Match: {productScore}/10</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -568,10 +599,10 @@ function TryOnDialog({
               <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-950/30 to-stone-900/40 p-3">
                 <div className="flex items-center gap-2 mb-1">
                   <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                  <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS — Style Preview</p>
+                  <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS — AI Style Preview</p>
                 </div>
                 <p className="text-[10px] text-amber-200/40">
-                  This composite overlays the product onto your photo using smart positioning. 
+                  AI generates a virtual try-on preview using multiple strategies for the best match. 
                   For best results, use a clear, well-lit, front-facing selfie.
                 </p>
               </div>

@@ -84,3 +84,37 @@ Stage Summary:
 - VLM analysis has timeout protection to prevent hanging requests
 - User will see clear error messages if something goes wrong
 - Browser cache cleared - new code should be served on refresh
+
+---
+Task ID: 5
+Agent: Main
+Task: Rewrite try-on API with VLM + AI image generation (v1.1 pattern)
+
+Work Log:
+- User reported "No job ID returned from server" error persisting
+- Investigated: the current source code had Sharp composite approach but the frontend component was already expecting jobId polling pattern
+- The v1.1 code at /versions/v1.1/ uses AI image generation with jobId polling
+- Rewrote /src/app/api/try-on/route.ts to match v1.1 pattern:
+  - POST creates a job and returns { jobId, status: 'processing' }
+  - GET polls with ?jobId=xxx to check progress
+  - Background process: VLM analyzes selfie + product, then tries 4 AI generation strategies
+  - Strategy A: edit-both (selfie + product images)
+  - Strategy B: edit-selfie (selfie only)
+  - Strategy C: edit-product (product only)
+  - Strategy D: create-detailed (text-only fallback)
+  - VLM verification compares face and product similarity scores
+  - Best result selected (60% face weight, 40% product weight)
+- Added external image URL support (http/https, //, /api/image-proxy)
+- Updated TryOnDialog component:
+  - Added faceScore and productScore state variables
+  - Updated result handler to capture scores from polling response
+  - Added Face Match and Product Score display in result UI
+  - Changed dialog title back to "AI Virtual Try-On"
+- Tested full flow: POST → jobId → polling → completed with image in ~100s
+
+Stage Summary:
+- API route now uses VLM + AI image generation with jobId polling (matching v1.1)
+- Frontend component already had the polling pattern, now also shows match scores
+- Full pipeline: VLM analysis → 4 strategies → VLM verification → best result
+- External product image URLs supported
+- No lint errors
