@@ -1,133 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import ZAI from 'z-ai-web-dev-sdk'
+import sharp from 'sharp'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
-type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864' | '1440x720' | '720x1440'
+// ── Types ─────────────────────────────────────────────────────────────
 
-interface TryOnJob {
-  status: 'processing' | 'completed' | 'failed'
-  imageUrl?: string
-  productName?: string
-  categorySlug?: string
-  error?: string
-  createdAt: number
-  attempt?: number
-  strategy?: string
-  suggestions?: any[]
-  progress?: string
-  isComposite?: boolean
+interface FaceAnalysis {
+  faceCenterX: number // 0-1 ratio
+  faceCenterY: number // 0-1 ratio
+  photoType: 'closeup' | 'waist-up' | 'full-body'
+  hasVisibleWrists: boolean
+  hasVisibleNeck: boolean
+  confidence: number
 }
 
-const jobs = new Map<string, TryOnJob>()
+// ── Product image helper ──────────────────────────────────────────────
 
-// ── Global Request Queue ─────────────────────────────────────────────
-// Ensures only ONE API call is in-flight at a time, with minimum spacing
-let lastApiCallAt = 0
-const MIN_API_SPACING_MS = 10_000 // 10s between API calls
-let apiCallInProgress = false
-
-async function waitForApiSlot(): Promise<void> {
-  while (apiCallInProgress) {
-    await sleep(1000)
-  }
-  const elapsed = Date.now() - lastApiCallAt
-  if (elapsed < MIN_API_SPACING_MS) {
-    await sleep(MIN_API_SPACING_MS - elapsed)
-  }
-  apiCallInProgress = true
-}
-
-function releaseApiSlot() {
-  lastApiCallAt = Date.now()
-  apiCallInProgress = false
-}
-
-// ── Rate Limit State ──────────────────────────────────────────────────
-// Tracks if the API is rate-limited so we can fast-fallback to composite
-let consecutive429s = 0
-let rateLimitUntil = 0
-
-function isRateLimitActive(): { active: boolean; waitSeconds: number } {
-  if (rateLimitUntil === 0) return { active: false, waitSeconds: 0 }
-  const remaining = rateLimitUntil - Date.now()
-  if (remaining <= 0) {
-    rateLimitUntil = 0
-    return { active: false, waitSeconds: 0 }
-  }
-  return { active: true, waitSeconds: Math.ceil(remaining / 1000) }
-}
-
-function record429() {
-  consecutive429s++
-  // Progressive cooldown: 30s, 45s, 60s, max 90s
-  const cooldownMs = Math.min(90_000, 30_000 + (consecutive429s - 1) * 15_000)
-  rateLimitUntil = Date.now() + cooldownMs
-  console.log(`[try-on] 🔴 Rate limited! Cooldown: ${cooldownMs / 1000}s (consecutive: ${consecutive429s})`)
-}
-
-function recordApiSuccess() {
-  if (consecutive429s > 0) {
-    console.log(`[try-on] 🟢 API recovered after ${consecutive429s} rate limits`)
-  }
-  consecutive429s = 0
-  rateLimitUntil = 0
-}
-
-// How many 429s before we give up and use composite fallback
-const MAX_429S_BEFORE_FALLBACK = 3
-
-// Clean up old jobs every 5 minutes
-setInterval(() => {
-  const now = Date.now()
-  for (const [id, job] of jobs) {
-    if (now - job.createdAt > 20 * 60 * 1000) {
-      jobs.delete(id)
-    }
-  }
-}, 5 * 60 * 1000)
-
-function getProductImageBase64(imagePath: string): string | null {
+function getProductImageBuffer(imagePath: string): Buffer | null {
   try {
     const fullPath = join(process.cwd(), 'public', imagePath)
     if (!existsSync(fullPath)) return null
-    const buffer = readFileSync(fullPath)
-    const ext = imagePath.split('.').pop()?.toLowerCase() || 'jpg'
-    const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
-    return `data:${mimeType};base64,${buffer.toString('base64')}`
+    return readFileSync(fullPath)
   } catch (err) {
     console.error('[try-on] Failed to read product image:', err)
     return null
   }
 }
 
-// ── Product placement helpers ──────────────────────────────────────
-
-function getProductPlacement(categorySlug: string, productName: string): string {
-  const n = productName.toLowerCase()
-  if (categorySlug === 'jewelry') {
-    if (n.includes('earring') || n.includes('jhumka') || n.includes('stud')) return 'wearing earrings on both earlobes'
-    if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple')) return 'wearing a necklace around the neck'
-    if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle')) return 'wearing a bracelet on the wrist'
-    if (n.includes('ring')) return 'wearing a ring on the finger'
-    if (n.includes('set') || n.includes('bridal')) return 'wearing a matching jewelry set of necklace and earrings'
-    return 'wearing the jewelry piece'
-  }
-  if (categorySlug === 'sarees') return 'draped in the saree in traditional Indian style with pallu over shoulder'
-  if (categorySlug === 'mens-shirts') return 'wearing the shirt on the torso'
-  if (categorySlug === 'watches') return 'wearing the watch on the wrist'
-  if (categorySlug === 'fashion') return 'wearing the outfit'
-  return 'wearing the product'
-}
-
-function getImageSize(categorySlug: string): ImageSize {
-  if (['sarees', 'fashion', 'mens-shirts'].includes(categorySlug)) return '768x1344'
-  if (categorySlug === 'home-living') return '1344x768'
-  return '864x1152'
-}
-
-// ── Category pairing for suggestions ───────────────────────────────
+// ── Category pairing for suggestions ──────────────────────────────────
 
 function getPairingCategory(categorySlug: string): string[] {
   const pairs: Record<string, string[]> = {
@@ -142,7 +44,415 @@ function getPairingCategory(categorySlug: string): string[] {
   return pairs[categorySlug] || ['jewelry']
 }
 
-// ── POST /api/try-on ───────────────────────────────────────────────
+// ── Default face analysis based on category ───────────────────────────
+
+function getDefaultAnalysis(categorySlug: string): FaceAnalysis {
+  switch (categorySlug) {
+    case 'jewelry':
+      return { faceCenterX: 0.45, faceCenterY: 0.3, photoType: 'closeup', hasVisibleWrists: false, hasVisibleNeck: true, confidence: 0.5 }
+    case 'watches':
+      return { faceCenterX: 0.45, faceCenterY: 0.25, photoType: 'waist-up', hasVisibleWrists: true, hasVisibleNeck: true, confidence: 0.5 }
+    case 'sarees':
+    case 'fashion':
+    case 'mens-shirts':
+      return { faceCenterX: 0.4, faceCenterY: 0.15, photoType: 'waist-up', hasVisibleWrists: true, hasVisibleNeck: true, confidence: 0.5 }
+    default:
+      return { faceCenterX: 0.4, faceCenterY: 0.25, photoType: 'waist-up', hasVisibleWrists: true, hasVisibleNeck: true, confidence: 0.5 }
+  }
+}
+
+// ── VLM-based selfie analysis ────────────────────────────────────────
+
+async function analyzeSelfie(selfieBase64: string): Promise<FaceAnalysis> {
+  try {
+    const zai = await ZAI.create()
+    const response = await zai.chat.completions.createVision({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Analyze this selfie photo for virtual try-on positioning. Return ONLY a JSON object with these fields:
+- faceCenterX: horizontal center of face as ratio 0-1 (left=0, right=1)
+- faceCenterY: vertical center of face as ratio 0-1 (top=0, bottom=1)
+- photoType: "closeup" | "waist-up" | "full-body"
+- hasVisibleWrists: true if wrists are visible in the photo
+- hasVisibleNeck: true if neck is clearly visible
+- confidence: your confidence 0-1 in this analysis
+
+Example: {"faceCenterX":0.45,"faceCenterY":0.28,"photoType":"waist-up","hasVisibleWrists":true,"hasVisibleNeck":true,"confidence":0.9}
+
+Return ONLY the JSON, no other text.`
+            },
+            {
+              type: 'image_url',
+              image_url: { url: selfieBase64 }
+            }
+          ]
+        }
+      ],
+      thinking: { type: 'disabled' }
+    })
+
+    const content = response.choices?.[0]?.message?.content || ''
+    // Extract JSON from the response
+    const jsonMatch = content.match(/\{[^}]+\}/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      return {
+        faceCenterX: Math.min(1, Math.max(0, parsed.faceCenterX || 0.45)),
+        faceCenterY: Math.min(1, Math.max(0, parsed.faceCenterY || 0.28)),
+        photoType: ['closeup', 'waist-up', 'full-body'].includes(parsed.photoType) ? parsed.photoType : 'waist-up',
+        hasVisibleWrists: !!parsed.hasVisibleWrists,
+        hasVisibleNeck: !!parsed.hasVisibleNeck,
+        confidence: Math.min(1, Math.max(0, parsed.confidence || 0.5)),
+      }
+    }
+  } catch (err) {
+    console.warn('[try-on] VLM analysis failed, using defaults:', err instanceof Error ? err.message : err)
+  }
+  return getDefaultAnalysis('fashion')
+}
+
+// ── Product placement position based on analysis + category ───────────
+
+interface PlacementPosition {
+  // Product card position (top-left corner, as ratio of canvas)
+  cardX: number
+  cardY: number
+  cardWidth: number
+  cardHeight: number
+  // Where the product "points to" on the selfie (for a subtle indicator line)
+  indicatorX: number
+  indicatorY: number
+}
+
+function getProductPlacement(
+  analysis: FaceAnalysis,
+  categorySlug: string,
+  productName: string,
+): PlacementPosition {
+  const n = productName.toLowerCase()
+
+  // Default: right side card
+  const rightCard: PlacementPosition = {
+    cardX: 0.62,
+    cardY: 0.06,
+    cardWidth: 0.35,
+    cardHeight: 0.55,
+    indicatorX: analysis.faceCenterX + 0.1,
+    indicatorY: analysis.faceCenterY + 0.15,
+  }
+
+  // For jewelry: position near the face/neck area
+  if (categorySlug === 'jewelry') {
+    if (n.includes('earring') || n.includes('jhumka') || n.includes('stud')) {
+      // Earrings: card near the ear area
+      return {
+        cardX: 0.62,
+        cardY: 0.04,
+        cardWidth: 0.34,
+        cardHeight: 0.38,
+        indicatorX: analysis.faceCenterX + 0.12,
+        indicatorY: analysis.faceCenterY - 0.02,
+      }
+    }
+    if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple')) {
+      // Necklace: card near the neck area
+      return {
+        cardX: 0.62,
+        cardY: 0.12,
+        cardWidth: 0.34,
+        cardHeight: 0.42,
+        indicatorX: analysis.faceCenterX + 0.05,
+        indicatorY: analysis.faceCenterY + 0.12,
+      }
+    }
+    if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle')) {
+      // Bracelet: card near the wrist area
+      return {
+        cardX: 0.62,
+        cardY: analysis.hasVisibleWrists ? 0.35 : 0.15,
+        cardWidth: 0.34,
+        cardHeight: 0.35,
+        indicatorX: analysis.faceCenterX + 0.18,
+        indicatorY: analysis.faceCenterY + 0.28,
+      }
+    }
+    if (n.includes('ring')) {
+      return {
+        cardX: 0.62,
+        cardY: 0.3,
+        cardWidth: 0.34,
+        cardHeight: 0.32,
+        indicatorX: analysis.faceCenterX + 0.2,
+        indicatorY: analysis.faceCenterY + 0.25,
+      }
+    }
+    // Generic jewelry
+    return {
+      cardX: 0.62,
+      cardY: 0.06,
+      cardWidth: 0.34,
+      cardHeight: 0.40,
+      indicatorX: analysis.faceCenterX + 0.08,
+      indicatorY: analysis.faceCenterY + 0.05,
+    }
+  }
+
+  if (categorySlug === 'watches') {
+    return {
+      cardX: 0.62,
+      cardY: analysis.hasVisibleWrists ? 0.3 : 0.12,
+      cardWidth: 0.34,
+      cardHeight: 0.38,
+      indicatorX: analysis.faceCenterX + 0.2,
+      indicatorY: analysis.faceCenterY + 0.22,
+    }
+  }
+
+  // Sarees, fashion, shirts: show product on the right side, larger card
+  if (['sarees', 'fashion', 'mens-shirts'].includes(categorySlug)) {
+    return {
+      cardX: 0.58,
+      cardY: 0.04,
+      cardWidth: 0.39,
+      cardHeight: 0.58,
+      indicatorX: analysis.faceCenterX + 0.05,
+      indicatorY: analysis.faceCenterY + 0.2,
+    }
+  }
+
+  return rightCard
+}
+
+// ── Create composite with Sharp ───────────────────────────────────────
+
+async function createComposite(
+  selfieBuffer: Buffer,
+  productBuffer: Buffer,
+  productName: string,
+  categorySlug: string,
+  analysis: FaceAnalysis,
+): Promise<Buffer> {
+  const W = 864
+  const H = 1152
+
+  // 1. Resize selfie to fill the canvas (cover mode)
+  const selfieMeta = await sharp(selfieBuffer).metadata()
+  const selfieW = selfieMeta.width || 800
+  const selfieH = selfieMeta.height || 1000
+
+  // Calculate crop for cover mode
+  const targetRatio = W / H
+  const selfieRatio = selfieW / selfieH
+  let cropW: number, cropH: number, cropX: number, cropY: number
+
+  if (selfieRatio > targetRatio) {
+    // Selfie is wider - crop sides
+    cropH = selfieH
+    cropW = Math.round(selfieH * targetRatio)
+    cropX = Math.round((selfieW - cropW) / 2)
+    cropY = 0
+  } else {
+    // Selfie is taller - crop top/bottom
+    cropW = selfieW
+    cropH = Math.round(selfieW / targetRatio)
+    cropX = 0
+    cropY = 0 // Crop from top (keep the face)
+  }
+
+  const resizedSelfie = await sharp(selfieBuffer)
+    .extract({ left: cropX, top: cropY, width: Math.min(cropW, selfieW), height: Math.min(cropH, selfieH) })
+    .resize(W, H, { fit: 'cover' })
+    .jpeg({ quality: 92 })
+    .toBuffer()
+
+  // 2. Create dark gradient overlay for the right side
+  const gradientOverlay = await sharp({
+    create: {
+      width: W,
+      height: H,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    }
+  })
+    .composite([
+      // Right side dark gradient
+      {
+        input: await createGradientBuffer(W, H),
+        left: 0,
+        top: 0,
+      }
+    ])
+    .png()
+    .toBuffer()
+
+  // 3. Prepare product image with rounded corners and gold border
+  const placement = getProductPlacement(analysis, categorySlug, productName)
+  const cardW = Math.round(W * placement.cardWidth)
+  const cardH = Math.round(H * placement.cardHeight)
+  const cardX = Math.round(W * placement.cardX)
+  const cardY = Math.round(H * placement.cardY)
+
+  // Inner padding for the product card
+  const padding = 12
+  const borderW = 2
+
+  // Create gold border frame
+  const goldBorder = await sharp({
+    create: {
+      width: cardW + borderW * 2,
+      height: cardH + borderW * 2,
+      channels: 4,
+      background: { r: 212, g: 168, b: 67, alpha: 1 }, // #D4A843
+    }
+  })
+    .ensureAlpha()
+    .png()
+    .toBuffer()
+
+  // Create card background with rounded corners
+  const cardBg = await sharp({
+    create: {
+      width: cardW,
+      height: cardH,
+      channels: 4,
+      background: { r: 20, g: 18, b: 16, alpha: 0.88 }, // Dark with transparency
+    }
+  })
+    .ensureAlpha()
+    .png()
+    .toBuffer()
+
+  // Resize product image to fit inside the card
+  const innerW = cardW - padding * 2
+  const innerH = cardH - padding * 2 - 60 // Reserve 60px for text at bottom
+  const productResized = await sharp(productBuffer)
+    .resize(innerW, innerH, { fit: 'inside', withoutEnlargement: true })
+    .png()
+    .toBuffer()
+
+  const productMeta = await sharp(productResized).metadata()
+  const pW = productMeta.width || innerW
+  const pH = productMeta.height || innerH
+
+  // Center product in the card area
+  const prodOffsetX = Math.round((innerW - pW) / 2)
+  const prodOffsetY = Math.round((innerH - pH) / 2)
+
+  // Compose product onto card background
+  const cardWithProduct = await sharp(cardBg)
+    .composite([
+      {
+        input: productResized,
+        left: padding + prodOffsetX,
+        top: padding + prodOffsetY,
+      }
+    ])
+    .png()
+    .toBuffer()
+
+  // 4. Create text overlays using SVG
+  const catLabels: Record<string, string> = {
+    'jewelry': 'JEWELRY',
+    'sarees': 'SAREE',
+    'watches': 'WATCH',
+    'mens-shirts': 'SHIRT',
+    'fashion': 'FASHION',
+    'fragrances': 'FRAGRANCE',
+    'leather-goods': 'LEATHER',
+    'home-living': 'HOME',
+  }
+  const catLabel = catLabels[categorySlug] || 'STYLE'
+  const displayName = productName.length > 28 ? productName.substring(0, 25) + '...' : productName
+
+  // Product name text
+  const nameSvg = Buffer.from(`<svg width="${cardW}" height="50">
+    <text x="${cardW / 2}" y="18" text-anchor="middle" font-family="Georgia, serif" font-size="12" font-weight="bold" fill="#D4A843">${escapeXml(displayName)}</text>
+    <text x="${cardW / 2}" y="34" text-anchor="middle" font-family="system-ui, sans-serif" font-size="9" fill="rgba(212,168,67,0.6)" letter-spacing="2">${catLabel} PREVIEW</text>
+  </svg>`)
+
+  // 3 BOXES LUXURY branding
+  const brandSvg = Buffer.from(`<svg width="${cardW}" height="30">
+    <text x="${cardW / 2}" y="14" text-anchor="middle" font-family="Georgia, serif" font-size="11" font-weight="bold" fill="#D4A843">3 BOXES</text>
+    <text x="${cardW / 2}" y="26" text-anchor="middle" font-family="Georgia, serif" font-size="8" fill="rgba(212,168,67,0.7)">LUXURY</text>
+  </svg>`)
+
+  // Bottom branding bar
+  const bottomBarSvg = Buffer.from(`<svg width="${W}" height="48">
+    <rect x="0" y="0" width="${W}" height="48" fill="rgba(10,8,6,0.8)"/>
+    <line x1="0" y1="0" x2="${W}" y2="0" stroke="rgba(212,168,67,0.3)" stroke-width="1"/>
+    <text x="${W / 2}" y="20" text-anchor="middle" font-family="Georgia, serif" font-size="14" font-weight="bold" fill="#D4A843">3 BOXES LUXURY</text>
+    <text x="${W / 2}" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="8" fill="rgba(212,168,67,0.5)" letter-spacing="3">STYLE PREVIEW</text>
+  </svg>`)
+
+  // Subtle indicator dot (gold circle near where the product would be worn)
+  const indicatorSize = 16
+  const indicatorX = Math.round(W * placement.indicatorX) - indicatorSize / 2
+  const indicatorY = Math.round(H * placement.indicatorY) - indicatorSize / 2
+  const indicatorSvg = Buffer.from(`<svg width="${indicatorSize}" height="${indicatorSize}">
+    <circle cx="${indicatorSize / 2}" cy="${indicatorSize / 2}" r="${indicatorSize / 2 - 1}" fill="none" stroke="rgba(212,168,67,0.6)" stroke-width="1.5" stroke-dasharray="3,2"/>
+    <circle cx="${indicatorSize / 2}" cy="${indicatorSize / 2}" r="2" fill="rgba(212,168,67,0.8)"/>
+  </svg>`)
+
+  // 5. Compose everything together
+  const composite = await sharp(resizedSelfie)
+    .composite([
+      // Dark gradient overlay
+      { input: gradientOverlay, left: 0, top: 0 },
+      // Indicator dot on selfie
+      { input: indicatorSvg, left: indicatorX, top: indicatorY },
+      // Gold border frame
+      { input: goldBorder, left: cardX - borderW, top: cardY - borderW },
+      // Card with product
+      { input: cardWithProduct, left: cardX, top: cardY },
+      // Product name text
+      { input: nameSvg, left: cardX, top: cardY + cardH - 55 },
+      // Brand text in card
+      { input: brandSvg, left: cardX, top: cardY + cardH - 20 },
+      // Bottom branding bar
+      { input: bottomBarSvg, left: 0, top: H - 48 },
+    ])
+    .jpeg({ quality: 92 })
+    .toBuffer()
+
+  return composite
+}
+
+// ── Helper: Create gradient overlay ───────────────────────────────────
+
+async function createGradientBuffer(W: number, H: number): Promise<Buffer> {
+  // Create a gradient that's transparent on the left and dark on the right
+  // Using a simple approach with sharp
+  const svgGradient = `<svg width="${W}" height="${H}">
+    <defs>
+      <linearGradient id="grad" x1="0.4" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="black" stop-opacity="0"/>
+        <stop offset="40%" stop-color="black" stop-opacity="0.1"/>
+        <stop offset="70%" stop-color="black" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="black" stop-opacity="0.7"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#grad)"/>
+  </svg>`
+
+  return Buffer.from(svgGradient)
+}
+
+// ── Helper: XML escape ────────────────────────────────────────────────
+
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+// ── POST /api/try-on ──────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
@@ -164,52 +474,77 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
 
+    // Get product image buffer
     const productImages: string[] = JSON.parse(product.images || '[]')
-    const productImageToUse = productImageUrl || (productImages.length > 0 ? productImages[0] : null)
-    const productImageBase64 = productImageToUse ? getProductImageBase64(productImageToUse) : null
+    const productImagePath = productImageUrl || (productImages.length > 0 ? productImages[0] : null)
+    const productImageBuffer = productImagePath ? getProductImageBuffer(productImagePath) : null
 
-    if (!productImageBase64) {
+    if (!productImageBuffer) {
       return NextResponse.json({ error: 'Product image not available' }, { status: 400 })
     }
 
-    // Fetch AI suggestions in parallel
-    const pairingCategories = getPairingCategory(product.category.slug)
-    const suggestionsPromise = db.product.findMany({
-      where: {
-        category: { slug: { in: pairingCategories } },
-        id: { not: productId },
-        stock: { gt: 0 },
-      },
-      include: { category: true },
-      take: 4,
-      orderBy: { rating: 'desc' },
-    })
+    // Decode selfie base64 to buffer
+    const selfieBase64Match = selfieData.match(/^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/)
+    if (!selfieBase64Match) {
+      return NextResponse.json({ error: 'Invalid selfie image data' }, { status: 400 })
+    }
+    const selfieBuffer = Buffer.from(selfieBase64Match[2], 'base64')
 
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+    // Run VLM analysis and suggestion fetching in parallel
+    const [analysis, suggestionsResult] = await Promise.allSettled([
+      analyzeSelfie(selfieData),
+      db.product.findMany({
+        where: {
+          category: { slug: { in: getPairingCategory(product.category.slug) } },
+          id: { not: productId },
+          stock: { gt: 0 },
+        },
+        include: { category: true },
+        take: 4,
+        orderBy: { rating: 'desc' },
+      }),
+    ])
 
-    const { active: rateLimited, waitSeconds } = isRateLimitActive()
+    const faceAnalysis: FaceAnalysis = analysis.status === 'fulfilled'
+      ? analysis.value
+      : getDefaultAnalysis(product.category.slug)
 
-    jobs.set(jobId, {
-      status: 'processing',
-      createdAt: Date.now(),
-      categorySlug: product.category.slug,
-      attempt: 1,
-      progress: rateLimited
-        ? `AI service recovering, ~${waitSeconds}s wait...`
-        : 'Preparing your virtual try-on...',
-    })
+    const suggestions = suggestionsResult.status === 'fulfilled'
+      ? suggestionsResult.value.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          price: s.price,
+          image: JSON.parse(s.images || '[]')[0] || '/images/placeholder.jpg',
+          category: s.category?.name || '',
+          categorySlug: s.category?.slug || '',
+        }))
+      : []
 
-    // Start background processing
-    backgroundProcess(jobId, product.name, product.category.slug, selfieData, productImageBase64, suggestionsPromise)
-      .catch((err) => console.error('[try-on] Background job failed:', err))
+    console.log(`[try-on] Face analysis: type=${faceAnalysis.photoType}, face=(${faceAnalysis.faceCenterX.toFixed(2)},${faceAnalysis.faceCenterY.toFixed(2)}), confidence=${faceAnalysis.confidence.toFixed(2)}`)
+
+    // Generate the composite image
+    const compositeBuffer = await createComposite(
+      selfieBuffer,
+      productImageBuffer,
+      product.name,
+      product.category.slug,
+      faceAnalysis,
+    )
+
+    // Convert to base64 data URI
+    const compositeBase64 = `data:image/jpeg;base64,${compositeBuffer.toString('base64')}`
 
     return NextResponse.json({
-      jobId,
-      status: 'processing',
+      status: 'completed',
+      imageUrl: compositeBase64,
       productName: product.name,
       categorySlug: product.category.slug,
-      rateLimited,
-      waitSeconds: rateLimited ? waitSeconds : undefined,
+      strategy: 'smart-composite',
+      faceAnalysis: {
+        photoType: faceAnalysis.photoType,
+        confidence: faceAnalysis.confidence,
+      },
+      suggestions,
     })
   } catch (error) {
     console.error('[try-on] API error:', error)
@@ -220,276 +555,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// ── GET /api/try-on?jobId=xxx ──────────────────────────────────────
+// ── GET /api/try-on — kept for compatibility, not used anymore ────────
 
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url)
-  const jobId = searchParams.get('jobId')
-
-  if (!jobId) return NextResponse.json({ error: 'Job ID required' }, { status: 400 })
-
-  const job = jobs.get(jobId)
-  if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
-
-  return NextResponse.json({
-    jobId,
-    status: job.status,
-    imageUrl: job.imageUrl,
-    productName: job.productName,
-    categorySlug: job.categorySlug,
-    error: job.error,
-    attempt: job.attempt,
-    strategy: job.strategy,
-    suggestions: job.suggestions,
-    progress: job.progress,
-    isComposite: job.isComposite,
-  })
-}
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-// ── Single API call attempt ──────────────────────────────────────────
-// Returns: { image: string } on success, { rateLimited: boolean } on 429, { error: string } on other error
-
-async function tryApiCall(
-  zai: ZAI,
-  method: 'edit' | 'create',
-  params: {
-    prompt: string
-    image?: string
-    size: ImageSize
-  },
-  job: TryOnJob,
-): Promise<{ image: string } | { rateLimited: boolean } | { error: string }> {
-  // Wait for API slot
-  await waitForApiSlot()
-
-  try {
-    if (job) job.progress = method === 'edit'
-      ? 'AI is generating your virtual try-on...'
-      : 'AI is creating a visualization...'
-
-    let response: any
-
-    if (method === 'edit' && params.image) {
-      response = await zai.images.generations.edit({
-        prompt: params.prompt,
-        image: params.image,
-        size: params.size,
-      })
-    } else {
-      response = await zai.images.generations.create({
-        prompt: params.prompt,
-        size: params.size,
-      })
-    }
-
-    releaseApiSlot()
-
-    const b64 = response?.data?.[0]?.base64
-    if (b64) {
-      console.log(`[try-on] ✅ ${method} succeeded`)
-      recordApiSuccess()
-      return { image: `data:image/png;base64,${b64}` }
-    }
-
-    console.warn(`[try-on] No base64 in ${method} response`)
-    return { error: 'No image data in response' }
-  } catch (err: any) {
-    releaseApiSlot()
-    const msg = (err?.message || String(err)).substring(0, 500)
-    const isRateLimit = msg.includes('429') || msg.includes('Too many') || msg.includes('rate limit')
-
-    if (isRateLimit) {
-      record429()
-      return { rateLimited: true }
-    }
-
-    console.error(`[try-on] ${method} error: ${msg.substring(0, 200)}`)
-    return { error: msg }
-  }
-}
-
-// ── Wait for rate limit cooldown, returns false if deadline exceeded ──
-
-async function waitForRateLimit(job: TryOnJob, deadline: number): Promise<boolean> {
-  const { active, waitSeconds } = isRateLimitActive()
-  if (!active) return true
-
-  // Cap wait at 60 seconds per cycle, or remaining deadline
-  const maxWait = Math.min(60_000, deadline - Date.now())
-  if (maxWait <= 0) return false
-
-  if (job) job.progress = `AI service busy, waiting ~${Math.ceil(maxWait / 1000)}s...`
-  console.log(`[try-on] Waiting ${maxWait / 1000}s for rate limit cooldown...`)
-  await sleep(maxWait)
-  return true
-}
-
-// ── Composite fallback ────────────────────────────────────────────────
-
-function setCompositeResult(job: TryOnJob, selfieData: string, productImageBase64: string, productName: string, categorySlug: string) {
-  job.status = 'completed'
-  job.productName = productName
-  job.strategy = 'composite-preview'
-  job.isComposite = true
-  job.progress = 'Preview generated (AI busy — try again later for full try-on)'
-  job.imageUrl = JSON.stringify({
-    type: 'composite',
-    selfie: selfieData,
-    product: productImageBase64,
-    productName,
-    categorySlug,
-  })
-}
-
-// ── Main pipeline ──────────────────────────────────────────────────
-
-async function backgroundProcess(
-  jobId: string, productName: string, categorySlug: string,
-  selfieData: string, productImageBase64: string,
-  suggestionsPromise: Promise<any>,
-) {
-  const job = jobs.get(jobId)
-  if (!job) return
-
-  const startTime = Date.now()
-  // Hard deadline: 3 minutes (fast enough for good UX, long enough for rate limit waits)
-  const deadline = startTime + 3 * 60 * 1000
-  let total429s = 0
-
-  try {
-    // Step 1: Fetch suggestions in background
-    const suggestions = await suggestionsPromise
-    const formattedSuggestions = suggestions.map((s: any) => ({
-      id: s.id,
-      name: s.name,
-      price: s.price,
-      image: JSON.parse(s.images || '[]')[0] || '/images/placeholder.jpg',
-      category: s.category?.name || '',
-      categorySlug: s.category?.slug || '',
-    }))
-    if (job) job.suggestions = formattedSuggestions
-
-    // Step 2: Initialize SDK
-    if (job) job.progress = 'Connecting to AI service...'
-    const zai = await ZAI.create()
-    const placement = getProductPlacement(categorySlug, productName)
-    const size = getImageSize(categorySlug)
-
-    // ── If API is deeply rate-limited, try one call then fallback fast ──
-    const { active: initiallyRateLimited } = isRateLimitActive()
-    if (initiallyRateLimited && consecutive429s >= MAX_429S_BEFORE_FALLBACK) {
-      console.log(`[try-on] API deeply rate-limited (${consecutive429s} consecutive 429s), using composite fallback`)
-      if (job) job.progress = 'AI service is busy — generating preview instead...'
-      await sleep(1000) // Brief pause for UX
-      setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug)
-      return
-    }
-
-    // ── Strategy 1: Image EDIT with selfie ──
-    if (Date.now() > deadline) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
-
-    if (job) { job.attempt = 1; job.progress = 'Generating your virtual try-on look...' }
-    console.log(`[try-on] Strategy 1: edit for job ${jobId}`)
-
-    const editPrompt = `Professional fashion photograph: the person in this image is now ${placement}. The product is: ${productName}. Keep the exact same face, skin tone, hair, and features. Apply the product naturally onto this person. Studio lighting, photorealistic, 8K quality, editorial fashion photography.`
-
-    // Wait for rate limit if active
-    if (!await waitForRateLimit(job, deadline)) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
-
-    const result1 = await tryApiCall(zai, 'edit', {
-      prompt: editPrompt,
-      image: selfieData,
-      size,
-    }, job)
-
-    if ('image' in result1) {
-      console.log(`[try-on] ✅ Strategy 1 (edit) succeeded in ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
-      job.status = 'completed'
-      job.imageUrl = result1.image
-      job.productName = productName
-      job.strategy = 'edit-selfie'
-      job.progress = 'Complete!'
-      return
-    }
-
-    if ('rateLimited' in result1) {
-      total429s++
-      // Wait for cooldown and retry ONCE
-      if (!await waitForRateLimit(job, deadline)) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
-
-      const retry1 = await tryApiCall(zai, 'edit', {
-        prompt: editPrompt,
-        image: selfieData,
-        size,
-      }, job)
-
-      if ('image' in retry1) {
-        job.status = 'completed'
-        job.imageUrl = retry1.image
-        job.productName = productName
-        job.strategy = 'edit-selfie'
-        job.progress = 'Complete!'
-        return
-      }
-
-      if ('rateLimited' in retry1) total429s++
-    }
-
-    // ── Check if we should fast-fallback ──
-    if (total429s >= MAX_429S_BEFORE_FALLBACK) {
-      console.log(`[try-on] ${total429s} rate limits hit, using composite fallback`)
-      if (job) job.progress = 'AI service is busy — generating preview instead...'
-      await sleep(500)
-      setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug)
-      return
-    }
-
-    // ── Strategy 2: Text-to-image ──
-    if (Date.now() > deadline) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
-
-    if (job) { job.attempt = 2; job.progress = 'Trying alternative generation approach...' }
-    console.log(`[try-on] Strategy 2: text-to-image for job ${jobId}`)
-
-    const bodyType = ['sarees', 'fashion', 'mens-shirts'].includes(categorySlug)
-      ? 'Full-body professional fashion photograph'
-      : ['jewelry', 'watches'].includes(categorySlug)
-        ? 'Close-up professional beauty photograph from chest up'
-        : 'Professional fashion photograph'
-
-    const createPrompt = `${bodyType} of a beautiful person ${placement}. The product is ${productName}. Photorealistic, studio lighting, 8K, high detail, professional fashion photography, luxury editorial style.`
-
-    if (!await waitForRateLimit(job, deadline)) { setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug); return }
-
-    const result2 = await tryApiCall(zai, 'create', {
-      prompt: createPrompt,
-      size,
-    }, job)
-
-    if ('image' in result2) {
-      console.log(`[try-on] ✅ Strategy 2 (text-to-image) succeeded in ${((Date.now() - startTime) / 1000).toFixed(1)}s`)
-      job.status = 'completed'
-      job.imageUrl = result2.image
-      job.productName = productName
-      job.strategy = 'text-to-image'
-      job.progress = 'Complete!'
-      return
-    }
-
-    if ('rateLimited' in result2) total429s++
-
-    // ── Final fallback: Composite ──
-    console.log(`[try-on] All API strategies exhausted (${total429s} rate limits), using composite fallback`)
-    setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug)
-
-  } catch (error) {
-    console.error(`[try-on] Job ${jobId} failed:`, error)
-    // Even on unexpected error, provide composite
-    setCompositeResult(job, selfieData, productImageBase64, productName, categorySlug)
-  }
+export async function GET() {
+  return NextResponse.json({ error: 'This endpoint no longer uses polling. Use POST instead.' }, { status: 400 })
 }

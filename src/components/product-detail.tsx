@@ -124,249 +124,10 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
   });
 }
 
-// ── Canvas Composite Fallback ────────────────────────────────────
-// When AI is rate-limited, creates a professional side-by-side composite
-function createCanvasComposite(
-  selfieData: string,
-  productImageBase64: string,
-  productName: string,
-  categorySlug: string
-): Promise<string> {
-  return new Promise((resolve) => {
-    const selfieImg = document.createElement('img');
-    const productImg = document.createElement('img');
-    let selfieLoaded = false;
-    let productLoaded = false;
-
-    function tryComposite() {
-      if (!selfieLoaded || !productLoaded) return;
-
-      const canvas = document.createElement('canvas');
-      const W = 864;
-      const H = 1152;
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { resolve(selfieData); return; }
-
-      // Background
-      ctx.fillStyle = '#1c1917';
-      ctx.fillRect(0, 0, W, H);
-
-      // Draw selfie as main image (full left side, slightly overlapping)
-      const selfieAspect = selfieImg.width / selfieImg.height;
-      let sx = 0, sy = 0, sw = W * 0.7, sh = H;
-      if (selfieAspect > sw / sh) {
-        sh = sw / selfieAspect;
-        sy = (H - sh) / 2;
-      } else {
-        sw = sh * selfieAspect;
-        sx = (W * 0.7 - sw) / 2;
-      }
-
-      // Draw selfie with slight overlay gradient
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, W * 0.7, H);
-      ctx.clip();
-      ctx.drawImage(selfieImg, sx, sy, sw, sh);
-      ctx.restore();
-
-      // Right panel - dark with gradient
-      const gradient = ctx.createLinearGradient(W * 0.55, 0, W * 0.7, 0);
-      gradient.addColorStop(0, 'rgba(28, 25, 23, 0)');
-      gradient.addColorStop(1, 'rgba(28, 25, 23, 0.95)');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(W * 0.55, 0, W * 0.15, H);
-
-      ctx.fillStyle = 'rgba(28, 25, 23, 0.92)';
-      ctx.fillRect(W * 0.7, 0, W * 0.3, H);
-
-      // Product image (right side, centered)
-      const prodAspect = productImg.width / productImg.height;
-      const prodSize = W * 0.22;
-      let px = W * 0.7 + (W * 0.3 - prodSize) / 2;
-      let py = H * 0.25;
-      let pw = prodSize, ph = prodSize / prodAspect;
-      if (ph > prodSize) {
-        ph = prodSize;
-        pw = prodSize * prodAspect;
-        px = W * 0.7 + (W * 0.3 - pw) / 2;
-      }
-
-      // Product image shadow
-      ctx.shadowColor = 'rgba(212, 168, 67, 0.3)';
-      ctx.shadowBlur = 20;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 5;
-      ctx.drawImage(productImg, px, py, pw, ph);
-      ctx.shadowColor = 'transparent';
-
-      // Product name
-      ctx.fillStyle = '#D4A843';
-      ctx.font = 'bold 14px Georgia, serif';
-      ctx.textAlign = 'center';
-      const maxTextWidth = W * 0.26;
-      const displayName = productName.length > 25 ? productName.substring(0, 22) + '...' : productName;
-      ctx.fillText(displayName, W * 0.85, py + ph + 30, maxTextWidth);
-
-      // Category label
-      const catLabels: Record<string, string> = {
-        'jewelry': 'JEWELRY PREVIEW',
-        'sarees': 'SAREE PREVIEW',
-        'watches': 'WATCH PREVIEW',
-        'mens-shirts': 'SHIRT PREVIEW',
-        'fashion': 'FASHION PREVIEW',
-      };
-      ctx.fillStyle = 'rgba(212, 168, 67, 0.6)';
-      ctx.font = '10px system-ui, sans-serif';
-      ctx.fillText(catLabels[categorySlug] || 'STYLE PREVIEW', W * 0.85, py - 15);
-
-      // 3 BOXES branding
-      ctx.fillStyle = '#D4A843';
-      ctx.font = 'bold 18px Georgia, serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('3 BOXES', W * 0.85, H * 0.65);
-      ctx.font = '12px Georgia, serif';
-      ctx.fillText('LUXURY', W * 0.85, H * 0.65 + 20);
-
-      // Preview badge
-      ctx.fillStyle = 'rgba(212, 168, 67, 0.15)';
-      const badgeW = W * 0.24;
-      const badgeH = 28;
-      const badgeX = W * 0.85 - badgeW / 2;
-      const badgeY = H * 0.72;
-      ctx.beginPath();
-      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(212, 168, 67, 0.8)';
-      ctx.font = '10px system-ui, sans-serif';
-      ctx.fillText('✨ COMPOSITE PREVIEW', W * 0.85, badgeY + 18);
-
-      // Info text
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.font = '11px system-ui, sans-serif';
-      ctx.fillText('AI try-on will be available', W * 0.85, H * 0.82);
-      ctx.fillText('when service recovers', W * 0.85, H * 0.82 + 16);
-
-      // Golden border accent
-      ctx.strokeStyle = 'rgba(212, 168, 67, 0.3)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(W * 0.7, H * 0.05);
-      ctx.lineTo(W * 0.7, H * 0.95);
-      ctx.stroke();
-
-      resolve(canvas.toDataURL('image/jpeg', 0.92));
-    }
-
-    selfieImg.onload = () => {
-      selfieLoaded = true;
-      tryComposite();
-    };
-    productImg.onload = () => {
-      productLoaded = true;
-      tryComposite();
-    };
-    selfieImg.onerror = () => resolve(selfieData);
-    productImg.onerror = () => resolve(selfieData);
-    selfieImg.src = selfieData;
-    productImg.src = productImageBase64;
-  });
-}
-
-// ── Logo Watermark Utility ─────────────────────────────────────
-function addLogoWatermark(imageDataUrl: string): Promise<string> {
-  return new Promise((resolve) => {
-    const img = document.createElement('img');
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) { resolve(imageDataUrl); return; }
-
-      // Draw the original image
-      ctx.drawImage(img, 0, 0);
-
-      // Draw the 3 BOXES logo watermark in gold
-      const logoSize = Math.max(40, Math.min(canvas.width, canvas.height) * 0.12);
-      const padding = logoSize * 0.3;
-      const x = canvas.width - logoSize - padding;
-      const y = canvas.height - logoSize - padding;
-
-      // Semi-transparent gold background circle
-      ctx.save();
-      ctx.globalAlpha = 0.75;
-      ctx.beginPath();
-      ctx.arc(x + logoSize / 2, y + logoSize / 2, logoSize / 2, 0, Math.PI * 2);
-      ctx.fillStyle = '#1a1a1a';
-      ctx.fill();
-      ctx.strokeStyle = '#D4A843';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Gold text
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = '#D4A843';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      // "3" at top
-      const fontSize1 = logoSize * 0.28;
-      ctx.font = `bold ${fontSize1}px Georgia, serif`;
-      ctx.fillText('3', x + logoSize / 2, y + logoSize * 0.3);
-
-      // "BOXES" in middle
-      const fontSize2 = logoSize * 0.18;
-      ctx.font = `bold ${fontSize2}px Georgia, serif`;
-      ctx.fillText('BOXES', x + logoSize / 2, y + logoSize * 0.52);
-
-      // "GIFTS" at bottom
-      const fontSize3 = logoSize * 0.13;
-      ctx.font = `${fontSize3}px Georgia, serif`;
-      ctx.fillText('GIFTS', x + logoSize / 2, y + logoSize * 0.72);
-
-      ctx.restore();
-
-      resolve(canvas.toDataURL('image/png'));
-    };
-    img.onerror = () => resolve(imageDataUrl);
-    img.src = imageDataUrl;
-  });
-}
+// (Canvas composite and watermark functions removed - server-side Sharp handles this now)
 
 // ── Try-On Dialog ──────────────────────────────────────────────
 type Step = 'upload' | 'preview' | 'generating' | 'result';
-
-function getScoreLabel(score: number, type: 'face' | 'product'): { label: string; color: string } {
-  if (score >= 9) return { label: type === 'face' ? 'Excellent Face Match' : 'Exact Product Match', color: 'text-emerald-400' };
-  if (score >= 7) return { label: type === 'face' ? 'Good Face Match' : 'Close Product Match', color: 'text-emerald-400' };
-  if (score >= 5) return { label: type === 'face' ? 'Partial Face Match' : 'Similar Product', color: 'text-amber-400' };
-  return { label: type === 'face' ? 'Low Face Match' : 'Different Product', color: 'text-red-400' };
-}
-
-function ScoreDots({ score, max = 10 }: { score: number; max?: number }) {
-  return (
-    <div className="flex items-center gap-0.5">
-      {Array.from({ length: max }).map((_, i) => (
-        <div
-          key={i}
-          className={`h-1.5 w-1.5 rounded-full transition-colors ${
-            i < score
-              ? score >= 7
-                ? 'bg-emerald-500'
-                : score >= 5
-                ? 'bg-amber-500'
-                : 'bg-red-500'
-              : 'bg-stone-700'
-          }`}
-        />
-      ))}
-    </div>
-  );
-}
 
 interface SuggestionItem {
   id: string;
@@ -376,18 +137,6 @@ interface SuggestionItem {
   category: string;
   categorySlug: string;
 }
-
-// Rotating tips shown during generation
-const GENERATION_TIPS = [
-  '💡 For best face match, use a clear front-facing selfie with good lighting',
-  '✨ AI try-on works best with simple backgrounds and no filters',
-  '💎 Jewelry looks most accurate when your neck/wrists are clearly visible',
-  '👗 Sarees and outfits look best with full-body or waist-up photos',
-  '⌚ Watches are most accurate with a clear wrist shot',
-  '📸 Natural lighting gives the most realistic try-on results',
-  '🎨 AI generates multiple versions and picks the best match for you',
-  '🌟 The 3 BOXES AI uses advanced face-preservation technology',
-];
 
 function TryOnDialog({
   open,
@@ -417,36 +166,11 @@ function TryOnDialog({
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [watermarkedResult, setWatermarkedResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pollCount, setPollCount] = useState(0);
-  const [faceScore, setFaceScore] = useState<number | null>(null);
-  const [productScore, setProductScore] = useState<number | null>(null);
   const [strategy, setStrategy] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
-  const [tipIndex, setTipIndex] = useState(0);
-  const [progressMsg, setProgressMsg] = useState('Analyzing your photo & product...');
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const [faceAnalysis, setFaceAnalysis] = useState<{ photoType: string; confidence: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
-  const tipTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Rotating tips
-  useEffect(() => {
-    if (step === 'generating') {
-      tipTimerRef.current = setInterval(() => {
-        setTipIndex((prev) => (prev + 1) % GENERATION_TIPS.length);
-      }, 5000);
-    }
-    return () => {
-      if (tipTimerRef.current) clearInterval(tipTimerRef.current);
-    };
-  }, [step]);
-
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, []);
 
   const reset = useCallback(() => {
     setStep('upload');
@@ -455,22 +179,10 @@ function TryOnDialog({
     setResultImage(null);
     setWatermarkedResult(null);
     setError(null);
-    setPollCount(0);
-    setFaceScore(null);
-    setProductScore(null);
     setStrategy(null);
     setSuggestions([]);
-    setTipIndex(0);
-    setProgressMsg('Analyzing your photo & product...');
     setAddedIds(new Set());
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-    if (tipTimerRef.current) {
-      clearInterval(tipTimerRef.current);
-      tipTimerRef.current = null;
-    }
+    setFaceAnalysis(null);
     onResetBackground();
   }, [onResetBackground]);
 
@@ -510,11 +222,9 @@ function TryOnDialog({
     if (!selfieData) return;
     setStep('generating');
     setError(null);
-    setPollCount(0);
     onBackgroundJob('generating');
 
     try {
-      // Step 1: Start the job
       const postRes = await fetch('/api/try-on', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -525,160 +235,28 @@ function TryOnDialog({
         }),
       });
 
-      const contentType = postRes.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        throw new Error(
-          postRes.status === 413
-            ? 'Image is too large. Please try a smaller photo.'
-            : postRes.status === 503
-            ? 'AI service is currently busy. Please try again later.'
-            : `Server error (${postRes.status}). Please try again.`
-        );
-      }
-
       const postData = await postRes.json();
       if (!postRes.ok) {
-        // Handle rate limit with helpful message
-        if (postRes.status === 429 && postData.waitSeconds) {
-          throw new Error(`AI service is busy. Please wait about ${postData.waitSeconds} seconds and try again.`);
-        }
         throw new Error(postData.error || `Error: ${postRes.status}`);
       }
 
-      const jobId = postData.jobId;
-      if (!jobId) {
-        throw new Error('No job ID returned from server');
-      }
-
-      // Step 2: Poll for completion
-      // 8-minute total timeout = 160 attempts × 3s each (matches backend deadline)
-      const maxAttempts = 160;
-      let attempts = 0;
-      let consecutiveErrors = 0;
-
-      const poll = async () => {
-        try {
-          const pollRes = await fetch(`/api/try-on?jobId=${jobId}`);
-          const pollData = await pollRes.json();
-          consecutiveErrors = 0; // Reset on successful fetch
-
-          // Update progress message from server
-          if (pollData.progress) setProgressMsg(pollData.progress);
-
-          if (pollData.status === 'completed' && pollData.imageUrl) {
-            // Check if this is a composite fallback (AI was rate-limited)
-            if (pollData.isComposite) {
-              try {
-                const compositeData = JSON.parse(pollData.imageUrl);
-                if (compositeData.type === 'composite') {
-                  // Render a client-side canvas composite
-                  const compositeImage = await createCanvasComposite(
-                    compositeData.selfie,
-                    compositeData.product,
-                    compositeData.productName,
-                    compositeData.categorySlug
-                  );
-                  const watermarked = await addLogoWatermark(compositeImage);
-                  setResultImage(compositeImage);
-                  setWatermarkedResult(watermarked);
-                  setStrategy('composite-preview');
-                  if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
-                  setStep('result');
-                  onBackgroundJob('result');
-                  if (pollingRef.current) {
-                    clearInterval(pollingRef.current);
-                    pollingRef.current = null;
-                  }
-                  return;
-                }
-              } catch (e) {
-                // Not a composite, treat as regular image
-              }
-            }
-            // Regular AI-generated image
-            const watermarked = await addLogoWatermark(pollData.imageUrl);
-            setResultImage(pollData.imageUrl);
-            setWatermarkedResult(watermarked);
-            setFaceScore(pollData.faceScore || null);
-            setProductScore(pollData.productScore || null);
-            setStrategy(pollData.strategy || null);
-            if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
-            setStep('result');
-            onBackgroundJob('result');
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-            return;
-          }
-
-          if (pollData.status === 'failed') {
-            setError(pollData.error || 'AI generation failed. Please try again.');
-            setStep('preview');
-            onResetBackground();
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-            return;
-          }
-
-          attempts++;
-          setPollCount(attempts);
-
-          // Capture suggestions as soon as they're available
-          if (pollData.suggestions?.length && suggestions.length === 0) {
-            setSuggestions(pollData.suggestions);
-          }
-
-          if (attempts >= maxAttempts) {
-            setError('Generation is taking longer than expected. Please try again — the AI service may be busy.');
-            setStep('preview');
-            onResetBackground();
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-          }
-        } catch (err) {
-          attempts++;
-          consecutiveErrors++;
-          setPollCount(attempts);
-          // If 5 consecutive fetch errors, stop polling
-          if (consecutiveErrors >= 5) {
-            setError('Connection lost during generation. Please check your internet and try again.');
-            setStep('preview');
-            onResetBackground();
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-          } else if (attempts >= maxAttempts) {
-            setError('Generation is taking longer than expected. Please try again.');
-            setStep('preview');
-            onResetBackground();
-            if (pollingRef.current) {
-              clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-          }
-        }
-      };
-
-      // Poll every 3 seconds
-      pollingRef.current = setInterval(poll, 3000);
-      // Also do an immediate poll after 2s
-      setTimeout(poll, 2000);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        setError('Request timed out. The AI service may be busy — please try again.');
+      if (postData.status === 'completed' && postData.imageUrl) {
+        setResultImage(postData.imageUrl);
+        setWatermarkedResult(postData.imageUrl); // Server already added branding
+        setStrategy(postData.strategy || 'smart-composite');
+        if (postData.faceAnalysis) setFaceAnalysis(postData.faceAnalysis);
+        if (postData.suggestions?.length) setSuggestions(postData.suggestions);
+        setStep('result');
+        onBackgroundJob('result');
       } else {
-        setError(err instanceof Error ? err.message : 'Something went wrong');
+        throw new Error('Unexpected response from server');
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
       setStep('preview');
       onResetBackground();
     }
-  }, [selfieData, productId, productImage, suggestions.length, onBackgroundJob, onResetBackground]);
+  }, [selfieData, productId, productImage, onBackgroundJob, onResetBackground]);
 
   // Get category-specific label
   const getCategoryLabel = () => {
@@ -705,6 +283,20 @@ function TryOnDialog({
     }
   };
 
+  // Get display label for photo type
+  const getPhotoTypeLabel = (photoType: string) => {
+    switch (photoType) {
+      case 'closeup':
+        return 'Close-up photo detected';
+      case 'waist-up':
+        return 'Waist-up photo detected';
+      case 'full-body':
+        return 'Full-body photo detected';
+      default:
+        return `${photoType} photo detected`;
+    }
+  };
+
   return (
     <Dialog
       open={open}
@@ -724,8 +316,8 @@ function TryOnDialog({
         <div className="relative bg-gradient-to-r from-amber-900/40 via-rose-900/30 to-amber-900/40 px-6 pt-6 pb-4">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl font-bold text-amber-100">
-              <Crown className="h-5 w-5 text-amber-400" />
-              AI Virtual Try-On
+              <Sparkles className="h-5 w-5 text-amber-400" />
+              Style Preview
             </DialogTitle>
             <DialogDescription className="text-amber-200/50">
               Upload your selfie and{' '}
@@ -748,7 +340,7 @@ function TryOnDialog({
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-amber-100">{productName}</p>
-                  <p className="text-xs text-amber-200/40">Selected for try-on</p>
+                  <p className="text-xs text-amber-200/40">Selected for style preview</p>
                 </div>
               </div>
 
@@ -823,7 +415,7 @@ function TryOnDialog({
                 </div>
 
                 <div className="flex flex-col items-center justify-center gap-2 pt-8">
-                  <Crown className="h-6 w-6 text-amber-400/40" />
+                  <Sparkles className="h-6 w-6 text-amber-400/40" />
                   <span className="text-[10px] text-amber-200/30">+</span>
                   <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-amber-900/20">
                     <img
@@ -863,8 +455,8 @@ function TryOnDialog({
                   onClick={handleGenerate}
                   className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                 >
-                  <Crown className="mr-2 h-4 w-4" />
-                  Generate Try-On
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Create Preview
                 </Button>
               </div>
             </div>
@@ -878,45 +470,24 @@ function TryOnDialog({
                 <div className="relative">
                   <div className="absolute inset-0 animate-ping rounded-full bg-amber-400/20" />
                   <div className="relative rounded-full bg-amber-900/20 p-5">
-                    <Crown className="h-8 w-8 animate-pulse text-amber-400" />
+                    <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
                   </div>
                 </div>
                 <h3 className="mt-4 text-base font-semibold text-amber-100">
-                  Creating Your Look
+                  Analyzing your photo...
                 </h3>
                 <p className="mt-1 text-center text-xs text-amber-200/40">
-                  {progressMsg}
-                </p>
-                <div className="mt-3 flex items-center gap-1">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400/60" />
-                  <span className="text-[10px] text-amber-200/30">
-                    {pollCount > 0 ? `Processing... (${pollCount * 3}s)` : 'Starting AI...'}
-                  </span>
-                </div>
-                <div className="mt-2 w-48">
-                  <div className="h-1.5 rounded-full bg-stone-800 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-1000"
-                      style={{ width: `${Math.min(90, pollCount * 3.5 + 5)}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Rotating tip */}
-              <div className="rounded-lg border border-amber-900/15 bg-amber-950/20 p-3 min-h-[40px]">
-                <p className="text-[11px] text-amber-200/50 transition-opacity duration-500">
-                  {GENERATION_TIPS[tipIndex]}
+                  Creating your style preview with {productName}
                 </p>
               </div>
 
-              {/* Product Gallery - How {productName} looks */}
+              {/* Product Gallery - shown while waiting */}
               {productImages.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <ImageIcon className="h-3.5 w-3.5 text-amber-400/70" />
                     <p className="text-[11px] font-semibold text-amber-200/60">
-                      How {productName} looks — Product Gallery
+                      {productName} — Product Gallery
                     </p>
                   </div>
                   <div className="flex gap-2 overflow-x-auto pb-2">
@@ -935,159 +506,45 @@ function TryOnDialog({
                   </div>
                 </div>
               )}
-
-              {/* AI Style Suggestions - shown while generating */}
-              {suggestions.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-3.5 w-3.5 text-amber-400/70" />
-                    <p className="text-[11px] font-semibold text-amber-200/60">
-                      AI Style Suggestions — Pairs well with {productName}
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {suggestions.slice(0, 4).map((s) => (
-                      <div
-                        key={s.id}
-                        className="group cursor-pointer rounded-lg border border-amber-900/15 bg-stone-900/40 p-2 transition-all hover:border-amber-600/30 hover:bg-stone-900/60"
-                        onClick={() => {
-                          const store = useStore.getState();
-                          store.setSelectedProductId(s.id);
-                          store.setCategory(s.categorySlug);
-                          store.setView('detail');
-                          reset();
-                        }}
-                      >
-                        <div className="relative aspect-square overflow-hidden rounded-md bg-stone-800 mb-2">
-                          <img
-                            src={s.image}
-                            alt={s.name}
-                            className="absolute inset-0 h-full w-full object-cover transition-transform group-hover:scale-105"
-                          />
-                        </div>
-                        <p className="text-[10px] font-medium text-amber-200/70 truncate">{s.name}</p>
-                        <div className="flex items-center justify-between mt-0.5">
-                          <p className="text-[10px] font-bold text-amber-400">{format(s.price)}</p>
-                          <p className="text-[8px] text-amber-200/25">{s.category}</p>
-                        </div>
-                        <button
-                          className="mt-1 w-full rounded bg-amber-600/80 text-[8px] font-bold text-stone-950 py-0.5 hover:bg-amber-500 transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleAddToCartSuggestion(s);
-                          }}
-                        >
-                          {addedIds.has(s.id) ? 'Added!' : '+ Cart'}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-[9px] text-amber-200/20 text-center">Tap a suggestion to view it while you wait</p>
-                </div>
-              )}
-
-              {/* Loading placeholders for suggestions if not yet loaded */}
-              {suggestions.length === 0 && pollCount > 1 && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-3.5 w-3.5 text-amber-400/40 animate-pulse" />
-                    <p className="text-[11px] font-semibold text-amber-200/40">
-                      Loading AI style suggestions...
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {[1, 2, 3, 4].map((i) => (
-                      <div key={i} className="rounded-lg border border-amber-900/10 bg-stone-900/30 p-2">
-                        <Skeleton className="aspect-square rounded-md bg-stone-800 mb-2" />
-                        <Skeleton className="h-3 w-3/4 bg-stone-800 mb-1" />
-                        <Skeleton className="h-3 w-1/2 bg-stone-800" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
           {/* Result Step */}
           {step === 'result' && watermarkedResult && (
             <div className="space-y-4">
-              {/* Side-by-side comparison */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/60">
-                    {selfiePreview && (
-                      <img
-                        src={selfiePreview}
-                        alt="Your selfie"
-                        className="h-full w-full object-cover"
-                      />
-                    )}
+              {/* Style Preview image */}
+              <div className="space-y-1.5">
+                <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-600/30 bg-stone-900/60">
+                  <img
+                    src={watermarkedResult}
+                    alt={`Style preview: ${productName}`}
+                    className="h-full w-full object-cover"
+                  />
+                  {/* 3 BOXES badge */}
+                  <div className="absolute left-1.5 top-1.5 rounded-full bg-stone-900/80 border border-amber-500/40 px-2 py-0.5 flex items-center gap-1 shadow-lg">
+                    <Sparkles className="h-2.5 w-2.5 text-amber-400" />
+                    <span className="text-[8px] font-bold text-amber-400">3 BOXES</span>
                   </div>
-                  <p className="text-center text-[10px] font-medium text-amber-200/50">Your Selfie</p>
-                </div>
-                <div className="space-y-1.5">
-                  <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-600/30 bg-stone-900/60">
-                    <img
-                      src={watermarkedResult}
-                      alt={`Virtual try-on: ${productName}`}
-                      className="h-full w-full object-cover"
-                    />
-                    {/* 3 BOXES watermark badge */}
-                    <div className="absolute left-1.5 top-1.5 rounded-full bg-stone-900/80 border border-amber-500/40 px-2 py-0.5 flex items-center gap-1 shadow-lg">
-                      <Crown className="h-2.5 w-2.5 text-amber-400" />
-                      <span className="text-[8px] font-bold text-amber-400">3 BOXES AI</span>
-                    </div>
+                  {/* Style Preview badge */}
+                  <div className="absolute right-1.5 top-1.5 rounded-full bg-amber-600/90 px-2 py-0.5 shadow-lg">
+                    <span className="text-[8px] font-bold text-stone-950">Style Preview</span>
                   </div>
-                  <p className="text-center text-[10px] font-medium text-amber-400">AI Try-On</p>
                 </div>
+                <p className="text-center text-[10px] font-medium text-amber-400">Style Preview</p>
               </div>
 
-              {/* Dual Match Quality Indicators */}
-              {(faceScore !== null || productScore !== null) && (
-                <div className="space-y-2">
-                  {faceScore !== null && (
-                    <div className="rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs">👤</span>
-                          <div>
-                            <p className="text-[10px] font-semibold text-amber-200/70">Face Match</p>
-                            <p className={`text-[9px] ${getScoreLabel(faceScore, 'face').color}`}>
-                              {getScoreLabel(faceScore, 'face').label}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <ScoreDots score={faceScore} />
-                          <span className={`text-[11px] font-bold ${getScoreLabel(faceScore, 'face').color}`}>
-                            {faceScore}/10
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                  {productScore !== null && (
-                    <div className="rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs">💎</span>
-                          <div>
-                            <p className="text-[10px] font-semibold text-amber-200/70">Product Match</p>
-                            <p className={`text-[9px] ${getScoreLabel(productScore, 'product').color}`}>
-                              {getScoreLabel(productScore, 'product').label}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <ScoreDots score={productScore} />
-                          <span className={`text-[11px] font-bold ${getScoreLabel(productScore, 'product').color}`}>
-                            {productScore}/10
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+              {/* Photo type detected */}
+              {faceAnalysis && (
+                <div className="flex items-center gap-2 rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
+                  <Camera className="h-3.5 w-3.5 text-amber-400/60" />
+                  <div className="flex-1">
+                    <p className="text-[10px] font-semibold text-amber-200/70">
+                      {getPhotoTypeLabel(faceAnalysis.photoType)}
+                    </p>
+                    <p className="text-[9px] text-amber-200/40">
+                      Confidence: {Math.round(faceAnalysis.confidence * 100)}%
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -1102,36 +559,24 @@ function TryOnDialog({
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-medium text-amber-200/70 truncate">{productName}</p>
-                  <p className="text-[10px] text-amber-200/30">Product used for try-on</p>
+                  <p className="text-[10px] text-amber-200/30">Product used in preview</p>
                 </div>
                 <span className="text-[10px] text-amber-200/30">&#10003; Applied</span>
               </div>
 
-              {/* Composite preview notice or regular info */}
-              {strategy === 'composite-preview' ? (
-                <div className="rounded-lg border border-amber-500/30 bg-gradient-to-r from-amber-950/40 to-stone-900/40 p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                    <p className="text-[10px] font-bold text-amber-300">COMPOSITE PREVIEW</p>
-                  </div>
-                  <p className="text-[10px] text-amber-200/50">
-                    The AI service is currently busy. This is a preview composite of you and the product. 
-                    Try again shortly for the full AI-powered virtual try-on experience.
-                  </p>
+              {/* 3 BOXES GIFTS — Style Preview info card */}
+              <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-950/30 to-stone-900/40 p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                  <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS — Style Preview</p>
                 </div>
-              ) : (
-                <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-950/30 to-stone-900/40 p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Crown className="h-3.5 w-3.5 text-amber-400" />
-                    <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS</p>
-                  </div>
-                  <p className="text-[10px] text-amber-200/40">
-                    AI uses multiple strategies and picks the best match. For best accuracy, use a clear, well-lit, front-facing selfie.
-                  </p>
-                </div>
-              )}
+                <p className="text-[10px] text-amber-200/40">
+                  This composite overlays the product onto your photo using smart positioning. 
+                  For best results, use a clear, well-lit, front-facing selfie.
+                </p>
+              </div>
 
-              {/* AI Style Suggestions in result too */}
+              {/* AI Style Suggestions in result */}
               {suggestions.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -1190,7 +635,7 @@ function TryOnDialog({
                 </Button>
                 <a
                   href={watermarkedResult}
-                  download={`3boxes-tryon-${productName.toLowerCase().replace(/\s+/g, '-')}.png`}
+                  download={`3boxes-style-preview-${productName.toLowerCase().replace(/\s+/g, '-')}.png`}
                   className="flex flex-1 items-center justify-center rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-stone-950 transition-all hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                 >
                   <Download className="mr-2 h-4 w-4" />
@@ -1583,8 +1028,8 @@ export function ProductDetail() {
                 <Crown className="h-5 w-5 text-amber-400" />
               </div>
               <div className="flex-1 text-left">
-                <p className="text-sm font-semibold text-amber-100">AI Virtual Try-On</p>
-                <p className="text-xs text-amber-200/40">See how it looks on you with 3 BOXES AI</p>
+                <p className="text-sm font-semibold text-amber-100">Style Preview</p>
+                <p className="text-xs text-amber-200/40">See how it looks on you with 3 BOXES</p>
               </div>
               <Sparkles className="h-4 w-4 text-amber-400/50 transition-colors group-hover:text-amber-400" />
             </button>
@@ -1846,7 +1291,7 @@ export function ProductDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* AI Try-On Dialog - always mounted when open or background job active */}
+      {/* Style Preview Dialog - mounted when open or background job active */}
       {(tryOnOpen || backgroundJobStep !== null) && product && (
         <TryOnDialog
           open={tryOnOpen}
@@ -1872,22 +1317,14 @@ export function ProductDetail() {
         >
           {backgroundJobStep === 'generating' ? (
             <div className="flex items-center gap-3 rounded-full border border-amber-600/40 bg-stone-900/95 px-5 py-3 shadow-2xl shadow-amber-900/30 backdrop-blur-sm">
-              <div className="relative">
-                <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
-              </div>
-              <div className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-amber-200">AI Generating...</span>
-                <div className="h-1 w-24 rounded-full bg-stone-700 overflow-hidden">
-                  <div className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 animate-pulse" style={{ width: '60%' }} />
-                </div>
-              </div>
-              <Crown className="h-4 w-4 text-amber-400/60" />
+              <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+              <span className="text-xs font-semibold text-amber-200">Creating preview...</span>
+              <Sparkles className="h-4 w-4 text-amber-400/60" />
             </div>
           ) : (
             <div className="flex items-center gap-3 rounded-full border border-amber-500/60 bg-stone-900/95 px-5 py-3 shadow-2xl shadow-amber-500/20 backdrop-blur-sm animate-[glow_2s_ease-in-out_infinite]">
-              <Crown className="h-4 w-4 text-amber-400" />
-              <span className="text-xs font-bold text-amber-300">AI Ready! Click to view</span>
-              <Sparkles className="h-4 w-4 text-amber-400 animate-pulse" />
+              <Sparkles className="h-4 w-4 text-amber-400" />
+              <span className="text-xs font-bold text-amber-300">Style Preview Ready! Click to view</span>
             </div>
           )}
         </motion.div>
