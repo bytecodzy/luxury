@@ -18,15 +18,58 @@ interface FaceAnalysis {
 
 // ── Product image helper ──────────────────────────────────────────────
 
-function getProductImageBuffer(imagePath: string): Buffer | null {
+function getProductImageBufferLocal(imagePath: string): Buffer | null {
   try {
     const fullPath = join(process.cwd(), 'public', imagePath)
     if (!existsSync(fullPath)) return null
     return readFileSync(fullPath)
   } catch (err) {
-    console.error('[try-on] Failed to read product image:', err)
+    console.error('[try-on] Failed to read local product image:', err)
     return null
   }
+}
+
+async function getProductImageBuffer(imagePath: string): Promise<Buffer | null> {
+  // Handle external URLs (http/https)
+  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+    try {
+      const response = await fetch(imagePath, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'image/*,*/*;q=0.8',
+        },
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!response.ok) {
+        console.error('[try-on] Failed to fetch external image:', response.status)
+        return null
+      }
+      return Buffer.from(await response.arrayBuffer())
+    } catch (err) {
+      console.error('[try-on] Failed to fetch external product image:', err)
+      return null
+    }
+  }
+  // Handle protocol-relative URLs
+  if (imagePath.startsWith('//')) {
+    return getProductImageBuffer(`https:${imagePath}`)
+  }
+  // Handle image-proxy URLs: /api/image-proxy?url=...
+  if (imagePath.startsWith('/api/image-proxy')) {
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+      const response = await fetch(`${baseUrl}${imagePath}`, {
+        signal: AbortSignal.timeout(10000),
+      })
+      if (!response.ok) return null
+      return Buffer.from(await response.arrayBuffer())
+    } catch (err) {
+      console.error('[try-on] Failed to fetch proxied product image:', err)
+      return null
+    }
+  }
+  // Local path
+  return getProductImageBufferLocal(imagePath)
 }
 
 // ── Category pairing for suggestions ──────────────────────────────────
@@ -63,7 +106,8 @@ function getDefaultAnalysis(categorySlug: string): FaceAnalysis {
 
 // ── VLM-based selfie analysis ────────────────────────────────────────
 
-async function analyzeSelfie(selfieBase64: string): Promise<FaceAnalysis> {
+async function analyzeSelfie(selfieBase64: string, categorySlug: string): Promise<FaceAnalysis> {
+  const defaultAnalysis = getDefaultAnalysis(categorySlug)
   try {
     const zai = await ZAI.create()
     const response = await zai.chat.completions.createVision({
@@ -112,7 +156,7 @@ Return ONLY the JSON, no other text.`
   } catch (err) {
     console.warn('[try-on] VLM analysis failed, using defaults:', err instanceof Error ? err.message : err)
   }
-  return getDefaultAnalysis('fashion')
+  return defaultAnalysis
 }
 
 // ── Product placement position based on analysis + category ───────────
@@ -239,33 +283,9 @@ async function createComposite(
   const W = 864
   const H = 1152
 
-  // 1. Resize selfie to fill the canvas (cover mode)
-  const selfieMeta = await sharp(selfieBuffer).metadata()
-  const selfieW = selfieMeta.width || 800
-  const selfieH = selfieMeta.height || 1000
-
-  // Calculate crop for cover mode
-  const targetRatio = W / H
-  const selfieRatio = selfieW / selfieH
-  let cropW: number, cropH: number, cropX: number, cropY: number
-
-  if (selfieRatio > targetRatio) {
-    // Selfie is wider - crop sides
-    cropH = selfieH
-    cropW = Math.round(selfieH * targetRatio)
-    cropX = Math.round((selfieW - cropW) / 2)
-    cropY = 0
-  } else {
-    // Selfie is taller - crop top/bottom
-    cropW = selfieW
-    cropH = Math.round(selfieW / targetRatio)
-    cropX = 0
-    cropY = 0 // Crop from top (keep the face)
-  }
-
+  // 1. Resize selfie to fill the canvas (cover mode, position top to keep face visible)
   const resizedSelfie = await sharp(selfieBuffer)
-    .extract({ left: cropX, top: cropY, width: Math.min(cropW, selfieW), height: Math.min(cropH, selfieH) })
-    .resize(W, H, { fit: 'cover' })
+    .resize(W, H, { fit: 'cover', position: 'top' })
     .jpeg({ quality: 92 })
     .toBuffer()
 
@@ -327,10 +347,10 @@ async function createComposite(
     .toBuffer()
 
   // Resize product image to fit inside the card
-  const innerW = cardW - padding * 2
-  const innerH = cardH - padding * 2 - 60 // Reserve 60px for text at bottom
+  const innerW = Math.max(50, cardW - padding * 2)
+  const innerH = Math.max(50, cardH - padding * 2 - 60) // Reserve 60px for text at bottom
   const productResized = await sharp(productBuffer)
-    .resize(innerW, innerH, { fit: 'inside', withoutEnlargement: true })
+    .resize(innerW, innerH, { fit: 'inside' })
     .png()
     .toBuffer()
 
@@ -477,22 +497,37 @@ export async function POST(request: NextRequest) {
     // Get product image buffer
     const productImages: string[] = JSON.parse(product.images || '[]')
     const productImagePath = productImageUrl || (productImages.length > 0 ? productImages[0] : null)
-    const productImageBuffer = productImagePath ? getProductImageBuffer(productImagePath) : null
+    const productImageBuffer = productImagePath ? await getProductImageBuffer(productImagePath) : null
 
     if (!productImageBuffer) {
       return NextResponse.json({ error: 'Product image not available' }, { status: 400 })
     }
 
     // Decode selfie base64 to buffer
-    const selfieBase64Match = selfieData.match(/^data:image\/(jpeg|jpg|png|webp);base64,(.+)$/)
+    const selfieBase64Match = selfieData.match(/^data:image\/([\w+]+);base64,(.+)$/)
     if (!selfieBase64Match) {
-      return NextResponse.json({ error: 'Invalid selfie image data' }, { status: 400 })
+      return NextResponse.json({ error: 'Invalid selfie image data - must be a data URI with base64 encoding' }, { status: 400 })
     }
     const selfieBuffer = Buffer.from(selfieBase64Match[2], 'base64')
 
+    // Validate selfie image is processable by sharp
+    try {
+      const selfieMeta = await sharp(selfieBuffer).metadata()
+      if (!selfieMeta.width || !selfieMeta.height || selfieMeta.width < 10 || selfieMeta.height < 10) {
+        return NextResponse.json({ error: 'Selfie image is too small or corrupted. Please upload a clearer photo.' }, { status: 400 })
+      }
+    } catch {
+      return NextResponse.json({ error: 'Could not process selfie image. Please try a different photo format (JPG or PNG).' }, { status: 400 })
+    }
+
     // Run VLM analysis and suggestion fetching in parallel
+    // VLM analysis has a 15s timeout to avoid long waits
+    const vlmTimeout = new Promise<FaceAnalysis>((resolve) => {
+      setTimeout(() => resolve(getDefaultAnalysis(product.category.slug)), 15000)
+    })
+
     const [analysis, suggestionsResult] = await Promise.allSettled([
-      analyzeSelfie(selfieData),
+      Promise.race([analyzeSelfie(selfieData, product.category.slug), vlmTimeout]),
       db.product.findMany({
         where: {
           category: { slug: { in: getPairingCategory(product.category.slug) } },
@@ -548,10 +583,11 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[try-on] API error:', error)
+    const message = error instanceof Error ? error.message : String(error)
     if (error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
-    return NextResponse.json({ error: 'Unexpected error occurred' }, { status: 500 })
+    return NextResponse.json({ error: `Failed to generate preview: ${message}` }, { status: 500 })
   }
 }
 

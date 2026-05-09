@@ -58,3 +58,29 @@ Stage Summary:
 - Frontend simplified significantly - no more long waits or misleading scores
 - Result shows the user's actual selfie with product overlay
 - Build compiles successfully
+
+---
+Task ID: 4
+Agent: Main
+Task: Fix "No job ID returned from server" error and improve try-on robustness
+
+Work Log:
+- Investigated the "No job ID returned from server" error - traced it to old code in versions/v1.1/ folder
+- Current source code (src/) does NOT contain jobId references - browser was caching old compiled code
+- Cleared .next/cache and .next/dev to force recompilation
+- Fixed sharp composite: replaced manual extract() with sharp's built-in cover resize (position: 'top') to avoid dimension errors
+- Made getProductImageBuffer async to support external URLs (http/https), proxy URLs (/api/image-proxy), and protocol-relative URLs (//)
+- Added selfie image validation before processing (minimum 10x10 pixels, processable by sharp)
+- Added VLM analysis 15-second timeout with category-aware default fallback
+- Improved error messages to include actual error details (not just "Unexpected error occurred")
+- Made selfie base64 regex more flexible to handle various image MIME types
+- Fixed innerW/innerH calculations with Math.max(50, ...) to prevent invalid dimensions
+- Tested API with valid test image - returns composite in ~3.5 seconds
+- Verified composite image output: 864x1152 JPEG, ~55KB
+
+Stage Summary:
+- Try-on API now works reliably with proper error handling
+- External product images (from Myntra, Nykaa, etc.) are supported
+- VLM analysis has timeout protection to prevent hanging requests
+- User will see clear error messages if something goes wrong
+- Browser cache cleared - new code should be served on refresh
