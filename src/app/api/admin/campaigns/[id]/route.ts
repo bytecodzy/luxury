@@ -1,29 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getSessionAsync } from '@/lib/sessions';
-
-async function verifyAdmin(request: NextRequest) {
-  const authHeader = request.headers.get('Authorization');
-  const token = authHeader?.replace('Bearer ', '');
-  const session = await getSessionAsync(token ?? '');
-
-  if (!session) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }), user: null };
-  }
-
-  if (session.role !== 'admin') {
-    return { error: NextResponse.json({ error: 'Forbidden. Admin access required.' }, { status: 403 }), user: null };
-  }
-
-  return { error: null, user: session };
-}
+import { requireAdmin } from '@/lib/auth-helper';
 
 // GET /api/admin/campaigns/[id] - Get campaign details with recipients
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await verifyAdmin(request);
+  const { error } = await requireAdmin(request);
   if (error) return error;
 
   const { id } = await params;
@@ -80,7 +64,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await verifyAdmin(request);
+  const { error } = await requireAdmin(request);
   if (error) return error;
 
   const { id } = await params;

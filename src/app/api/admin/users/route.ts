@@ -1,23 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getSessionAsync } from '@/lib/sessions';
-import { createHash } from 'crypto';
+import { requireAdmin } from '@/lib/auth-helper';
+import bcrypt from 'bcryptjs';
 
-async function verifyAdmin(request: NextRequest) {
-  const auth = request.headers.get('authorization');
-  const user = await getSessionAsync(auth?.replace('Bearer ', '') ?? '');
-  if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }), user: null };
-  if (user.role !== 'admin') return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }), user: null };
-  return { error: null, user };
-}
-
-function hashPassword(password: string): string {
-  return createHash('sha256').update(password).digest('hex');
+async function hashPassword(password: string): Promise<string> {
+  const salt = await bcrypt.genSalt(12);
+  return bcrypt.hash(password, salt);
 }
 
 // GET /api/admin/users - List all users
 export async function GET(request: NextRequest) {
-  const { error } = await verifyAdmin(request);
+  const { error } = await requireAdmin(request);
   if (error) return error;
 
   const { searchParams } = new URL(request.url);
@@ -69,7 +62,7 @@ export async function GET(request: NextRequest) {
 
 // POST /api/admin/users - Admin creates user with specific role and permissions
 export async function POST(request: NextRequest) {
-  const { error } = await verifyAdmin(request);
+  const { error } = await requireAdmin(request);
   if (error) return error;
 
   try {
@@ -92,7 +85,7 @@ export async function POST(request: NextRequest) {
       data: {
         email,
         name,
-        password: hashPassword(password),
+        password: await hashPassword(password),
         role: role || 'customer',
         isActive: isActive !== undefined ? isActive : true,
         approvalStatus: approvalStatus || 'approved',

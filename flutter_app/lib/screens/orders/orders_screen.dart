@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../config/app_config.dart';
 import '../../models/app_models.dart';
 import '../../providers/app_providers.dart';
+import '../../services/api_service.dart';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -19,9 +20,9 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   static const _tabs = ['All', 'Pending', 'Shipped', 'Delivered', 'Cancelled'];
 
-  // Mock orders for demo
-  final List<Order> _orders = [];
+  List<Order> _orders = [];
   bool _isLoading = true;
+  String? _error;
 
   @override
   void initState() {
@@ -37,21 +38,25 @@ class _OrdersScreenState extends State<OrdersScreen>
   }
 
   Future<void> _loadOrders() async {
-    // Simulate loading - in production this would come from AppProvider/API
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (mounted) {
+    setState(() { _isLoading = true; _error = null; });
+    try {
+      final api = ApiService();
+      final provider = context.read<AppProvider>();
+      if (!provider.isLoggedIn) {
+        setState(() { _isLoading = false; _orders = []; });
+        return;
+      }
+      final orders = await api.getOrders();
       setState(() {
-        _orders.addAll(_generateMockOrders());
+        _orders = orders;
         _isLoading = false;
       });
+    } catch (e) {
+      setState(() { _error = e.toString(); _isLoading = false; });
     }
   }
 
   Future<void> _onRefresh() async {
-    setState(() {
-      _orders.clear();
-      _isLoading = true;
-    });
     await _loadOrders();
   }
 
@@ -108,100 +113,65 @@ class _OrdersScreenState extends State<OrdersScreen>
                 strokeWidth: 2,
               ),
             )
-          : TabBarView(
-              controller: _tabController,
-              children: _tabs.map((tab) {
-                final filtered = _getFilteredOrders(tab);
-                return filtered.isEmpty
-                    ? _EmptyOrdersState(tab: tab)
-                    : RefreshIndicator(
-                        color: gold,
-                        backgroundColor: const Color(AppConfig.cardBg),
-                        onRefresh: _onRefresh,
-                        child: ListView.separated(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.all(16),
-                          itemCount: filtered.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
-                          itemBuilder: (context, index) {
-                            return _OrderCard(order: filtered[index]);
-                          },
+          : _error != null
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.error_outline, color: Colors.redAccent.withOpacity(0.5), size: 48),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Failed to load orders',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white.withOpacity(0.6),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
                         ),
-                      );
-              }).toList(),
-            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _error!,
+                        style: GoogleFonts.poppins(
+                          color: Colors.white.withOpacity(0.4),
+                          fontSize: 12,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: _loadOrders,
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: Text(
+                          'Retry',
+                          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : TabBarView(
+                  controller: _tabController,
+                  children: _tabs.map((tab) {
+                    final filtered = _getFilteredOrders(tab);
+                    return filtered.isEmpty
+                        ? _EmptyOrdersState(tab: tab)
+                        : RefreshIndicator(
+                            color: gold,
+                            backgroundColor: const Color(AppConfig.cardBg),
+                            onRefresh: _onRefresh,
+                            child: ListView.separated(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.all(16),
+                              itemCount: filtered.length,
+                              separatorBuilder: (_, __) => const SizedBox(height: 12),
+                              itemBuilder: (context, index) {
+                                return _OrderCard(order: filtered[index]);
+                              },
+                            ),
+                          );
+                  }).toList(),
+                ),
     );
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // Mock Data Generator
-  // ════════════════════════════════════════════════════════════════
-  List<Order> _generateMockOrders() {
-    return [
-      Order(
-        id: '1',
-        orderNumber: '3BL-2024-001',
-        total: 4999,
-        status: 'delivered',
-        createdAt: DateTime.now().subtract(const Duration(days: 7)),
-        items: [
-          OrderItem(name: 'Royal Gold Hamper', price: 3499, quantity: 1, image: ''),
-          OrderItem(name: 'Premium Candle Set', price: 1500, quantity: 1, image: ''),
-        ],
-      ),
-      Order(
-        id: '2',
-        orderNumber: '3BL-2024-002',
-        total: 2999,
-        status: 'shipped',
-        createdAt: DateTime.now().subtract(const Duration(days: 3)),
-        items: [
-          OrderItem(name: 'Luxury Chocolate Box', price: 2999, quantity: 1, image: ''),
-        ],
-      ),
-      Order(
-        id: '3',
-        orderNumber: '3BL-2024-003',
-        total: 8997,
-        status: 'pending',
-        createdAt: DateTime.now().subtract(const Duration(hours: 12)),
-        items: [
-          OrderItem(name: 'Diamond Necklace Set', price: 5999, quantity: 1, image: ''),
-          OrderItem(name: 'Silk Scarf Collection', price: 2998, quantity: 1, image: ''),
-        ],
-      ),
-      Order(
-        id: '4',
-        orderNumber: '3BL-2024-004',
-        total: 1599,
-        status: 'cancelled',
-        createdAt: DateTime.now().subtract(const Duration(days: 14)),
-        items: [
-          OrderItem(name: 'Artisan Tea Collection', price: 1599, quantity: 1, image: ''),
-        ],
-      ),
-      Order(
-        id: '5',
-        orderNumber: '3BL-2024-005',
-        total: 6498,
-        status: 'delivered',
-        createdAt: DateTime.now().subtract(const Duration(days: 21)),
-        items: [
-          OrderItem(name: 'Crystal Vase Set', price: 4499, quantity: 1, image: ''),
-          OrderItem(name: 'Scented Candle Trio', price: 1999, quantity: 1, image: ''),
-        ],
-      ),
-      Order(
-        id: '6',
-        orderNumber: '3BL-2024-006',
-        total: 3499,
-        status: 'shipped',
-        createdAt: DateTime.now().subtract(const Duration(days: 2)),
-        items: [
-          OrderItem(name: 'Perfume Gift Set', price: 3499, quantity: 1, image: ''),
-        ],
-      ),
-    ];
   }
 }
 
@@ -356,7 +326,7 @@ class _OrderCard extends StatelessWidget {
                       child: order.items.first.image != null &&
                               order.items.first.image!.isNotEmpty
                           ? Image.network(
-                              order.items.first.image!,
+                              AppConfig.getImageUrl(order.items.first.image),
                               fit: BoxFit.cover,
                               errorBuilder: (_, __, ___) => Container(
                                 color: const Color(AppConfig.surfaceBg),
@@ -468,6 +438,7 @@ class _StatusBadge extends StatelessWidget {
   Color _getColor() {
     switch (status.toLowerCase()) {
       case 'pending':
+      case 'processing':
         return Colors.amber;
       case 'shipped':
         return Colors.blue;
@@ -484,6 +455,8 @@ class _StatusBadge extends StatelessWidget {
     switch (status.toLowerCase()) {
       case 'pending':
         return Icons.schedule;
+      case 'processing':
+        return Icons.settings;
       case 'shipped':
         return Icons.local_shipping;
       case 'delivered':
@@ -687,7 +660,7 @@ class _OrderDetailScreen extends StatelessWidget {
                                 height: 52,
                                 child: item.image != null && item.image!.isNotEmpty
                                     ? Image.network(
-                                        item.image!,
+                                        AppConfig.getImageUrl(item.image),
                                         fit: BoxFit.cover,
                                         errorBuilder: (_, __, ___) => Container(
                                           color: const Color(AppConfig.surfaceBg),
@@ -769,63 +742,7 @@ class _OrderDetailScreen extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-
-            // Shipping Address
-            _DetailSection(
-              icon: Icons.location_on_outlined,
-              title: 'Shipping Address',
-              content: '123 Luxury Lane\nMumbai, Maharashtra 400001\nIndia',
-            ),
-            const SizedBox(height: 16),
-
-            // Payment Method
-            _DetailSection(
-              icon: Icons.payment_outlined,
-              title: 'Payment Method',
-              content: 'Visa ending in 4242',
-            ),
             const SizedBox(height: 24),
-
-            // Download Invoice
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      backgroundColor: const Color(AppConfig.cardBg),
-                      content: Row(
-                        children: [
-                          const Icon(Icons.download_done, color: Color(AppConfig.primaryGold), size: 20),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Invoice download started',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          ),
-                        ],
-                      ),
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.download_outlined, size: 18),
-                label: Text(
-                  'Download Invoice',
-                  style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: gold,
-                  side: const BorderSide(color: gold, width: 1),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -852,6 +769,7 @@ class _OrderDetailScreen extends StatelessWidget {
         currentStep = 0;
         break;
       case 'confirmed':
+      case 'processing':
         currentStep = 1;
         break;
       case 'shipped':
@@ -962,62 +880,5 @@ class _OrderDetailScreen extends StatelessWidget {
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
     ];
     return '${date.day} ${months[date.month]}, ${date.year}';
-  }
-}
-
-// ════════════════════════════════════════════════════════════════
-// Detail Section
-// ════════════════════════════════════════════════════════════════
-class _DetailSection extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String content;
-
-  const _DetailSection({
-    required this.icon,
-    required this.title,
-    required this.content,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    const gold = Color(AppConfig.primaryGold);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(AppConfig.cardBg),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: gold.withOpacity(0.08), width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: gold, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Text(
-            content,
-            style: GoogleFonts.poppins(
-              color: Colors.white.withOpacity(0.6),
-              fontSize: 13,
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

@@ -83,15 +83,15 @@ export function CheckoutView() {
     {
       id: 'express',
       label: t('checkout.expressDelivery'),
-      description: format(25),
-      price: 25,
+      description: format(150),
+      price: 150,
       estimatedDays: t('checkout.businessDays', { days: '2-3' }),
     },
     {
       id: 'same-day',
       label: t('checkout.sameDayDelivery'),
-      description: format(50),
-      price: 50,
+      description: format(250),
+      price: 250,
       estimatedDays: t('checkout.businessDays', { days: '1' }),
     },
   ];
@@ -106,8 +106,8 @@ export function CheckoutView() {
   const deliveryCost = selectedDelivery.price;
 
   const shipping = deliveryType === 'standard'
-    ? (subtotal > 500 ? 0 : 15)
-    : deliveryCost;
+    ? (subtotal > 500 ? 0 : 50)
+    : deliveryType === 'express' ? 150 : deliveryType === 'same-day' ? 250 : deliveryCost;
   const tax = subtotal * 0.08;
   const total = subtotal + shipping + tax - discount;
 
@@ -119,7 +119,7 @@ export function CheckoutView() {
     city: '',
     state: '',
     zipCode: '',
-    country: 'US',
+    country: 'IN',
     phone: '',
     cardNumber: '',
     cardExpiry: '',
@@ -408,7 +408,7 @@ export function CheckoutView() {
                         : 'text-amber-200/60'
                     }`}>
                       {option.id === 'standard'
-                        ? (subtotal > 500 ? t('common.free') : format(15))
+                        ? (subtotal > 500 ? t('common.free') : format(50))
                         : format(option.price)
                       }
                     </span>

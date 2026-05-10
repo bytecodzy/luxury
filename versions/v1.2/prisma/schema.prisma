@@ -1,0 +1,407 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  image       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  products    Product[]
+}
+
+model Product {
+  id             String    @id @default(cuid())
+  productNumber  String    @unique
+  name           String
+  slug           String    @unique
+  description    String
+  price          Float
+  compareAtPrice Float?
+  costPrice      Float?
+  sku            String?
+  images         String    // JSON array of image URLs
+  categoryId     String
+  category       Category  @relation(fields: [categoryId], references: [id])
+  stock          Int       @default(0)
+  reorderLevel   Int       @default(5)
+  rating         Float     @default(0)
+  reviewCount    Int       @default(0)
+  featured       Boolean   @default(false)
+  tags           String?   // JSON array of tags
+  vendorId       String?
+  vendor         Vendor?   @relation(fields: [vendorId], references: [id])
+  sourceUrl      String?
+  platform       String?   // myntra, nykaa, amazon, caratlane, tanishq, bluestone, voylla, flipkart, etc.
+  affiliateUrl   String?   // affiliate/tracking link for external products
+  affiliateId    String?   // affiliate network ID
+  commission     Float?    // commission percentage
+  externalId     String?   // product ID on the source platform
+  lastSyncedAt   DateTime? // when the product was last synced from source
+  syncStatus     String    @default("active") // active, paused, error, removed
+  isExternal     Boolean   @default(false) // true = product lives on another platform
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+  inventoryLogs  InventoryLog[]
+  wishlistItems  WishlistItem[]
+}
+
+model PlatformIntegration {
+  id              String    @id @default(cuid())
+  name            String    @unique  // e.g. "Myntra", "Nykaa", "CaratLane"
+  slug            String    @unique  // e.g. "myntra", "nykaa", "caratlane"
+  baseUrl         String    // e.g. "https://www.myntra.com"
+  logo            String?   // URL to platform logo
+  isActive        Boolean   @default(true)
+  autoSync        Boolean   @default(true) // automatically sync products
+  syncInterval    Int       @default(3600) // sync interval in seconds (1 hour default)
+  lastSyncedAt    DateTime?
+  syncStatus      String    @default("idle") // idle, syncing, error
+  lastSyncError   String?
+  categories      String    @default("[]") // JSON array of categories to import
+  affiliateTag    String?   // affiliate tracking tag
+  commission      Float?    @default(0) // default commission %
+  maxProducts     Int       @default(500) // max products to keep from this platform
+  productCount    Int       @default(0) // current number of products from this platform
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  syncLogs        SyncLog[]
+  categoryMaps    PartnerCategoryMap[]
+}
+
+model SyncLog {
+  id              String    @id @default(cuid())
+  integrationId   String
+  integration     PlatformIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  type            String    // full, incremental, category
+  status          String    // started, completed, failed
+  productsFound   Int       @default(0)
+  productsAdded   Int       @default(0)
+  productsUpdated Int       @default(0)
+  productsRemoved Int       @default(0)
+  error           String?
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+}
+
+model Cart {
+  id        String     @id @default(cuid())
+  sessionId String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  items     CartItem[]
+}
+
+model CartItem {
+  id        String  @id @default(cuid())
+  cartId    String
+  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int     @default(1)
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  orderNumber   String      @unique
+  email         String
+  firstName     String
+  lastName      String
+  address       String
+  city          String
+  state         String
+  zipCode       String
+  country       String
+  phone         String?
+  subtotal      Float
+  shipping      Float
+  tax           Float
+  total         Float
+  status        String      @default("pending") // pending, processing, shipped, delivered, cancelled
+  paymentMethod String      @default("card")
+  paymentStatus String      @default("pending") // pending, paid, failed, refunded
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  items         OrderItem[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  name      String
+  price     Float
+  quantity  Int
+  image     String?
+}
+
+model User {
+  id                 String            @id @default(cuid())
+  email              String            @unique
+  name               String
+  password           String?
+  role               String            @default("user") // admin, user, agent, team, corporate
+  avatar             String?
+  phone              String?
+  isActive           Boolean           @default(true)
+  emailVerified      Boolean           @default(false)
+  phoneVerified      Boolean           @default(false)
+  twoFactorSecret    String?
+  twoFactorEnabled   Boolean           @default(false)
+  twoFactorRequired  Boolean           @default(false) // admin-enforced 2FA requirement
+  adminRole          String?           // super_admin, product_manager, order_manager, inventory_manager, finance_manager, support_agent, corporate_account_manager
+  corporateRole      String?           // corporate_admin, finance_user, campaign_manager
+  approvalStatus     String            @default("pending") // pending, approved, rejected, suspended
+  socialProvider     String?           // google, facebook, linkedin
+  socialId           String?
+  resetToken         String?
+  resetTokenExpiry   DateTime?
+  emailVerifyToken   String?
+  emailVerifyExpiry  DateTime?
+  phoneVerifyCode    String?
+  phoneVerifyExpiry  DateTime?
+  otpCode            String?           // for OTP login
+  otpExpiry          DateTime?         // OTP expiry time
+  otpRequestId       String?           // OTP request ID for verification
+  failedLoginAttempts Int             @default(0) // track failed login attempts
+  lockedUntil        DateTime?         // account lock expiry time
+  lastLoginAt        DateTime?
+  lastLoginIp        String?
+  lastLoginDevice    String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  permissions        UserPermission[]
+  sessions           Session[]
+  wishlistItems      WishlistItem[]
+  auditLogs          AuditLog[]
+  corporateAccount   CorporateAccount?
+}
+
+model UserPermission {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission String   // e.g. "products.manage", "orders.manage", "accounting.view"
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, permission])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  token        String   @unique
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress    String?
+  userAgent    String?
+  deviceInfo   String?
+  lastActivity DateTime @default(now())
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+}
+
+model Vendor {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  gstNumber   String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+  invoices    Invoice[]
+}
+
+model Invoice {
+  id             String       @id @default(cuid())
+  invoiceNumber  String       @unique
+  vendorId       String?
+  vendor         Vendor?      @relation(fields: [vendorId], references: [id])
+  orderId        String?
+  amount         Float
+  tax            Float        @default(0)
+  total          Float
+  status         String       @default("draft") // draft, sent, paid, cancelled
+  dueDate        DateTime?
+  paidDate       DateTime?
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  items          InvoiceItem[]
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Int     @default(1)
+  unitPrice   Float
+  amount      Float
+}
+
+model AccountEntry {
+  id          String   @id @default(cuid())
+  entryNumber String   @unique
+  type        String   // debit, credit
+  category    String   // sales, purchase, expense, refund, tax, other
+  amount      Float
+  description String
+  reference   String?  // order number, invoice number, etc.
+  createdAt   DateTime @default(now())
+}
+
+model InventoryLog {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  type      String   // in, out, adjustment, return
+  quantity  Int
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+}
+
+model PaymentMethod {
+  id           String   @id @default(cuid())
+  type         String   // card, upi, netbanking, wallet
+  provider     String?
+  last4        String?
+  isDefault    Boolean  @default(false)
+  userId       String?
+  createdAt    DateTime @default(now())
+}
+
+model Offer {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  code        String    @unique
+  type        String    // percentage, fixed
+  value       Float
+  minOrder    Float?
+  maxDiscount Float?
+  validFrom   DateTime
+  validTo     DateTime
+  isActive    Boolean   @default(true)
+  usageLimit  Int?
+  usedCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model WikiDocument {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  category  String?
+  createdBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AgentDocShare {
+  id         String   @id @default(cuid())
+  agentId    String
+  docId      String
+  sharedBy   String
+  createdAt  DateTime @default(now())
+}
+
+model SupportTicket {
+  id        String                  @id @default(cuid())
+  subject   String
+  status    String                  @default("open") // open, in_progress, resolved, closed
+  priority  String                  @default("medium") // low, medium, high, urgent
+  userId    String?
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
+  messages  SupportTicketMessage[]
+}
+
+model SupportTicketMessage {
+  id        String         @id @default(cuid())
+  ticketId  String
+  ticket    SupportTicket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  senderId  String?
+  message   String
+  createdAt DateTime       @default(now())
+}
+
+model AffiliateClick {
+  id           String   @id @default(cuid())
+  productId    String
+  platform     String   // which platform the click was for
+  sourceUrl    String?  // the external URL clicked
+  referralCode String?  // affiliate referral code used
+  ipAddress    String?
+  userAgent    String?
+  clickedAt    DateTime @default(now())
+}
+
+model PartnerCategoryMap {
+  id             String   @id @default(cuid())
+  integrationId  String
+  integration    PlatformIntegration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  partnerCatName String   // category name on partner site (e.g. "Rings", "Necklaces")
+  partnerCatSlug String   // category slug on partner site
+  localCatId     String?  // map to our category (nullable = create new)
+  createdAt      DateTime @default(now())
+
+  @@unique([integrationId, partnerCatSlug])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String   // login_success, login_failed, register, logout, etc.
+  entity    String   // user, order, product, etc.
+  entityId  String?
+  details   String?  // JSON string with additional info
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+}
+
+model CorporateAccount {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName         String
+  gstNumber           String?
+  billingAddress      String?
+  authorizedPerson    String?
+  workEmail           String?
+  approvalStatus      String   @default("pending") // pending, approved, rejected, suspended
+  creditLimit         Float    @default(0)
+  paymentTerms        String?  // net15, net30, net60
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}

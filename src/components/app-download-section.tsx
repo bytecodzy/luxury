@@ -131,7 +131,7 @@ export function AppDownloadSection() {
           >
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-medium text-amber-400">
               <Smartphone className="h-3.5 w-3.5" />
-              Available as Android App
+              Available on iOS & Android
             </div>
             <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
               <span className="text-amber-50">Get the </span>
@@ -139,7 +139,7 @@ export function AppDownloadSection() {
               <span className="text-amber-50"> App</span>
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-base text-amber-200/60 sm:text-lg">
-              Install our app on your Android device for the ultimate luxury
+              Install our app on your iPhone or Android device for the ultimate luxury
               shopping experience. Browse, gift, and shop — anytime, anywhere.
             </p>
           </motion.div>
@@ -252,13 +252,15 @@ export function AppDownloadSection() {
                     className="gap-2 bg-amber-600 text-stone-950 hover:bg-amber-500 transition-all duration-300 hover:shadow-lg hover:shadow-amber-600/25 px-8 py-6 text-base font-bold"
                   >
                     <Download className="h-5 w-5" />
-                    {isMobile
+                    {isIOS
                       ? 'Add to Home Screen'
-                      : 'Get Android App'}
+                      : isMobile
+                        ? 'Install App'
+                        : 'Get the App'}
                   </Button>
                 )}
                 <p className="text-xs text-amber-200/40">
-                  Free • No app store needed • Instant install
+                  Free • Works on iOS & Android • Instant install
                 </p>
               </div>
             </motion.div>
@@ -398,11 +400,11 @@ export function AppDownloadSection() {
                     One-Tap Install
                   </h4>
                   <p className="text-xs text-amber-200/50 leading-relaxed">
-                    Our Progressive Web App installs directly on your Android
-                    device — no app store needed. It works just like a native
-                    app: launches from your home screen, runs fullscreen, and
-                    works offline. Get instant access to luxury gifting with a
-                    single tap.
+                    Our Progressive Web App installs directly on your iPhone or
+                    Android device — no app store needed. It works just like a
+                    native app: launches from your home screen, runs fullscreen,
+                    and works offline. Get instant access to luxury gifting with
+                    a single tap.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {[
@@ -426,11 +428,11 @@ export function AppDownloadSection() {
               {/* Alternative: Open in browser */}
               <div className="mt-4 flex flex-col gap-2">
                 <button
-                  onClick={() => window.open('/app/', '_blank')}
+                  onClick={() => window.open('/?XTransformPort=3002', '_blank')}
                   className="flex items-center gap-2 text-sm text-amber-300/60 hover:text-amber-300 transition-colors"
                 >
                   <Monitor className="h-4 w-4" />
-                  Or try the Flutter Web App in your browser
+                  Or try the app in your browser
                   <ChevronRight className="h-3.5 w-3.5" />
                 </button>
               </div>

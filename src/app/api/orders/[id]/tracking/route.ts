@@ -1,13 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getSessionFromRequest } from '@/lib/auth-helper'
 
 // GET /api/orders/[id]/tracking - Get all tracking events for an order
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params
+
+    // Authenticate user
+    const user = await getSessionFromRequest(request)
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      )
+    }
 
     // Verify order exists
     const order = await db.order.findUnique({
@@ -15,6 +25,7 @@ export async function GET(
       select: {
         id: true,
         orderNumber: true,
+        email: true,
         status: true,
         deliveryType: true,
         estimatedDelivery: true,
@@ -27,6 +38,14 @@ export async function GET(
       return NextResponse.json(
         { error: 'Order not found' },
         { status: 404 }
+      )
+    }
+
+    // Allow access if admin or order owner
+    if (user.role !== 'admin' && user.email !== order.email) {
+      return NextResponse.json(
+        { error: 'Forbidden: You can only view tracking for your own orders' },
+        { status: 403 }
       )
     }
 

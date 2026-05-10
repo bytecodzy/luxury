@@ -155,6 +155,13 @@ class _MainNavigationState extends State<MainNavigation> {
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
 
+    // Sync tab index with provider (e.g., when child screens call setTab)
+    if (provider.currentTab != _currentIndex) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _currentIndex = provider.currentTab);
+      });
+    }
+
     final List<Widget> screens = [
       const HomeScreen(),
       const CategoryScreen(),

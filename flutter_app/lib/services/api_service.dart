@@ -20,7 +20,7 @@ class ApiService {
   };
 
   Future<Map<String, dynamic>> _get(String path, {Map<String, String>? queryParams}) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}$path').replace(queryParameters: queryParams);
+    final uri = Uri.parse('${AppConfig.effectiveBaseUrl}$path').replace(queryParameters: queryParams);
     final response = await http.get(uri, headers: _headers);
     if (response.statusCode == 200) {
       return json.decode(response.body);
@@ -29,7 +29,7 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}$path');
+    final uri = Uri.parse('${AppConfig.effectiveBaseUrl}$path');
     final response = await http.post(uri, headers: _headers, body: json.encode(body));
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return json.decode(response.body);
@@ -38,7 +38,7 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> _put(String path, Map<String, dynamic> body) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}$path');
+    final uri = Uri.parse('${AppConfig.effectiveBaseUrl}$path');
     final response = await http.put(uri, headers: _headers, body: json.encode(body));
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return json.decode(response.body);
@@ -47,7 +47,7 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> _delete(String path) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}$path');
+    final uri = Uri.parse('${AppConfig.effectiveBaseUrl}$path');
     final response = await http.delete(uri, headers: _headers);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return json.decode(response.body);

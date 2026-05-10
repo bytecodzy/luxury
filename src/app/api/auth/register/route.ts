@@ -58,19 +58,19 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate password length
-    if (password.length < 6) {
+    if (password.length < 8) {
       return NextResponse.json(
-        { error: 'Password must be at least 6 characters long' },
+        { error: 'Password must be at least 8 characters long' },
         { status: 400 }
       );
     }
 
     // Validate role
     const validRole = role || 'user';
-    const allowedRoles = ['admin', 'user', 'agent', 'team', 'corporate'];
+    const allowedRoles = ['user', 'agent', 'team', 'corporate'];
     if (!allowedRoles.includes(validRole)) {
       return NextResponse.json(
-        { error: 'Invalid role. Must be one of: admin, user, agent, team' },
+        { error: 'Invalid role. Must be one of: user, agent, team, corporate' },
         { status: 400 }
       );
     }
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // Determine approval status based on role
-    const approvalStatus = ['admin', 'user', 'corporate'].includes(validRole) ? 'approved' : 'pending';
+    const approvalStatus = ['user'].includes(validRole) ? 'approved' : 'pending';
 
     // Create user
     const user = await db.user.create({

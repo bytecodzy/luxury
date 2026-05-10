@@ -195,15 +195,15 @@ export function AdminDashboard() {
 function DashboardTab({ token }: { token: string | null }) {
   const { data: productsData } = useQuery({ queryKey: ['admin-products'], queryFn: () => apiFetch('/api/admin/products?limit=1', undefined, token) })
   const { data: usersData } = useQuery({ queryKey: ['admin-users'], queryFn: () => apiFetch('/api/admin/users?limit=1', undefined, token) })
-  const { data: ordersData } = useQuery({ queryKey: ['admin-orders'], queryFn: () => apiFetch('/api/admin/products?limit=1', undefined, token).then(() => fetch('/api/orders?email=admin@3boxes.com', { headers: authH(token) }).then(r => r.json()).catch(() => ({ orders: [] }))) })
+  const { data: ordersData } = useQuery({ queryKey: ['admin-orders'], queryFn: () => apiFetch('/api/admin/orders?limit=1', undefined, token) })
   const { data: accountingData } = useQuery({ queryKey: ['accounting-summary'], queryFn: () => apiFetch('/api/accounting?limit=1', undefined, token) })
 
   const totalProducts = productsData?.pagination?.total || 0
   const totalUsers = usersData?.pagination?.total || 0
-  const totalOrders = ordersData?.orders?.length || 0
+  const totalOrders = ordersData?.pagination?.total || 0
   const totalRevenue = accountingData?.summary?.totalCredits || 0
 
-  const { data: recentOrders } = useQuery({ queryKey: ['recent-orders'], queryFn: () => apiFetch('/api/admin/products?limit=5', undefined, token).catch(() => null) })
+  const { data: recentOrders } = useQuery({ queryKey: ['recent-orders'], queryFn: () => apiFetch('/api/admin/orders?limit=5', undefined, token).catch(() => null) })
 
   const summaryCards = [
     { title: 'Total Revenue', value: fmt(totalRevenue), icon: DollarSign, color: 'text-green-400', bg: 'bg-green-600/10' },
@@ -466,7 +466,7 @@ function ProductForm({ token, product, onClose, onSaved }: { token: string | nul
         reorderLevel: parseInt(form.reorderLevel),
         images,
         tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : [],
-        vendorId: form.vendorId || null,
+        vendorId: form.vendorId === 'none' ? null : form.vendorId || null,
       }
       if (product) {
         await apiFetch(`/api/admin/products/${product.id}`, { method: 'PUT', body: JSON.stringify(body) }, token)

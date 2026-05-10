@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_models.dart';
 import '../services/api_service.dart';
 import '../config/app_config.dart';
@@ -70,6 +71,13 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
     
     try {
+      // Restore auth token from SharedPreferences before making API calls
+      final prefs = await SharedPreferences.getInstance();
+      final savedToken = prefs.getString('auth_token');
+      if (savedToken != null) {
+        _api.setAuthToken(savedToken);
+      }
+
       await Future.wait([
         loadCategories(),
         loadProducts(),
@@ -80,6 +88,21 @@ class AppProvider extends ChangeNotifier {
       final user = await _api.getMe();
       if (user != null) {
         _user = user;
+
+        // Load cart from backend
+        try {
+          final cartData = await _api.getCart();
+          final List<dynamic> items = cartData['items'] ?? [];
+          _cartItems = items.map((e) => CartItem.fromJson(e)).toList();
+        } catch (_) {
+          // Cart might be empty, that's fine
+        }
+
+        // Load wishlist from backend
+        try {
+          final wishlistData = await _api.getWishlist();
+          _wishlistIds = wishlistData.map((p) => p.id).toList();
+        } catch (_) {}
       }
     } catch (e) {
       debugPrint('Init error: $e');
@@ -163,17 +186,24 @@ class AppProvider extends ChangeNotifier {
     // Sync with backend if logged in
     if (isLoggedIn) {
       try {
-        await _api.addToCart(_cartItems.last);
+        await _api.addToCart(_cartItems[existingIndex >= 0 ? existingIndex : _cartItems.length - 1]);
       } catch (_) {}
     }
   }
 
-  void removeFromCart(String productId) {
+  Future<void> removeFromCart(String productId) async {
     _cartItems.removeWhere((item) => item.productId == productId);
     notifyListeners();
+
+    // Sync with backend if logged in
+    if (isLoggedIn) {
+      try {
+        await _api.removeFromCart(productId);
+      } catch (_) {}
+    }
   }
 
-  void updateCartQuantity(String productId, int quantity) {
+  Future<void> updateCartQuantity(String productId, int quantity) async {
     final index = _cartItems.indexWhere((item) => item.productId == productId);
     if (index >= 0) {
       if (quantity <= 0) {
@@ -183,11 +213,29 @@ class AppProvider extends ChangeNotifier {
       }
     }
     notifyListeners();
+
+    // Sync with backend if logged in
+    if (isLoggedIn) {
+      try {
+        await _api.updateCartItem(productId, quantity);
+      } catch (_) {}
+    }
   }
 
-  void clearCart() {
+  Future<void> clearCart() async {
+    // Save product IDs before clearing local state
+    final productIds = _cartItems.map((item) => item.productId).toList();
     _cartItems = [];
     notifyListeners();
+
+    // Sync with backend if logged in
+    if (isLoggedIn) {
+      try {
+        for (final productId in productIds) {
+          await _api.removeFromCart(productId);
+        }
+      } catch (_) {}
+    }
   }
 
   // Wishlist
@@ -213,6 +261,15 @@ class AppProvider extends ChangeNotifier {
     try {
       final data = await _api.login(email, password);
       _user = User.fromJson(data['user']);
+
+      // Save auth token
+      final token = data['token'] as String?;
+      if (token != null) {
+        _api.setAuthToken(token);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('auth_token', token);
+      }
+
       notifyListeners();
       return true;
     } catch (e) {
@@ -224,6 +281,15 @@ class AppProvider extends ChangeNotifier {
     try {
       final data = await _api.register(name, email, password);
       _user = User.fromJson(data['user']);
+
+      // Save auth token
+      final token = data['token'] as String?;
+      if (token != null) {
+        _api.setAuthToken(token);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('auth_token', token);
+      }
+
       notifyListeners();
       return true;
     } catch (e) {
@@ -231,9 +297,14 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
-  void logout() {
+  Future<void> logout() async {
     _user = null;
     _api.clearAuthToken();
+
+    // Clear saved token
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+
     notifyListeners();
   }
 

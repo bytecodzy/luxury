@@ -1,21 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getSessionAsync } from '@/lib/sessions';
-
-async function verifyAdmin(request: NextRequest) {
-  const auth = request.headers.get('authorization');
-  const user = await getSessionAsync(auth?.replace('Bearer ', '') ?? '');
-  if (!user) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }), user: null };
-  if (user.role !== 'admin') return { error: NextResponse.json({ error: 'Forbidden' }, { status: 403 }), user: null };
-  return { error: null, user };
-}
+import { requireAdmin } from '@/lib/auth-helper';
 
 // GET /api/admin/products/[id] - Get single product
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await verifyAdmin(request);
+  const { error } = await requireAdmin(request);
   if (error) return error;
 
   const { id } = await params;
@@ -46,7 +38,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await verifyAdmin(request);
+  const { error } = await requireAdmin(request);
   if (error) return error;
 
   const { id } = await params;
@@ -120,7 +112,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await verifyAdmin(request);
+  const { error } = await requireAdmin(request);
   if (error) return error;
 
   const { id } = await params;

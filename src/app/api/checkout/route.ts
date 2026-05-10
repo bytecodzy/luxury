@@ -79,7 +79,6 @@ export async function POST(request: NextRequest) {
       greetingMessage,
       hidePrice = false,
       couponCode,
-      discount: clientDiscount = 0,
       paymentMethod = 'card',
     } = body
 
@@ -207,8 +206,6 @@ export async function POST(request: NextRequest) {
         validatedDiscount = result.discount
         offerId = result.offerId
       }
-    } else if (clientDiscount > 0) {
-      validatedDiscount = Math.min(clientDiscount, subtotal)
     }
 
     // Calculate shipping based on delivery type

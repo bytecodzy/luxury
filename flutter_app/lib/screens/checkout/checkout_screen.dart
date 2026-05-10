@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../config/app_config.dart';
 import '../../providers/app_providers.dart';
+import '../../services/api_service.dart';
 
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({super.key});
@@ -777,21 +778,51 @@ class _CheckoutScreenState extends State<CheckoutScreen> with SingleTickerProvid
 
     setState(() => _isPlacing = true);
 
-    // Simulate order placement
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final api = ApiService();
+      await api.checkout({
+        'name': _nameController.text,
+        'phone': _phoneController.text,
+        'address': _address1Controller.text,
+        'address2': _address2Controller.text,
+        'city': _cityController.text,
+        'state': _stateController.text,
+        'zipCode': _pincodeController.text,
+        'items': provider.cartItems.map((item) => {
+          'productId': item.productId,
+          'quantity': item.quantity,
+        }).toList(),
+        'paymentMethod': _paymentMethod,
+        'couponCode': _promoApplied ? _promoController.text : null,
+      });
 
-    if (!mounted) return;
+      provider.clearCart();
 
-    provider.clearCart();
+      if (!mounted) return;
+      setState(() => _isPlacing = false);
 
-    setState(() => _isPlacing = false);
-
-    // Show success dialog
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => _OrderSuccessDialog(),
-    );
+      // Show success dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _OrderSuccessDialog(),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isPlacing = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(AppConfig.cardBg),
+            content: Text(
+              'Failed to place order: $e',
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    }
   }
 }
 

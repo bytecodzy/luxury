@@ -33,6 +33,31 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Only HTTP/HTTPS URLs can be proxied' }, { status: 400 });
   }
 
+  // Block internal/private IPs and restrict to known image domains
+  const ALLOWED_DOMAINS = [
+    'myntra.com', 'www.myntra.com', 'assets.myntassets.com',
+    'nykaa.com', 'www.nykaa.com', 'images-static.nykaa.com', 'adn-static2.nykaa.com',
+    'amazon.in', 'www.amazon.in', 'm.media-amazon.com', 'images-eu.ssl-images-amazon.com',
+    'flipkart.com', 'www.flipkart.com', 'rukminim2.flixcart.com',
+    'caratlane.com', 'www.caratlane.com',
+    'tanishq.co.in', 'www.tanishq.co.in',
+    'bluestone.com', 'www.bluestone.com',
+    'voylla.com', 'www.voylla.com',
+    'googleusercontent.com', 'lh3.googleusercontent.com',
+    'unsplash.com', 'images.unsplash.com',
+    'placehold.co', 'via.placeholder.com',
+  ]
+  const urlObj = new URL(imageUrl)
+  const hostname = urlObj.hostname.toLowerCase()
+  const isAllowed = ALLOWED_DOMAINS.some(d => hostname === d || hostname.endsWith('.' + d))
+  if (!isAllowed) {
+    return NextResponse.json({ error: 'Domain not allowed' }, { status: 403 })
+  }
+  // Block private/internal IPs
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.') || hostname.startsWith('172.')) {
+    return NextResponse.json({ error: 'Internal URLs not allowed' }, { status: 403 })
+  }
+
   // Check cache
   const cacheKey = imageUrl;
   const cached = imageCache.get(cacheKey);

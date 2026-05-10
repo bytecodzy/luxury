@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { getSessionFromRequest } from '@/lib/auth-helper'
 
 export async function GET(request: NextRequest) {
   try {
+    const user = await getSessionFromRequest(request)
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      )
+    }
+
     const { searchParams } = new URL(request.url)
     const email = searchParams.get('email')
 
@@ -10,6 +20,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         { error: 'Email parameter is required' },
         { status: 400 }
+      )
+    }
+
+    // Allow access only if user is admin or requesting their own orders
+    if (user.role !== 'admin' && user.email !== email.toLowerCase().trim()) {
+      return NextResponse.json(
+        { error: 'Forbidden: You can only view your own orders' },
+        { status: 403 }
       )
     }
 

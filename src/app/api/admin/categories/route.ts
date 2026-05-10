@@ -2,16 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAdmin } from '@/lib/auth-helper'
 
-// GET /api/admin/categories - List all categories with product counts
+// GET /api/admin/categories - List all categories with product counts (admin only)
 export async function GET(request: NextRequest) {
   try {
-    // Try admin auth, but allow public access for listing
-    const authHeader = request.headers.get('authorization')
-    let isAdmin = false
-    if (authHeader) {
-      const result = await requireAdmin(request)
-      if (!result.error) isAdmin = true
-    }
+    const { error } = await requireAdmin(request)
+    if (error) return error
 
     const categories = await db.category.findMany({
       orderBy: { name: 'asc' },
@@ -29,8 +24,8 @@ export async function GET(request: NextRequest) {
       description: cat.description,
       image: cat.image,
       productCount: cat._count.products,
-      createdAt: isAdmin ? cat.createdAt : undefined,
-      updatedAt: isAdmin ? cat.updatedAt : undefined,
+      createdAt: cat.createdAt,
+      updatedAt: cat.updatedAt,
     }))
 
     return NextResponse.json({ categories: transformed })

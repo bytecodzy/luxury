@@ -140,8 +140,8 @@ export function AuthDialog() {
         }
 
         // Check if 2FA is required
-        if (data.requires2FA) {
-          setAuthPendingUserId(data.user?.id || data.userId)
+        if (data.requiresTwoFactor) {
+          setAuthPendingUserId(data.userId)
           setAuthTwoFAStep(true)
           setSuccess('A verification code has been sent. Please enter it below.')
           return

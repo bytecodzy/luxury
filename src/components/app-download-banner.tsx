@@ -111,12 +111,12 @@ export function AppDownloadBanner() {
             {/* Text */}
             <div className="flex-1 min-w-0">
               <h3 className="text-sm font-bold text-amber-100">
-                Install the Android App
+                Install the App
               </h3>
               <p className="mt-0.5 text-xs text-amber-200/50 line-clamp-2">
                 {deferredPrompt
                   ? 'Tap to install directly on your device — no app store needed!'
-                  : 'Scroll down to get the 3 BOXES LUXURY app for Android.'}
+                  : 'Get the 3 BOXES LUXURY app for iOS & Android.'}
               </p>
 
               {/* Action buttons */}
@@ -141,7 +141,7 @@ export function AppDownloadBanner() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => window.open('/app/', '_blank')}
+                  onClick={() => window.open('/?XTransformPort=3002', '_blank')}
                   className="border-amber-500/30 bg-amber-900/10 text-amber-300 hover:bg-amber-900/20 hover:text-amber-200 h-8 gap-1.5 text-xs"
                 >
                   <Monitor className="h-3.5 w-3.5" />
