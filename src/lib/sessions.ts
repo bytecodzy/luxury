@@ -1,8 +1,14 @@
 import { db } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
+import jwt from 'jsonwebtoken';
 
 // In-memory session cache for fast lookups
-const sessionCache = new Map<string, { userId: string; expiresAt: Date }>();
+const sessionCache = new Map<string, { userId: string; expiresAt: Date; id: string; email: string; name: string; role: string }>();
+
+/**
+ * Export the session cache for synchronous lookups (used by auth.ts verifyAuth).
+ */
+export { sessionCache as sessions };
 
 // Clean expired sessions from cache every 5 minutes
 setInterval(() => {
@@ -56,7 +62,7 @@ export async function createSession(
     },
   });
 
-  sessionCache.set(token, { userId: user.id, expiresAt });
+  sessionCache.set(token, { userId: user.id, expiresAt, id: user.id, email: user.email, name: user.name, role: user.role });
 }
 
 /**
@@ -119,6 +125,10 @@ export async function getSessionAsync(
   sessionCache.set(token, {
     userId: session.userId,
     expiresAt: session.expiresAt,
+    id: session.user.id,
+    email: session.user.email,
+    name: session.user.name,
+    role: session.user.role,
   });
 
   return {
@@ -154,4 +164,104 @@ export async function destroySession(token: string): Promise<void> {
  */
 export function generateToken(): string {
   return uuidv4();
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
+
+export interface TokenPair {
+  accessToken: string;
+  refreshToken: string;
+  accessExpiresAt: Date;
+  refreshExpiresAt: Date;
+}
+
+/**
+ * Generate a JWT access/refresh token pair for a user.
+ * Access token is short-lived (15 min), refresh token is longer-lived (7 days).
+ */
+export async function generateTokenPair(
+  user: SessionUser,
+  permissions: string[] = []
+): Promise<TokenPair> {
+  const accessExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+  const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+  const accessToken = jwt.sign(
+    {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      permissions,
+      type: 'access',
+    },
+    JWT_SECRET,
+    { expiresIn: '15m' }
+  );
+
+  const refreshToken = jwt.sign(
+    {
+      userId: user.id,
+      type: 'refresh',
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+
+  return {
+    accessToken,
+    refreshToken,
+    accessExpiresAt,
+    refreshExpiresAt,
+  };
+}
+
+/**
+ * Refresh an access token using a valid refresh token.
+ * Returns a new token pair or null if the refresh token is invalid.
+ */
+export async function refreshAccessToken(
+  refreshToken: string
+): Promise<TokenPair | null> {
+  try {
+    const decoded = jwt.verify(refreshToken, JWT_SECRET) as {
+      userId: string;
+      type: string;
+    };
+
+    if (decoded.type !== 'refresh') {
+      return null;
+    }
+
+    const user = await db.user.findUnique({
+      where: { id: decoded.userId },
+    });
+
+    if (!user || !user.isActive) {
+      return null;
+    }
+
+    // Get user permissions
+    const userWithPerms = await db.user.findUnique({
+      where: { id: user.id },
+      include: { permissions: { select: { permission: true } } },
+    });
+    const permissions = userWithPerms?.permissions.map((p) => p.permission) || [];
+
+    const sessionUser: SessionUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      isActive: user.isActive,
+      approvalStatus: user.approvalStatus,
+      emailVerified: user.emailVerified,
+      phoneVerified: user.phoneVerified,
+      twoFactorEnabled: user.twoFactorEnabled,
+    };
+
+    return generateTokenPair(sessionUser, permissions);
+  } catch {
+    return null;
+  }
 }

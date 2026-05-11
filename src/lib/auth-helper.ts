@@ -201,3 +201,39 @@ export function parseDeviceInfo(userAgent: string): string {
   if (/Linux/i.test(userAgent)) return 'Linux Desktop'
   return 'Unknown Device'
 }
+
+/**
+ * Require a specific permission. Authenticates first, then checks the user's permissions.
+ * Admins always pass permission checks.
+ */
+export async function requirePermission(
+  request: NextRequest,
+  permission: string
+): Promise<{ user: AuthUser; error: null } | { user: null; error: NextResponse }> {
+  const result = await authenticate(request)
+  if (result.error) return result
+
+  // Admins have all permissions
+  if (result.user.role === 'admin') {
+    return result
+  }
+
+  // Look up user permissions from DB
+  const userPerms = await db.userPermission.findMany({
+    where: { userId: result.user.id },
+    select: { permission: true },
+  })
+  const permStrings = userPerms.map((p) => p.permission)
+
+  if (!permStrings.includes(permission)) {
+    return {
+      user: null,
+      error: NextResponse.json(
+        { error: `Forbidden: '${permission}' permission required` },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return result
+}
