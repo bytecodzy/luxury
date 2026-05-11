@@ -123,6 +123,30 @@ async function validateCoupon(code: string, subtotal: number) {
   return { valid: true, error: null as string | null, discount, offer }
 }
 
+/**
+ * Return an empty cart response when the database is unavailable.
+ * This allows the frontend to continue working with client-side cart state.
+ */
+function emptyCartResponse() {
+  return NextResponse.json({
+    cart: {
+      id: 'offline-cart',
+      sessionId: 'offline',
+      userId: null,
+      couponCode: null,
+      items: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    summary: {
+      subtotal: 0,
+      discount: 0,
+      itemCount: 0,
+    },
+    source: 'offline',
+  })
+}
+
 // GET /api/cart - Get cart with items
 export async function GET(request: NextRequest) {
   try {
@@ -165,13 +189,11 @@ export async function GET(request: NextRequest) {
         discount,
         itemCount: cart.items.reduce((sum, item) => sum + item.quantity, 0),
       },
+      source: 'database',
     })
   } catch (error) {
-    console.error('Error fetching cart:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch cart' },
-      { status: 500 }
-    )
+    console.warn('[Cart API] Database query failed, returning empty offline cart:', error)
+    return emptyCartResponse()
   }
 }
 
@@ -302,12 +324,12 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    return NextResponse.json({ cart: updatedCart })
+    return NextResponse.json({ cart: updatedCart, source: 'database' })
   } catch (error) {
-    console.error('Error adding to cart:', error)
+    console.warn('[Cart API] Database operation failed for POST:', error)
     return NextResponse.json(
-      { error: 'Failed to add to cart' },
-      { status: 500 }
+      { error: 'Cart is currently unavailable. Please use client-side cart or try again later.', offline: true },
+      { status: 503 }
     )
   }
 }
@@ -476,10 +498,10 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ cart: updatedCart })
   } catch (error) {
-    console.error('Error updating cart item:', error)
+    console.warn('[Cart API] Database operation failed for PATCH:', error)
     return NextResponse.json(
-      { error: 'Failed to update cart item' },
-      { status: 500 }
+      { error: 'Cart update is currently unavailable. Please try again later.', offline: true },
+      { status: 503 }
     )
   }
 }
@@ -537,10 +559,10 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({ cart: updatedCart })
   } catch (error) {
-    console.error('Error removing cart item:', error)
+    console.warn('[Cart API] Database operation failed for DELETE:', error)
     return NextResponse.json(
-      { error: 'Failed to remove cart item' },
-      { status: 500 }
+      { error: 'Cart removal is currently unavailable. Please try again later.', offline: true },
+      { status: 503 }
     )
   }
 }

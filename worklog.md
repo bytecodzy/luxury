@@ -54,3 +54,31 @@ Stage Summary:
 - Need to add PostgreSQL database (Vercel Postgres, Neon, or Supabase) and update DATABASE_URL env var
 - Need to run Prisma migrations against the new database
 - Need to seed the database with products, categories, and admin users
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Deploy 3 BOXES LUXURY to Vercel with working Shopify API fallback
+
+Work Log:
+- Checked Vercel deployment status - found previous deployments in READY state but with Vercel Authentication protection on preview URLs
+- Deployed to production using `vercel --prod` which bypasses preview authentication
+- Found DATABASE_URL on Vercel was a placeholder (`postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require)`)
+- Could not create a PostgreSQL database programmatically (Neon/Supabase/Render/Turso all require browser authentication)
+- Created Shopify Admin API fallback client at `/home/z/my-project/src/lib/shopify.ts`
+- Modified products API route to fall back to Shopify when database is unavailable
+- Modified categories API route to fall back to Shopify when database is unavailable
+- Modified cart API route to handle database errors gracefully
+- Redeployed to Vercel production
+- Verified products API returns 57 products from Shopify (source: "shopify")
+- Verified categories API returns 15 categories from Shopify (source: "shopify")
+- Verified frontend renders correctly with all branding and animations
+
+Stage Summary:
+- Vercel deployment URL: https://my-project-sepia-seven-42.vercel.app (production)
+- Alternative URL: https://3boxes-luxury-kvwsoqyvp-pmkshars-projects.vercel.app
+- Products API: Working via Shopify Admin API fallback (57 products)
+- Categories API: Working via Shopify Admin API fallback (15 categories)
+- Cart API: Returns offline mode when DB unavailable
+- Frontend: Fully rendering with luxury branding, animations, and product data
+- To fully enable DB features (cart, orders, auth): User needs to create a real Neon PostgreSQL database and update DATABASE_URL on Vercel
