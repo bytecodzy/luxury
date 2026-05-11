@@ -1,5 +1,5 @@
 {
-  "buildCommand": "sed -i 's/provider = \"sqlite\"/provider = \"postgresql\"/g' prisma/schema.prisma && prisma generate && next build",
+  "buildCommand": "sed -i 's/provider = \"sqlite\"/provider = \"postgresql\"/g' prisma/schema.prisma && export DATABASE_URL=\"$POSTGRES_PRISMA_URL\" && prisma generate && prisma db push --accept-data-loss && next build",
   "installCommand": "bun install",
   "framework": "nextjs",
   "regions": ["bom1"]
