@@ -87,10 +87,19 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
   if (imagePath.startsWith('//')) {
     return getProductImageBase64(`https:${imagePath}`)
   }
-  // Handle image-proxy URLs
+  // Handle image-proxy URLs — extract the original URL and fetch directly
   if (imagePath.startsWith('/api/image-proxy')) {
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'
+      // Extract the original URL from the proxy URL query parameter
+      const proxyUrlObj = new URL(imagePath, 'http://localhost')
+      const originalUrl = proxyUrlObj.searchParams.get('url')
+      if (originalUrl) {
+        // Fetch the original URL directly instead of going through our proxy
+        const directResult = await getProductImageBase64(originalUrl.startsWith('//') ? `https:${originalUrl}` : originalUrl)
+        if (directResult) return directResult
+      }
+      // Fallback: try self-fetching through the proxy
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
       const response = await fetch(`${baseUrl}${imagePath}`, {
         signal: AbortSignal.timeout(10000),
       })
@@ -222,7 +231,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid image format' }, { status: 400 })
     }
 
-    // Try to fetch product from database first, then Shopify fallback, then client-provided data
+    // Try to fetch product from database first, then client-provided data, then Shopify fallback
     let product = null
     try {
       product = await db.product.findUnique({
@@ -230,10 +239,22 @@ export async function POST(request: NextRequest) {
         include: { category: true },
       })
     } catch (dbError) {
-      console.log('[try-on] Database unavailable, trying Shopify fallback...')
+      console.log('[try-on] Database unavailable, trying other sources...')
     }
 
-    // If not in DB, try Shopify fallback
+    // Client-provided data (most reliable on Vercel and when DB is unavailable)
+    // This ensures try-on works on Vercel even without DB/Shopify access
+    if (!product && clientProductName && clientCategorySlug) {
+      console.log('[try-on] Using client-provided product details')
+      product = {
+        id: productId,
+        name: clientProductName,
+        images: JSON.stringify(productImageUrl ? [productImageUrl] : []),
+        category: { name: clientCategorySlug, slug: clientCategorySlug },
+      }
+    }
+
+    // If not in DB and no client data, try Shopify fallback
     if (!product) {
       try {
         const { fetchShopifyProducts } = await import('@/lib/shopify')
@@ -249,18 +270,6 @@ export async function POST(request: NextRequest) {
         }
       } catch (shopifyError) {
         console.error('[try-on] Shopify fallback also failed:', shopifyError)
-      }
-    }
-
-    // Final fallback: use product details sent from the client
-    // This ensures try-on works on Vercel even without DB/Shopify access
-    if (!product && clientProductName && clientCategorySlug) {
-      console.log('[try-on] Using client-provided product details as fallback')
-      product = {
-        id: productId,
-        name: clientProductName,
-        images: JSON.stringify(productImageUrl ? [productImageUrl] : []),
-        category: { name: clientCategorySlug, slug: clientCategorySlug },
       }
     }
 

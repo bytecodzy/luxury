@@ -46,6 +46,9 @@ export async function GET(request: NextRequest) {
     'googleusercontent.com', 'lh3.googleusercontent.com',
     'unsplash.com', 'images.unsplash.com',
     'placehold.co', 'via.placeholder.com',
+    // Shopify CDN domains
+    'cdn.shopify.com', 'shopify.com', 'www.shopify.com',
+    'myshopify.com',
   ]
   const urlObj = new URL(imageUrl)
   const hostname = urlObj.hostname.toLowerCase()

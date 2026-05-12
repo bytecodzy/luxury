@@ -20,7 +20,6 @@ import { TeamDashboard } from '@/components/team-dashboard';
 import { CorporateDashboard } from '@/components/corporate-dashboard';
 import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
-// App download banner removed per user request
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
 

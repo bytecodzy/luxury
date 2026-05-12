@@ -28,6 +28,7 @@ interface TryOnDialogProps {
   productId: string;
   productName: string;
   productImage: string;
+  categorySlug?: string;
 }
 
 type Step = 'upload' | 'preview' | 'generating' | 'result';
@@ -85,6 +86,7 @@ export function TryOnDialog({
   productId,
   productName,
   productImage,
+  categorySlug,
 }: TryOnDialogProps) {
   const [step, setStep] = useState<Step>('upload');
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
@@ -176,6 +178,10 @@ export function TryOnDialog({
         body: JSON.stringify({
           productId,
           selfieData,
+          // Send product details for Vercel/DB-unavailable scenarios
+          productImageUrl: productImage,
+          productName,
+          categorySlug: categorySlug || '',
         }),
         signal: controller.signal,
       });
@@ -213,7 +219,7 @@ export function TryOnDialog({
       }
       setStep('preview');
     }
-  }, [selfieData, productId]);
+  }, [selfieData, productId, productImage, productName, categorySlug]);
 
   const handleReset = useCallback(() => {
     reset();

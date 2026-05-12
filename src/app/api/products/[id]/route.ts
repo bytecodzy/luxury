@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { fetchShopifyProducts } from '@/lib/shopify'
 
 // Platform slug to logo URL mapping
 const PLATFORM_LOGO_MAP: Record<string, string> = {
@@ -20,10 +21,49 @@ export async function GET(
   try {
     const { id } = await params
 
-    const product = await db.product.findUnique({
-      where: { id },
-      include: { category: true },
-    })
+    // Try database first
+    let product = null
+    try {
+      product = await db.product.findUnique({
+        where: { id },
+        include: { category: true },
+      })
+    } catch (dbError) {
+      console.warn('[Product API] Database unavailable, trying Shopify fallback for id:', id)
+    }
+
+    // If not in DB, try Shopify fallback (critical for Vercel where DB is unavailable)
+    if (!product) {
+      try {
+        // Shopify IDs are prefixed like "shopify-12345"
+        const shopifyProducts = await fetchShopifyProducts()
+        const sp = shopifyProducts.find(p => p.id === id)
+        if (sp) {
+          product = {
+            id: sp.id,
+            name: sp.name,
+            slug: sp.slug,
+            description: sp.description,
+            price: sp.price,
+            compareAtPrice: sp.compareAtPrice,
+            images: JSON.stringify(sp.images),
+            category: { name: sp.category, slug: sp.categorySlug },
+            stock: sp.stock,
+            rating: sp.rating,
+            reviewCount: sp.reviewCount,
+            featured: sp.featured,
+            tags: JSON.stringify(sp.tags),
+            deliveryEstimate: sp.deliveryEstimate || '3-5 business days',
+            platform: sp.platform,
+            isExternal: sp.isExternal,
+            sourceUrl: sp.sourceUrl,
+            affiliateUrl: sp.affiliateUrl,
+          }
+        }
+      } catch (shopifyError) {
+        console.error('[Product API] Shopify fallback also failed:', shopifyError)
+      }
+    }
 
     if (!product) {
       return NextResponse.json(
