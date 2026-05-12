@@ -3,6 +3,19 @@
 		query XTransformPort=*
 	}
 
+	@ai_path {
+		path /v1/*
+	}
+
+	handle @ai_path {
+		reverse_proxy 172.25.136.193:8080 {
+			header_up Host {host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
 	handle @transform_port_query {
 		reverse_proxy localhost:{query.XTransformPort} {
 			header_up Host {host}

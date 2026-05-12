@@ -14,6 +14,24 @@ export async function GET() {
     if (check.available) {
       return NextResponse.json({ available: true })
     }
+
+    // Check if a proxy is configured (for Vercel deployments)
+    const proxyUrl = process.env.ZAI_PROXY_URL
+    if (proxyUrl) {
+      // Test if the proxy is reachable
+      try {
+        const proxyCheck = await fetch(`${proxyUrl}/api/try-on/status`, {
+          signal: AbortSignal.timeout(5000),
+        })
+        const proxyResult = await proxyCheck.json()
+        if (proxyResult.available) {
+          return NextResponse.json({ available: true, proxied: true })
+        }
+      } catch {
+        // Proxy not reachable
+      }
+    }
+
     return NextResponse.json({
       available: false,
       message: check.reason || 'Virtual try-on is currently unavailable. This feature requires our AI style service.',

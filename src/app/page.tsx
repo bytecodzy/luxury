@@ -20,8 +20,7 @@ import { TeamDashboard } from '@/components/team-dashboard';
 import { CorporateDashboard } from '@/components/corporate-dashboard';
 import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
-import { AppDownloadSection } from '@/components/app-download-section';
-import { AppDownloadBanner } from '@/components/app-download-banner';
+// App download banner removed per user request
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
 
@@ -36,7 +35,6 @@ function AppContent() {
             <HeroSection />
             <CategoryGrid />
             <ProductGrid />
-            <AppDownloadSection />
           </>
         );
       case 'product':
@@ -65,7 +63,6 @@ function AppContent() {
             <HeroSection />
             <CategoryGrid />
             <ProductGrid />
-            <AppDownloadSection />
           </>
         );
     }
@@ -93,7 +90,6 @@ function AppContent() {
       <AuthDialog />
       <GiftBuilder />
       <GiftAssistant />
-      <AppDownloadBanner />
     </div>
   );
 }

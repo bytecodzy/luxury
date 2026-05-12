@@ -168,9 +168,34 @@ function getPairingCategory(categorySlug: string): string[] {
 
 export async function POST(request: NextRequest) {
   try {
-    // Check if AI service is available BEFORE doing any work
+    // Check if AI service is available locally (file config or env vars)
     const aiCheck = isZAIAvailable()
+
     if (!aiCheck.available) {
+      // AI service not available locally — try proxying to the sandbox
+      const proxyUrl = process.env.ZAI_PROXY_URL
+      if (proxyUrl) {
+        console.log('[try-on] AI not available locally, proxying to sandbox:', proxyUrl)
+        try {
+          const body = await request.json()
+          const proxyResponse = await fetch(`${proxyUrl}/api/try-on`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(30000),
+          })
+          const proxyResult = await proxyResponse.json()
+          return NextResponse.json(proxyResult, { status: proxyResponse.status })
+        } catch (proxyError) {
+          console.error('[try-on] Proxy failed:', proxyError)
+          return NextResponse.json({
+            error: 'Virtual try-on is temporarily unavailable. Could not connect to the AI style service. Please try again in a moment.',
+            code: 'AI_SERVICE_UNAVAILABLE',
+          }, { status: 503 })
+        }
+      }
+
+      // No proxy configured either — show unavailable message
       return NextResponse.json({
         error: 'Virtual try-on is currently unavailable. This feature requires our AI style service which is not configured on this deployment. Please contact support or try again later.',
         code: 'AI_SERVICE_UNAVAILABLE',
@@ -310,7 +335,23 @@ export async function GET(request: NextRequest) {
   if (!jobId) return NextResponse.json({ error: 'Job ID required' }, { status: 400 })
 
   const job = jobs.get(jobId)
-  if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 })
+
+  // If job not found locally, try proxying to sandbox (for Vercel deployments)
+  if (!job) {
+    const proxyUrl = process.env.ZAI_PROXY_URL
+    if (proxyUrl) {
+      try {
+        const proxyResponse = await fetch(`${proxyUrl}/api/try-on?jobId=${jobId}`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        const proxyResult = await proxyResponse.json()
+        return NextResponse.json(proxyResult, { status: proxyResponse.status })
+      } catch {
+        return NextResponse.json({ error: 'Job not found and proxy unavailable' }, { status: 404 })
+      }
+    }
+    return NextResponse.json({ error: 'Job not found' }, { status: 404 })
+  }
 
   return NextResponse.json({
     jobId,
