@@ -651,7 +651,15 @@ async function backgroundProcess(
     console.error(`[try-on] Job ${jobId} failed:`, error)
     if (job) {
       job.status = 'failed'
-      job.error = error instanceof Error ? error.message : 'Generation failed'
+      const msg = error instanceof Error ? error.message : 'Generation failed'
+      // Provide user-friendly error for common issues
+      if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('AI_STYLE_SERVICE_UNAVAILABLE')) {
+        job.error = 'Virtual try-on is temporarily unavailable. Our AI style service could not be reached. Please try again in a moment.'
+      } else if (msg.includes('.z-ai-config')) {
+        job.error = 'Virtual try-on is temporarily unavailable. Our AI style service is being configured. Please try again later.'
+      } else {
+        job.error = msg
+      }
     }
   }
 }
