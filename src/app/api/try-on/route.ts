@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { productId, selfieData, productImageUrl } = body
+    const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
 
     if (!productId || !selfieData) {
       return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid image format' }, { status: 400 })
     }
 
-    // Try to fetch product from database first, then Shopify fallback
+    // Try to fetch product from database first, then Shopify fallback, then client-provided data
     let product = null
     try {
       product = await db.product.findUnique({
@@ -252,8 +252,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Final fallback: use product details sent from the client
+    // This ensures try-on works on Vercel even without DB/Shopify access
+    if (!product && clientProductName && clientCategorySlug) {
+      console.log('[try-on] Using client-provided product details as fallback')
+      product = {
+        id: productId,
+        name: clientProductName,
+        images: JSON.stringify(productImageUrl ? [productImageUrl] : []),
+        category: { name: clientCategorySlug, slug: clientCategorySlug },
+      }
+    }
+
     if (!product) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Product not found. Please ensure the product is loaded before trying on.' }, { status: 404 })
     }
 
     const productImages: string[] = JSON.parse(product.images || '[]')

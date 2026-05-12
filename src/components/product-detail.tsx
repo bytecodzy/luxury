@@ -240,6 +240,8 @@ function TryOnDialog({
           productId,
           selfieData,
           productImageUrl: productImage,
+          productName,
+          categorySlug,
         }),
       });
 
