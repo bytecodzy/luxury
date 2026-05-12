@@ -34,13 +34,22 @@ export async function GET() {
       }
     }
 
+    // Also check environment variables (for Vercel/serverless)
+    if (!configFound) {
+      const envBaseUrl = process.env.ZAI_BASE_URL
+      const envApiKey = process.env.ZAI_API_KEY
+      if (envBaseUrl && envApiKey) {
+        configFound = true
+      }
+    }
+
     if (configFound) {
       return NextResponse.json({ available: true })
     }
 
     return NextResponse.json({
       available: false,
-      message: 'AI service is not configured. Please contact support.',
+      message: 'AI service is not configured. Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel, or create .z-ai-config file.',
     })
   } catch {
     return NextResponse.json({

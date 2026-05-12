@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import ZAI from 'z-ai-web-dev-sdk'
+import { createZAI } from '@/lib/zai'
 
 const SYSTEM_PROMPT = `You are the AI Gift Recommendation Assistant for 3 BOXES GIFTS — a premium luxury gifting brand in India. You are sophisticated, warm, and knowledgeable about luxury gifts.
 
@@ -56,10 +56,6 @@ Keep responses concise but warm. Use emojis sparingly for elegance. Never break 
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
-}
-
-async function createZAI(): Promise<InstanceType<typeof ZAI>> {
-  return await ZAI.create()
 }
 
 function parseFilters(text: string): Record<string, string> | null {

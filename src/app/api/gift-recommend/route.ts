@@ -118,8 +118,8 @@ export async function POST(request: NextRequest) {
     let aiSuggestions: Array<{ name: string; reason: string; priceRange: string }> = []
 
     try {
-      const ZAI = (await import('z-ai-web-dev-sdk')).default
-      const zai = await ZAI.create()
+      const { createZAI } = await import('@/lib/zai')
+      const zai = await createZAI()
 
       const productContext = recommendations
         .map(

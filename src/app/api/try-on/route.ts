@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import ZAI from 'z-ai-web-dev-sdk'
+import { createZAI } from '@/lib/zai'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
@@ -178,10 +178,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid image format' }, { status: 400 })
     }
 
-    const product = await db.product.findUnique({
-      where: { id: productId },
-      include: { category: true },
-    })
+    // Try to fetch product from database first, then Shopify fallback
+    let product = null
+    try {
+      product = await db.product.findUnique({
+        where: { id: productId },
+        include: { category: true },
+      })
+    } catch (dbError) {
+      console.log('[try-on] Database unavailable, trying Shopify fallback...')
+    }
+
+    // If not in DB, try Shopify fallback
+    if (!product) {
+      try {
+        const { fetchShopifyProducts } = await import('@/lib/shopify')
+        const shopifyProducts = await fetchShopifyProducts()
+        const sp = shopifyProducts.find(p => p.id === productId)
+        if (sp) {
+          product = {
+            id: sp.id,
+            name: sp.name,
+            images: JSON.stringify(sp.images),
+            category: { name: sp.category, slug: sp.categorySlug },
+          }
+        }
+      } catch (shopifyError) {
+        console.error('[try-on] Shopify fallback also failed:', shopifyError)
+      }
+    }
+
     if (!product) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 })
     }
@@ -195,17 +221,40 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch AI suggestions in parallel with job creation
-    const pairingCategories = getPairingCategory(product.category.slug)
-    const suggestionsPromise = db.product.findMany({
-      where: {
-        category: { slug: { in: pairingCategories } },
-        id: { not: productId },
-        stock: { gt: 0 },
-      },
-      include: { category: true },
-      take: 4,
-      orderBy: { rating: 'desc' },
-    })
+    const pairingCategories = getPairingCategory(product.category?.slug || '')
+    let suggestionsPromise: Promise<any[]>
+    try {
+      suggestionsPromise = db.product.findMany({
+        where: {
+          category: { slug: { in: pairingCategories } },
+          id: { not: productId },
+          stock: { gt: 0 },
+        },
+        include: { category: true },
+        take: 4,
+        orderBy: { rating: 'desc' },
+      })
+    } catch {
+      // Fallback: use Shopify products for suggestions
+      suggestionsPromise = (async () => {
+        try {
+          const { fetchShopifyProducts } = await import('@/lib/shopify')
+          const allProducts = await fetchShopifyProducts()
+          return allProducts
+            .filter(p => pairingCategories.includes(p.categorySlug) && p.id !== productId)
+            .slice(0, 4)
+            .map(p => ({
+              id: p.id,
+              name: p.name,
+              price: p.price,
+              images: JSON.stringify(p.images),
+              category: { name: p.category, slug: p.categorySlug },
+            }))
+        } catch {
+          return []
+        }
+      })()
+    }
 
     const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 
@@ -231,6 +280,14 @@ export async function POST(request: NextRequest) {
     console.error('[try-on] API error:', error)
     if (error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+    }
+    const message = error instanceof Error ? error.message : 'Unexpected error occurred'
+    // Check if it's a config error
+    if (message.includes('.z-ai-config') || message.includes('not configured')) {
+      return NextResponse.json({
+        error: 'Virtual try-on is currently unavailable. The AI service needs to be configured. Please set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel.',
+        code: 'AI_NOT_CONFIGURED',
+      }, { status: 503 })
     }
     return NextResponse.json({ error: 'Unexpected error occurred' }, { status: 500 })
   }
@@ -263,10 +320,6 @@ export async function GET(request: NextRequest) {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-
-async function createZAI(): Promise<InstanceType<typeof ZAI>> {
-  return await ZAI.create()
-}
 
 async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs = 45000): Promise<string> {
   try {

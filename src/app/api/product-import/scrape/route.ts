@@ -35,8 +35,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 });
     }
 
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
+    const { createZAI } = await import('@/lib/zai');
+    const zai = await createZAI();
 
     // Step 1: Read the page content
     const pageData = await zai.functions.invoke('page_reader', { url });

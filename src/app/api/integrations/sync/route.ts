@@ -200,8 +200,8 @@ async function performSync(
   productsUpdated: number;
   errors: string[];
 }> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
+  const { createZAI } = await import('@/lib/zai');
+  const zai = await createZAI();
 
   const integrationCategories: string[] = JSON.parse(integration.categories || '[]');
   const categoriesToSync = category ? [category] : integrationCategories;
