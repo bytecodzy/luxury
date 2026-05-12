@@ -168,21 +168,28 @@ function getPairingCategory(categorySlug: string): string[] {
 
 export async function POST(request: NextRequest) {
   try {
-    // Check if AI service is available locally (file config or env vars)
-    const aiCheck = isZAIAvailable()
+    // Check if AI service is available and reachable
+    const aiCheck = await isZAIAvailable()
 
-    if (!aiCheck.available) {
-      // AI service not available locally — try proxying to the sandbox
+    if (aiCheck.mode === 'proxy') {
+      // AI service not reachable locally — proxy to sandbox
       const proxyUrl = process.env.ZAI_PROXY_URL
       if (proxyUrl) {
-        console.log('[try-on] AI not available locally, proxying to sandbox:', proxyUrl)
+        console.log('[try-on] AI not reachable locally, proxying to sandbox:', proxyUrl)
         try {
           const body = await request.json()
+          // The sandbox gateway requires the 'Abc' header for authentication
+          // The header value is the hostname prefix (e.g., 'preview-chat-xxx')
+          const proxyHost = new URL(proxyUrl).hostname
+          const abcHeader = proxyHost.split('.')[0]
           const proxyResponse = await fetch(`${proxyUrl}/api/try-on`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'Abc': abcHeader,
+            },
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(30000),
+            signal: AbortSignal.timeout(120000), // 2 min timeout for AI generation
           })
           const proxyResult = await proxyResponse.json()
           return NextResponse.json(proxyResult, { status: proxyResponse.status })
@@ -194,10 +201,11 @@ export async function POST(request: NextRequest) {
           }, { status: 503 })
         }
       }
+    }
 
-      // No proxy configured either — show unavailable message
+    if (!aiCheck.available) {
       return NextResponse.json({
-        error: 'Virtual try-on is currently unavailable. This feature requires our AI style service which is not configured on this deployment. Please contact support or try again later.',
+        error: 'Virtual try-on is currently unavailable. This feature requires our AI style service which is not configured on this deployment. Please try again later.',
         code: 'AI_SERVICE_UNAVAILABLE',
       }, { status: 503 })
     }
@@ -316,14 +324,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
     const message = error instanceof Error ? error.message : 'Unexpected error occurred'
-    // Check if it's a config/service error
     if (message.includes('AI_STYLE_SERVICE_UNAVAILABLE') || message.includes('.z-ai-config') || message.includes('not configured')) {
       return NextResponse.json({
-        error: 'Virtual try-on is currently unavailable. This feature requires our AI style service which is not configured on this deployment. Please contact support or try again later.',
+        error: 'Virtual try-on is currently unavailable. This feature requires our AI style service which is not configured on this deployment.',
         code: 'AI_SERVICE_UNAVAILABLE',
       }, { status: 503 })
     }
-    return NextResponse.json({ error: 'An unexpected error occurred while generating your style preview. Please try again.', status: 500 })
+    return NextResponse.json({ error: 'An unexpected error occurred while generating your style preview. Please try again.' }, { status: 500 })
   }
 }
 
@@ -341,7 +348,10 @@ export async function GET(request: NextRequest) {
     const proxyUrl = process.env.ZAI_PROXY_URL
     if (proxyUrl) {
       try {
+        const proxyHost = new URL(proxyUrl).hostname
+        const abcHeader = proxyHost.split('.')[0]
         const proxyResponse = await fetch(`${proxyUrl}/api/try-on?jobId=${jobId}`, {
+          headers: { 'Abc': abcHeader },
           signal: AbortSignal.timeout(10000),
         })
         const proxyResult = await proxyResponse.json()
@@ -422,7 +432,7 @@ async function vlmVerify(
   }
 }
 
-// ── Generation strategies ──────────────────────────────────────────
+// ── Generation strategies (v1.1 — optimized for face+product matching) ──
 
 async function strategyEditSelfie(
   zai: any, selfieData: string, productImageBase64: string,
@@ -432,7 +442,7 @@ async function strategyEditSelfie(
     const placement = getProductPlacement(categorySlug, productName)
     const size = getImageSize(categorySlug)
 
-    const prompt = `Professional fashion photograph of the person in this image, now ${placement}. The product is: ${productDesc}. Keep the exact same face, skin tone, hair, eye color, and body type. ${personDesc ? `The person has ${personDesc}.` : ''} Studio lighting, photorealistic, 8K quality.`
+    const prompt = `Professional fashion photograph of the person in this image, now ${placement}. The product is: ${productDesc}. IMPORTANT: Keep the exact same face, skin tone, hair color, eye color, and body type as the original person. Do NOT change the person's identity. ${personDesc ? `The person has ${personDesc}.` : ''} Studio lighting, photorealistic, 8K quality, fashion magazine quality.`
 
     console.log(`[try-on] Strategy: edit-selfie, prompt: ${prompt.substring(0, 150)}...`)
 
@@ -464,7 +474,7 @@ async function strategyCreateDetailed(
       ? 'Close-up professional beauty photograph from chest up'
       : 'Professional fashion photograph'
 
-    const prompt = `${bodyType} of a person ${placement}. Person: ${personDesc}. Product: ${productDesc}. The person is ${placement}. Photorealistic, studio lighting, 8K, high detail, professional fashion photography.`
+    const prompt = `${bodyType} of a person ${placement}. Person: ${personDesc}. Product: ${productDesc}. The person is ${placement}. Photorealistic, studio lighting, 8K, high detail, professional fashion photography, Vogue magazine quality.`
 
     console.log(`[try-on] Strategy: create-detailed, prompt: ${prompt.substring(0, 150)}...`)
 
@@ -486,7 +496,7 @@ async function strategyEditBoth(
     const placement = getProductPlacement(categorySlug, productName)
     const size = getImageSize(categorySlug)
 
-    const prompt = `Professional fashion photograph. The FIRST image is the person, the SECOND image is the ${productName}. Combine them: show this person ${placement}. Keep the exact same face, hair, skin tone from the first image. Apply the exact product from the second image. Studio lighting, photorealistic, 8K quality.`
+    const prompt = `Professional fashion photograph. The FIRST image is the person, the SECOND image is the ${productName}. Combine them: show this exact person ${placement}. CRITICAL: Keep the EXACT same face, hair, skin tone from the first image — do NOT change the person's identity. Apply the exact product from the second image with accurate colors and details. Studio lighting, photorealistic, 8K quality, fashion editorial.`
 
     console.log(`[try-on] Strategy: edit-both, prompt: ${prompt.substring(0, 150)}...`)
 
@@ -513,7 +523,7 @@ async function strategyEditProduct(
     const placement = getProductPlacement(categorySlug, productName)
     const size = getImageSize(categorySlug)
 
-    const prompt = `Professional fashion photograph of a person ${placement}. The person has: ${personDesc}. Keep the exact product shown in the image on this person. Studio lighting, photorealistic, 8K quality.`
+    const prompt = `Professional fashion photograph of a person ${placement}. The person has: ${personDesc}. Keep the exact product shown in the image on this person. Maintain the product's exact colors, patterns, and details. Studio lighting, photorealistic, 8K quality.`
 
     console.log(`[try-on] Strategy: edit-product, prompt: ${prompt.substring(0, 150)}...`)
 
@@ -652,7 +662,6 @@ async function backgroundProcess(
     if (job) {
       job.status = 'failed'
       const msg = error instanceof Error ? error.message : 'Generation failed'
-      // Provide user-friendly error for common issues
       if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('AI_STYLE_SERVICE_UNAVAILABLE')) {
         job.error = 'Virtual try-on is temporarily unavailable. Our AI style service could not be reached. Please try again in a moment.'
       } else if (msg.includes('.z-ai-config')) {

@@ -1056,7 +1056,8 @@ export function ProductDetail() {
                 try {
                   const res = await fetch('/api/try-on/status');
                   const data = await res.json();
-                  if (data.available && data.mode === 'ai') {
+                  // Both 'ai' (direct) and 'proxy' (sandbox-routed) modes support try-on
+                  if (data.available && (data.mode === 'ai' || data.mode === 'proxy')) {
                     setTryOnUnavailable(false);
                     setTryOnOpen(true);
                   } else {
@@ -1081,8 +1082,8 @@ export function ProductDetail() {
               <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-700/30 bg-amber-950/20 p-3">
                 <Sparkles className="h-4 w-4 flex-shrink-0 text-amber-500/60 mt-0.5" />
                 <div>
-                  <p className="text-xs font-medium text-amber-300/80">AI Style Preview Unavailable</p>
-                  <p className="text-[10px] text-amber-200/40 mt-0.5">Our AI style service is not reachable from this deployment. Please use the development preview for full AI try-on features.</p>
+                  <p className="text-xs font-medium text-amber-300/80">AI Style Preview Temporarily Unavailable</p>
+                  <p className="text-[10px] text-amber-200/40 mt-0.5">Our AI style service is currently offline. This feature requires a live AI connection. Please try again later.</p>
                 </div>
               </div>
             )}
