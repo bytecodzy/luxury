@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { createZAI } from '@/lib/zai'
+import { createZAI, isZAIAvailable } from '@/lib/zai'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
@@ -168,6 +168,15 @@ function getPairingCategory(categorySlug: string): string[] {
 
 export async function POST(request: NextRequest) {
   try {
+    // Check if AI service is available BEFORE doing any work
+    const aiCheck = isZAIAvailable()
+    if (!aiCheck.available) {
+      return NextResponse.json({
+        error: 'Virtual try-on is currently unavailable. This feature requires our AI style service which is not configured on this deployment. Please contact support or try again later.',
+        code: 'AI_SERVICE_UNAVAILABLE',
+      }, { status: 503 })
+    }
+
     const body = await request.json()
     const { productId, selfieData, productImageUrl } = body
 
@@ -282,14 +291,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
     const message = error instanceof Error ? error.message : 'Unexpected error occurred'
-    // Check if it's a config error
-    if (message.includes('.z-ai-config') || message.includes('not configured')) {
+    // Check if it's a config/service error
+    if (message.includes('AI_STYLE_SERVICE_UNAVAILABLE') || message.includes('.z-ai-config') || message.includes('not configured')) {
       return NextResponse.json({
-        error: 'Virtual try-on is currently unavailable. The AI service needs to be configured. Please set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel.',
-        code: 'AI_NOT_CONFIGURED',
+        error: 'Virtual try-on is currently unavailable. This feature requires our AI style service which is not configured on this deployment. Please contact support or try again later.',
+        code: 'AI_SERVICE_UNAVAILABLE',
       }, { status: 503 })
     }
-    return NextResponse.json({ error: 'Unexpected error occurred' }, { status: 500 })
+    return NextResponse.json({ error: 'An unexpected error occurred while generating your style preview. Please try again.', status: 500 })
   }
 }
 

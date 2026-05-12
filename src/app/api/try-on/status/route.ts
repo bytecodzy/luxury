@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server'
-import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
-import os from 'os'
+import { isZAIAvailable } from '@/lib/zai'
 
 /**
  * GET /api/try-on/status
@@ -12,44 +10,13 @@ import os from 'os'
  */
 export async function GET() {
   try {
-    // Check if z-ai-config exists (same logic as SDK)
-    const homeDir = os.homedir()
-    const configPaths = [
-      join(process.cwd(), '.z-ai-config'),
-      join(homeDir, '.z-ai-config'),
-      '/etc/.z-ai-config',
-    ]
-
-    let configFound = false
-    for (const filePath of configPaths) {
-      try {
-        const configStr = readFileSync(filePath, 'utf-8')
-        const config = JSON.parse(configStr)
-        if (config.baseUrl && config.apiKey) {
-          configFound = true
-          break
-        }
-      } catch {
-        // Continue to next path
-      }
-    }
-
-    // Also check environment variables (for Vercel/serverless)
-    if (!configFound) {
-      const envBaseUrl = process.env.ZAI_BASE_URL
-      const envApiKey = process.env.ZAI_API_KEY
-      if (envBaseUrl && envApiKey) {
-        configFound = true
-      }
-    }
-
-    if (configFound) {
+    const check = isZAIAvailable()
+    if (check.available) {
       return NextResponse.json({ available: true })
     }
-
     return NextResponse.json({
       available: false,
-      message: 'AI service is not configured. Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel, or create .z-ai-config file.',
+      message: check.reason || 'Virtual try-on is currently unavailable. This feature requires our AI style service.',
     })
   } catch {
     return NextResponse.json({

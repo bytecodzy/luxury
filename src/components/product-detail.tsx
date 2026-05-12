@@ -692,6 +692,7 @@ export function ProductDetail() {
   const [isAdding, setIsAdding] = useState(false);
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [tryOnOpen, setTryOnOpen] = useState(false);
+  const [tryOnUnavailable, setTryOnUnavailable] = useState(false);
   const [backgroundJobStep, setBackgroundJobStep] = useState<'generating' | 'result' | null>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
@@ -1052,7 +1053,20 @@ export function ProductDetail() {
             transition={{ delay: 0.2 }}
           >
             <button
-              onClick={() => setTryOnOpen(true)}
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/try-on/status');
+                  const data = await res.json();
+                  if (data.available) {
+                    setTryOnUnavailable(false);
+                    setTryOnOpen(true);
+                  } else {
+                    setTryOnUnavailable(true);
+                  }
+                } catch {
+                  setTryOnUnavailable(true);
+                }
+              }}
               className="group flex w-full items-center gap-3 rounded-xl border border-amber-600/30 bg-gradient-to-r from-amber-900/20 via-rose-900/20 to-amber-900/20 p-4 transition-all hover:border-amber-500/50 hover:from-amber-900/30 hover:via-rose-900/30 hover:to-amber-900/30 hover:shadow-lg hover:shadow-amber-900/20"
             >
               <div className="rounded-lg bg-amber-600/20 p-2.5 transition-colors group-hover:bg-amber-600/30">
@@ -1064,6 +1078,15 @@ export function ProductDetail() {
               </div>
               <Sparkles className="h-4 w-4 text-amber-400/50 transition-colors group-hover:text-amber-400" />
             </button>
+            {tryOnUnavailable && (
+              <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-700/30 bg-amber-950/20 p-3">
+                <Sparkles className="h-4 w-4 flex-shrink-0 text-amber-500/60 mt-0.5" />
+                <div>
+                  <p className="text-xs font-medium text-amber-300/80">Style Preview Temporarily Unavailable</p>
+                  <p className="text-[10px] text-amber-200/40 mt-0.5">Our AI style service is being configured. This feature will be available soon. Please check back later!</p>
+                </div>
+              </div>
+            )}
           </motion.div>
 
           {/* External Product Notice */}
