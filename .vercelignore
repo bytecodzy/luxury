@@ -6,3 +6,4 @@ agent-ctx/
 *.sh
 screenshot*.png
 test-*.png
+.z-ai-config

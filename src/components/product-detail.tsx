@@ -1,6 +1,6 @@
 'use client';
 
-/* TryOnDialog v1.2 — format via prop */
+/* TryOnDialog v2.0 — AI + Client-side Style Preview */
 
 import { useStore } from '@/lib/store';
 import { useCurrency } from '@/lib/currency';
@@ -21,8 +21,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send } from 'lucide-react';
+import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send, Move, Maximize2, Eye } from 'lucide-react';
 import { useAffiliateClick } from '@/hooks/useAffiliateClick';
+import { generateStylePreview, getDefaultPlacement, getProductImageDataUrl, type StylePreviewOptions } from '@/lib/client-style-preview';
 
 interface ProductDetail {
   id: string;
@@ -150,6 +151,7 @@ function TryOnDialog({
   productImages,
   onBackgroundJob,
   onResetBackground,
+  mode = 'ai',
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -160,6 +162,7 @@ function TryOnDialog({
   productImages: string[];
   onBackgroundJob: (step: 'generating' | 'result') => void;
   onResetBackground: () => void;
+  mode?: 'ai' | 'client';
 }) {
   const [step, setStep] = useState<Step>('upload');
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
@@ -174,6 +177,14 @@ function TryOnDialog({
   const [productScore, setProductScore] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Client-side mode state
+  const [clientPos, setClientPos] = useState({ x: 0.5, y: 0.4 });
+  const [clientScale, setClientScale] = useState(0.5);
+  const [clientOpacity, setClientOpacity] = useState(0.9);
+  const [clientBlendMode, setClientBlendMode] = useState('source-over');
+  const [isGeneratingClient, setIsGeneratingClient] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const reset = useCallback(() => {
     setStep('upload');
     setSelfiePreview(null);
@@ -187,8 +198,15 @@ function TryOnDialog({
     setFaceScore(null);
     setProductScore(null);
     setProgressMessage('');
+    // Reset client-side state
+    const defaults = getDefaultPlacement(categorySlug, productName);
+    setClientPos(defaults.position);
+    setClientScale(defaults.scale);
+    setClientOpacity(defaults.opacity);
+    setClientBlendMode(defaults.blendMode);
+    setIsGeneratingClient(false);
     onResetBackground();
-  }, [onResetBackground]);
+  }, [onResetBackground, categorySlug, productName]);
 
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -224,7 +242,38 @@ function TryOnDialog({
 
   const [progressMessage, setProgressMessage] = useState<string>('');
 
-  const handleGenerate = useCallback(async () => {
+  // Client-side Style Preview generation
+  const handleClientGenerate = useCallback(async () => {
+    if (!selfieData) return;
+    setIsGeneratingClient(true);
+    setError(null);
+
+    try {
+      const productDataUrl = await getProductImageDataUrl(productImage);
+      const result = await generateStylePreview({
+        selfieData,
+        productImage: productDataUrl,
+        categorySlug,
+        productName,
+        position: clientPos,
+        scale: clientScale,
+        opacity: clientOpacity,
+        blendMode: clientBlendMode,
+      });
+
+      setResultImage(result.imageUrl);
+      setWatermarkedResult(result.imageUrl);
+      setStrategy('client-preview');
+      setStep('result');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create style preview');
+    } finally {
+      setIsGeneratingClient(false);
+    }
+  }, [selfieData, productImage, categorySlug, productName, clientPos, clientScale, clientOpacity, clientBlendMode]);
+
+  // AI-powered generation (server-side)
+  const handleAIGenerate = useCallback(async () => {
     if (!selfieData) return;
     setStep('generating');
     setError(null);
@@ -299,6 +348,15 @@ function TryOnDialog({
     }
   }, [selfieData, productId, productImage, onBackgroundJob, onResetBackground]);
 
+  // Initialize client defaults when category changes
+  useEffect(() => {
+    const defaults = getDefaultPlacement(categorySlug, productName);
+    setClientPos(defaults.position);
+    setClientScale(defaults.scale);
+    setClientOpacity(defaults.opacity);
+    setClientBlendMode(defaults.blendMode);
+  }, [categorySlug, productName]);
+
   // Get category-specific label
   const getCategoryLabel = () => {
     switch (categorySlug) {
@@ -344,11 +402,14 @@ function TryOnDialog({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-xl font-bold text-amber-100">
               <Sparkles className="h-5 w-5 text-amber-400" />
-              AI Virtual Try-On
+              {mode === 'ai' ? 'AI Virtual Try-On' : 'Style Preview'}
             </DialogTitle>
             <DialogDescription className="text-amber-200/50">
               Upload your selfie and{' '}
               <span className="text-amber-300">{getCategoryLabel()}</span>
+              {mode === 'client' && (
+                <span className="ml-1 text-amber-400/60">· Instant preview</span>
+              )}
             </DialogDescription>
           </DialogHeader>
         </div>
@@ -458,6 +519,84 @@ function TryOnDialog({
                 </div>
               </div>
 
+              {/* Client-side mode: adjustment controls */}
+              {mode === 'client' && (
+                <div className="space-y-3 rounded-lg border border-amber-900/20 bg-stone-900/40 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Eye className="h-3.5 w-3.5 text-amber-400/70" />
+                    <span className="text-[11px] font-semibold text-amber-200/70">Adjust Preview</span>
+                  </div>
+                  {/* Position Y */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[10px] text-amber-200/50 flex items-center gap-1">
+                        <Move className="h-3 w-3" /> Position
+                      </Label>
+                      <span className="text-[10px] text-amber-400/60">{Math.round(clientPos.y * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="0.9"
+                      step="0.02"
+                      value={clientPos.y}
+                      onChange={(e) => setClientPos(prev => ({ ...prev, y: parseFloat(e.target.value) }))}
+                      className="w-full h-1.5 bg-amber-900/30 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    />
+                  </div>
+                  {/* Position X */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[10px] text-amber-200/50">Horizontal</Label>
+                      <span className="text-[10px] text-amber-400/60">{Math.round(clientPos.x * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="0.9"
+                      step="0.02"
+                      value={clientPos.x}
+                      onChange={(e) => setClientPos(prev => ({ ...prev, x: parseFloat(e.target.value) }))}
+                      className="w-full h-1.5 bg-amber-900/30 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    />
+                  </div>
+                  {/* Scale */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[10px] text-amber-200/50 flex items-center gap-1">
+                        <Maximize2 className="h-3 w-3" /> Size
+                      </Label>
+                      <span className="text-[10px] text-amber-400/60">{Math.round(clientScale * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="1.5"
+                      step="0.02"
+                      value={clientScale}
+                      onChange={(e) => setClientScale(parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-amber-900/30 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    />
+                  </div>
+                  {/* Opacity */}
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[10px] text-amber-200/50">Opacity</Label>
+                      <span className="text-[10px] text-amber-400/60">{Math.round(clientOpacity * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.2"
+                      max="1"
+                      step="0.02"
+                      value={clientOpacity}
+                      onChange={(e) => setClientOpacity(parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-amber-900/30 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    />
+                  </div>
+                </div>
+              )}
+
               {error && (
                 <div className="flex items-center gap-2 rounded-lg border border-red-900/30 bg-red-950/30 p-3">
                   <AlertCircle className="h-4 w-4 flex-shrink-0 text-red-400" />
@@ -479,11 +618,16 @@ function TryOnDialog({
                   Retake
                 </Button>
                 <Button
-                  onClick={handleGenerate}
+                  onClick={mode === 'client' ? handleClientGenerate : handleAIGenerate}
+                  disabled={mode === 'client' && isGeneratingClient}
                   className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                 >
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Create Preview
+                  {isGeneratingClient ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-2 h-4 w-4" />
+                  )}
+                  {mode === 'client' ? 'Create Preview' : 'Create AI Preview'}
                 </Button>
               </div>
             </div>
@@ -561,7 +705,7 @@ function TryOnDialog({
               </div>
 
               {/* AI Match Scores */}
-              {strategy && (
+              {strategy && strategy !== 'client-preview' && (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
                   <Crown className="h-3.5 w-3.5 text-amber-400/60" />
                   <div className="flex-1">
@@ -600,11 +744,12 @@ function TryOnDialog({
               <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-950/30 to-stone-900/40 p-3">
                 <div className="flex items-center gap-2 mb-1">
                   <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                  <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS — AI Style Preview</p>
+                  <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS — {strategy === 'client-preview' ? 'Style Preview' : 'AI Style Preview'}</p>
                 </div>
                 <p className="text-[10px] text-amber-200/40">
-                  AI generates a virtual try-on preview using multiple strategies for the best match. 
-                  For best results, use a clear, well-lit, front-facing selfie.
+                  {strategy === 'client-preview' 
+                    ? 'Interactive style preview — adjust position, size, and opacity for the perfect look. Try different placements to find your style!'
+                    : 'AI generates a virtual try-on preview using multiple strategies for the best match. For best results, use a clear, well-lit, front-facing selfie.'}
                 </p>
               </div>
 
@@ -658,11 +803,20 @@ function TryOnDialog({
               <div className="flex gap-3">
                 <Button
                   variant="outline"
-                  onClick={reset}
+                  onClick={() => {
+                    if (strategy === 'client-preview') {
+                      // Go back to preview step to adjust and retry
+                      setResultImage(null);
+                      setWatermarkedResult(null);
+                      setStep('preview');
+                    } else {
+                      reset();
+                    }
+                  }}
                   className="flex-1 border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
                 >
                   <RotateCcw className="mr-2 h-4 w-4" />
-                  Try Again
+                  {strategy === 'client-preview' ? 'Adjust & Retry' : 'Try Again'}
                 </Button>
                 <a
                   href={watermarkedResult}
@@ -692,7 +846,7 @@ export function ProductDetail() {
   const [isAdding, setIsAdding] = useState(false);
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [tryOnOpen, setTryOnOpen] = useState(false);
-  const [tryOnUnavailable, setTryOnUnavailable] = useState(false);
+  const [tryOnMode, setTryOnMode] = useState<'ai' | 'client'>('client');
   const [backgroundJobStep, setBackgroundJobStep] = useState<'generating' | 'result' | null>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
@@ -1057,15 +1211,11 @@ export function ProductDetail() {
                 try {
                   const res = await fetch('/api/try-on/status');
                   const data = await res.json();
-                  if (data.available) {
-                    setTryOnUnavailable(false);
-                    setTryOnOpen(true);
-                  } else {
-                    setTryOnUnavailable(true);
-                  }
+                  setTryOnMode(data.mode === 'ai' ? 'ai' : 'client');
                 } catch {
-                  setTryOnUnavailable(true);
+                  setTryOnMode('client');
                 }
+                setTryOnOpen(true);
               }}
               className="group flex w-full items-center gap-3 rounded-xl border border-amber-600/30 bg-gradient-to-r from-amber-900/20 via-rose-900/20 to-amber-900/20 p-4 transition-all hover:border-amber-500/50 hover:from-amber-900/30 hover:via-rose-900/30 hover:to-amber-900/30 hover:shadow-lg hover:shadow-amber-900/20"
             >
@@ -1078,15 +1228,6 @@ export function ProductDetail() {
               </div>
               <Sparkles className="h-4 w-4 text-amber-400/50 transition-colors group-hover:text-amber-400" />
             </button>
-            {tryOnUnavailable && (
-              <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-700/30 bg-amber-950/20 p-3">
-                <Sparkles className="h-4 w-4 flex-shrink-0 text-amber-500/60 mt-0.5" />
-                <div>
-                  <p className="text-xs font-medium text-amber-300/80">Style Preview Temporarily Unavailable</p>
-                  <p className="text-[10px] text-amber-200/40 mt-0.5">Our AI style service is being configured. This feature will be available soon. Please check back later!</p>
-                </div>
-              </div>
-            )}
           </motion.div>
 
           {/* External Product Notice */}
@@ -1357,7 +1498,8 @@ export function ProductDetail() {
           productImages={product.images.map(img => getProxiedImageUrl(img))}
           onBackgroundJob={handleBackgroundJob}
           onResetBackground={handleResetBackground}
-/>
+          mode={tryOnMode}
+        />
       )}
 
       {/* Floating Pill — shown when dialog is closed but a background job is running */}

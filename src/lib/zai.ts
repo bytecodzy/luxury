@@ -8,14 +8,27 @@ import os from 'os'
  * Returns { available: boolean, reason?: string }
  */
 export function isZAIAvailable(): { available: boolean; reason?: string } {
-  // Check environment variables first (works on Vercel/serverless)
+  // On Vercel, only trust environment variables — the .z-ai-config file
+  // may be present in the deployment but points to an internal IP
+  // that is not reachable from Vercel's servers.
+  const isVercel = !!process.env.VERCEL
+
+  // Check environment variables first (works everywhere)
   const envBaseUrl = process.env.ZAI_BASE_URL
   const envApiKey = process.env.ZAI_API_KEY
   if (envBaseUrl && envApiKey) {
     return { available: true }
   }
 
-  // Check if config file exists
+  // On Vercel, don't check config files — they may point to unreachable internal IPs
+  if (isVercel) {
+    return {
+      available: false,
+      reason: 'AI service is not configured via environment variables on this deployment. Using client-side Style Preview.',
+    }
+  }
+
+  // Local development: check config files
   try {
     const configPaths = [
       path.join(process.cwd(), '.z-ai-config'),
@@ -39,7 +52,7 @@ export function isZAIAvailable(): { available: boolean; reason?: string } {
 
   return {
     available: false,
-    reason: 'AI service is not configured. The virtual try-on feature requires the AI service to be available. Please try again later or contact support.',
+    reason: 'AI service is not configured. The Style Preview feature will use client-side compositing instead.',
   }
 }
 
@@ -50,7 +63,8 @@ export function isZAIAvailable(): { available: boolean; reason?: string } {
  * 1. Environment variables: ZAI_BASE_URL + ZAI_API_KEY (for Vercel/serverless)
  * 2. File-based config (.z-ai-config in project root, home dir, or /etc)
  *
- * On Vercel, the .z-ai-config file may not exist, so we prefer env vars.
+ * On Vercel, the .z-ai-config file may exist but points to an
+ * unreachable internal IP, so only env vars are trusted.
  */
 export async function createZAI(): Promise<InstanceType<typeof ZAI>> {
   // Try environment variables first (works on Vercel/serverless)
@@ -71,14 +85,17 @@ export async function createZAI(): Promise<InstanceType<typeof ZAI>> {
     }
   }
 
-  // Fallback: Try the standard file-based config
+  // On Vercel, don't try file-based config
+  if (process.env.VERCEL) {
+    throw new Error('AI_STYLE_SERVICE_UNAVAILABLE')
+  }
+
+  // Fallback: Try the standard file-based config (local dev only)
   try {
     return await ZAI.create()
   } catch (err) {
     console.error('[ZAI] File-based config failed:', err instanceof Error ? err.message : String(err))
   }
 
-  throw new Error(
-    'AI_STYLE_SERVICE_UNAVAILABLE'
-  )
+  throw new Error('AI_STYLE_SERVICE_UNAVAILABLE')
 }

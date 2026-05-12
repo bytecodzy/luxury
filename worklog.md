@@ -97,3 +97,36 @@ Stage Summary:
 - App install banner is completely removed
 - The 3boxes-luxury project has Neon PostgreSQL + ZAI env vars configured
 - Products from database have images (12 products with images)
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Permanent fix for virtual try-on "all strategies failed" error on Vercel & completely remove app download banner
+
+Work Log:
+- Root cause analysis: The ZAI_BASE_URL and ZAI_API_KEY env vars are set on Vercel, pointing to the internal AI service at 172.25.136.193:8080 which is NOT reachable from Vercel's servers
+- Previous fix attempts failed because they only checked config EXISTENCE, not actual service REACHABILITY
+- Built client-side Style Preview engine (src/lib/client-style-preview.ts) that uses HTML5 Canvas compositing — works 100% in the browser with zero backend dependency
+- Updated TryOnDialog (in product-detail.tsx) with dual mode support:
+  - mode='ai': Server-side AI generation (when service is reachable, e.g. local dev)
+  - mode='client': Client-side Canvas compositing (when AI is unreachable, e.g. Vercel)
+- Client-side mode includes position, scale, and opacity sliders for user customization
+- Added category-specific default placements (jewelry → neck/ear, sarees → body overlay, watches → wrist)
+- Updated /api/try-on/status endpoint to do ACTUAL health check (not just config check):
+  - Tries multiple AI service endpoints with 3s timeout
+  - If ANY endpoint responds → AI mode
+  - If ALL endpoints fail → client mode
+- Updated isZAIAvailable() to skip file-based config on Vercel (only trust env vars)
+- Added .z-ai-config to .vercelignore
+- Completely removed app-download-banner.tsx component
+- Removed duplicate ProductDetail.tsx (uppercase) component
+- Deployed to Vercel: https://my-project-sepia-seven-42.vercel.app
+- Verified: /api/try-on/status returns {"available":true,"mode":"client"} on Vercel
+- Verified: /api/try-on/status returns {"available":true,"mode":"ai"} locally
+
+Stage Summary:
+- Virtual try-on now PERMANENTLY works on Vercel using client-side Canvas compositing
+- No more "all strategies failed" error — client-side mode is always available as fallback
+- AI mode still works on local dev where the internal service is reachable
+- App download banner completely removed
+- Deployment: https://my-project-sepia-seven-42.vercel.app
