@@ -45,3 +45,30 @@ Stage Summary:
 - Build now handles missing DATABASE_URL gracefully (prisma db push skipped)
 - Vercel Deployment Protection disabled for public access
 - Vercel URLs: https://my-project-cafjdif3v-pmkshars-projects.vercel.app and https://my-project-sepia-seven-42.vercel.app
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix .z-ai-config error (persistent) & unclosable app download banner
+
+Work Log:
+- Investigated persistent .z-ai-config error: ZAI.create() was called first, throwing before env var fallback could kick in
+- Refactored src/lib/zai.ts: env vars now checked FIRST (before file config), added isZAIAvailable() pre-check function
+- Updated src/app/api/try-on/route.ts: added isZAIAvailable() check at top of POST handler, returns 503 with friendly message if unavailable
+- Updated src/app/api/try-on/status/route.ts: uses shared isZAIAvailable() instead of inline file reading
+- Updated src/components/product-detail.tsx: added tryOnUnavailable state, pre-checks /api/try-on/status before opening dialog, shows "temporarily unavailable" inline message
+- Fixed app download banner (src/components/app-download-banner.tsx):
+  - Increased close button touch target from ~20px to 32px (h-8 w-8 flex centering)
+  - Fixed AnimatePresence: now uses isVisible state with proper key for exit animation
+  - Added localStorage persistence for dismissed state (won't re-show after dismiss)
+  - Added 2.5s delay before showing banner to avoid immediate popup
+  - Added aria-label for accessibility, active state for touch feedback
+- All lint errors resolved
+- Committed as: 5b942b2 "Fix: virtual try-on .z-ai-config error & unclosable app banner"
+- Could not deploy to Vercel: no auth token available in sandbox environment
+
+Stage Summary:
+- Virtual try-on now gracefully handles missing AI config with user-friendly message instead of raw config error
+- App download banner close button is now larger, more accessible, and works correctly
+- Changes committed but need manual Vercel deployment by user
+- User needs to: (1) Push to GitHub/Vercel or (2) Run `vercel --prod` from their local machine
