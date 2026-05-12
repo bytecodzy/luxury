@@ -208,3 +208,43 @@ Stage Summary:
 - On sandbox: mode='ai' — direct AI access
 - Vercel env vars cleaned up: removed unreachable internal IP, kept proxy URL
 - Deployment: https://my-project-sepia-seven-42.vercel.app
+
+---
+Task ID: 1
+Agent: main
+Task: Fix HMR error caused by deleted app-download-section.tsx reference
+
+Work Log:
+- Checked page.tsx - import was already removed (only a comment remained on line 23)
+- Identified the issue was stale HMR cache referencing the deleted module
+- Cleared .next cache directory entirely
+- Killed stale dev server processes and let auto-restart script rebuild
+- Server restarted successfully and returned HTTP 200
+
+Stage Summary:
+- The import was already removed from page.tsx - the error was from stale HMR cache
+- Cleared .next cache, restarted dev server, preview works again
+
+---
+Task ID: 2
+Agent: main
+Task: Rewrite try-on API with correct ZAI SDK usage (v1.1)
+
+Work Log:
+- Discovered root cause: ZAI SDK's CreateImageEditBody defines `image?: string` (singular)
+- Previous code used `images: [{ url: ... }]` (plural array) with `as any` type cast
+- The `images` field was silently ignored by the API, causing text-only generation
+- This resulted in "completely mismatch" results since no reference image was used
+- Rewrote /src/app/api/try-on/route.ts with v1.1 changes:
+  1. Changed `images: [{ url: selfieData }]` to `image: selfieData` (correct singular field)
+  2. Kept 3 strategies: edit-selfie (primary), edit-product, create-detailed (fallback)
+  3. Removed VLM verification step (reduced ~60s latency per attempt)
+  4. Improved prompt engineering for virtual try-on accuracy
+  5. Early exit on first successful strategy (no need for all 4)
+  6. Removed edit-both strategy (SDK doesn't support multiple images in edit API)
+
+Stage Summary:
+- Fixed critical API mismatch that was causing AI try-on to produce random images
+- v1.1 uses correct `image` field in edit API calls
+- Reduced latency by removing VLM verification and using early exit
+- Server is running and responding with HTTP 200
