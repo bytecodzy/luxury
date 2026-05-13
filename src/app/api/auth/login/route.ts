@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
-import { createSession, generateToken, sessionCache } from '@/lib/sessions';
+import { createSession, generateToken, sessionCache, createJWTSessionToken, verifyJWTSession } from '@/lib/sessions';
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,6 +14,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const isVercel = !!process.env.VERCEL;
 
     // Try to find user by email in database first
     let user = null;
@@ -37,7 +39,6 @@ export async function POST(request: NextRequest) {
         password === adminPassword
       ) {
         // Create a virtual admin session from env vars
-        const token = generateToken();
         const virtualAdminUser = {
           id: 'admin-env',
           email: adminEmail,
@@ -51,19 +52,37 @@ export async function POST(request: NextRequest) {
           twoFactorEnabled: false,
         };
 
+        // On Vercel: use JWT token (stateless, works across serverless invocations)
+        if (isVercel) {
+          const jwtToken = createJWTSessionToken(virtualAdminUser);
+          // Also add to in-memory cache for this invocation
+          const token = jwtToken;
+          sessionCache.set(token, {
+            userId: virtualAdminUser.id,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+            id: virtualAdminUser.id,
+            email: virtualAdminUser.email,
+            name: virtualAdminUser.name,
+            role: virtualAdminUser.role,
+          });
+
+          return NextResponse.json({
+            user: virtualAdminUser,
+            token,
+          });
+        }
+
+        // Locally: create session with UUID token
+        const token = generateToken();
+
         // Try to create session in DB, but don't fail if DB is unavailable
         try {
           await createSession(token, virtualAdminUser);
         } catch {
           // DB unavailable — session will be in-memory only
-          console.log(
-            '[Auth] DB unavailable for session creation, using in-memory session'
-          );
-          // Store in the in-memory cache directly so getSessionAsync can find it
-          const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
           sessionCache.set(token, {
             userId: virtualAdminUser.id,
-            expiresAt,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
             id: virtualAdminUser.id,
             email: virtualAdminUser.email,
             name: virtualAdminUser.name,
@@ -137,8 +156,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create session
-    const token = generateToken();
-    await createSession(token, {
+    const sessionUser = {
       id: user.id,
       email: user.email,
       name: user.name,
@@ -149,7 +167,43 @@ export async function POST(request: NextRequest) {
       emailVerified: user.emailVerified,
       phoneVerified: user.phoneVerified,
       twoFactorEnabled: user.twoFactorEnabled,
-    });
+    };
+
+    // On Vercel: use JWT token (stateless)
+    if (isVercel) {
+      const jwtToken = createJWTSessionToken(sessionUser);
+      // Also add to in-memory cache for this invocation
+      sessionCache.set(jwtToken, {
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      });
+
+      return NextResponse.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          avatar: user.avatar,
+          phone: user.phone,
+          isActive: user.isActive,
+          emailVerified: user.emailVerified,
+          phoneVerified: user.phoneVerified,
+          twoFactorEnabled: user.twoFactorEnabled,
+          approvalStatus: user.approvalStatus,
+          createdAt: user.createdAt,
+        },
+        token: jwtToken,
+      });
+    }
+
+    // Locally: create session with UUID token + DB storage
+    const token = generateToken();
+    await createSession(token, sessionUser);
 
     // Return user data and token
     return NextResponse.json({

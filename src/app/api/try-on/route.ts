@@ -181,6 +181,18 @@ function getPairingCategory(categorySlug: string): string[] {
 
 export async function POST(request: NextRequest) {
   try {
+    // On Vercel: AI service is always unreachable (internal IP only).
+    // Return 503 immediately so client-side canvas fallback is used.
+    const isVercel = !!process.env.VERCEL
+
+    if (isVercel) {
+      console.log('[try-on] Vercel detected, AI service unavailable. Client will use canvas fallback.')
+      return NextResponse.json({
+        error: 'Virtual try-on is currently unavailable on this deployment. Use the visual style preview instead.',
+        code: 'AI_SERVICE_UNAVAILABLE',
+      }, { status: 503 })
+    }
+
     // Check if AI service is available and reachable
     const aiCheck = await isZAIAvailable()
 

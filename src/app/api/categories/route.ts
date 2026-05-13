@@ -3,7 +3,28 @@ import { db } from '@/lib/db'
 import { fetchShopifyCategories } from '@/lib/shopify'
 
 export async function GET() {
-  // ─── Try database first ───
+  // ─── On Vercel: skip DB entirely and use Shopify directly ───
+  // This prevents duplications from DB + Shopify categories
+  const isVercel = !!process.env.VERCEL
+
+  if (isVercel) {
+    console.log('[Categories API] Vercel detected, using Shopify directly')
+    try {
+      const shopifyCategories = await fetchShopifyCategories()
+      return NextResponse.json({
+        categories: shopifyCategories,
+        source: 'shopify',
+      })
+    } catch (shopifyError) {
+      console.error('[Categories API] Shopify fetch failed on Vercel:', shopifyError)
+      return NextResponse.json(
+        { error: 'Failed to fetch categories from Shopify' },
+        { status: 500 }
+      )
+    }
+  }
+
+  // ─── Local development: Try database first ───
   try {
     const categories = await db.category.findMany({
       orderBy: { name: 'asc' },

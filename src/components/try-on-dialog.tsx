@@ -35,14 +35,60 @@ type Step = 'upload' | 'preview' | 'generating' | 'result';
 
 // ── Image loading helper ─────────────────────────────────────────
 
-function loadImage(src: string): Promise<HTMLImageElement> {
+function loadImage(src: string, crossOrigin = true): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = document.createElement('img');
-    img.crossOrigin = 'anonymous';
+    if (crossOrigin) img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    img.onerror = () => {
+      // If CORS fails, try without crossOrigin
+      if (crossOrigin) {
+        loadImage(src, false).then(resolve).catch(reject);
+      } else {
+        reject(new Error(`Failed to load image: ${src}`));
+      }
+    };
     img.src = src;
   });
+}
+
+/**
+ * Load an image for canvas use. For external URLs, tries to use the
+ * image proxy to avoid CORS issues. Falls back to direct loading.
+ */
+async function loadImageForCanvas(url: string): Promise<HTMLImageElement> {
+  // For Shopify CDN URLs, try direct first (they support CORS)
+  if (url.startsWith('https://cdn.shopify.com') || url.startsWith('https://shopify.com')) {
+    try {
+      return await loadImage(url, true);
+    } catch {
+      // If CORS fails, try without crossOrigin (canvas will be tainted but we handle that)
+      return await loadImage(url, false);
+    }
+  }
+
+  // For other external URLs, try through image proxy first
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(url)}`;
+    try {
+      return await loadImage(proxyUrl, true);
+    } catch {
+      // Proxy failed, try direct
+      try {
+        return await loadImage(url, true);
+      } catch {
+        return await loadImage(url, false);
+      }
+    }
+  }
+
+  // For protocol-relative URLs
+  if (url.startsWith('//')) {
+    return loadImageForCanvas('https:' + url);
+  }
+
+  // For local paths
+  return loadImage(url, false);
 }
 
 // ── Poll for AI job result ───────────────────────────────────────
@@ -80,7 +126,7 @@ async function createClientSideComposite(
     if (!ctx) return null;
 
     // Load selfie
-    const selfieImg = await loadImage(selfieDataUrl);
+    const selfieImg = await loadImage(selfieDataUrl, false);
 
     // Set canvas size to selfie dimensions (max 1024)
     let w = selfieImg.width;
@@ -104,13 +150,11 @@ async function createClientSideComposite(
     try {
       let productSrc = productImageUrl;
       if (productSrc.startsWith('/api/image-proxy?url=')) {
-        const urlParam = new URL(productSrc, 'http://localhost').searchParams.get(
-          'url'
-        );
+        const urlParam = new URL(productSrc, 'http://localhost').searchParams.get('url');
         if (urlParam) productSrc = urlParam;
       }
 
-      const productImg = await loadImage(productSrc);
+      const productImg = await loadImageForCanvas(productSrc);
       const prodSize = Math.min(w * 0.35, 300);
       const prodX = w - prodSize - 20;
       const prodY = h - prodSize - 60;
@@ -127,26 +171,11 @@ async function createClientSideComposite(
       ctx.beginPath();
       ctx.moveTo(prodX + r, prodY);
       ctx.lineTo(prodX + prodSize - r, prodY);
-      ctx.quadraticCurveTo(
-        prodX + prodSize,
-        prodY,
-        prodX + prodSize,
-        prodY + r
-      );
+      ctx.quadraticCurveTo(prodX + prodSize, prodY, prodX + prodSize, prodY + r);
       ctx.lineTo(prodX + prodSize, prodY + prodSize - r);
-      ctx.quadraticCurveTo(
-        prodX + prodSize,
-        prodY + prodSize,
-        prodX + prodSize - r,
-        prodY + prodSize
-      );
+      ctx.quadraticCurveTo(prodX + prodSize, prodY + prodSize, prodX + prodSize - r, prodY + prodSize);
       ctx.lineTo(prodX + r, prodY + prodSize);
-      ctx.quadraticCurveTo(
-        prodX,
-        prodY + prodSize,
-        prodX,
-        prodY + prodSize - r
-      );
+      ctx.quadraticCurveTo(prodX, prodY + prodSize, prodX, prodY + prodSize - r);
       ctx.lineTo(prodX, prodY + r);
       ctx.quadraticCurveTo(prodX, prodY, prodX + r, prodY);
       ctx.closePath();
@@ -161,26 +190,11 @@ async function createClientSideComposite(
       ctx.beginPath();
       ctx.moveTo(prodX + r, prodY);
       ctx.lineTo(prodX + prodSize - r, prodY);
-      ctx.quadraticCurveTo(
-        prodX + prodSize,
-        prodY,
-        prodX + prodSize,
-        prodY + r
-      );
+      ctx.quadraticCurveTo(prodX + prodSize, prodY, prodX + prodSize, prodY + r);
       ctx.lineTo(prodX + prodSize, prodY + prodSize - r);
-      ctx.quadraticCurveTo(
-        prodX + prodSize,
-        prodY + prodSize,
-        prodX + prodSize - r,
-        prodY + prodSize
-      );
+      ctx.quadraticCurveTo(prodX + prodSize, prodY + prodSize, prodX + prodSize - r, prodY + prodSize);
       ctx.lineTo(prodX + r, prodY + prodSize);
-      ctx.quadraticCurveTo(
-        prodX,
-        prodY + prodSize,
-        prodX,
-        prodY + prodSize - r
-      );
+      ctx.quadraticCurveTo(prodX, prodY + prodSize, prodX, prodY + prodSize - r);
       ctx.lineTo(prodX, prodY + r);
       ctx.quadraticCurveTo(prodX, prodY, prodX + r, prodY);
       ctx.closePath();
@@ -199,67 +213,7 @@ async function createClientSideComposite(
     }
 
     // Draw 3BOXES LUXURY watermark in bottom-left
-    try {
-      const logoImg = await loadImage('/images/logo.png');
-      const logoW = 80;
-      const logoH = Math.round((logoImg.height / logoImg.width) * logoW);
-      const logoX = 15;
-      const logoY = h - logoH - 15;
-
-      // Semi-transparent background for logo
-      ctx.fillStyle = 'rgba(28, 25, 23, 0.7)'; // stone-950 with alpha
-      ctx.beginPath();
-      const lr = 6;
-      const pad = 5;
-      ctx.moveTo(logoX - pad + lr, logoY - pad);
-      ctx.lineTo(logoX + logoW + pad + 120 - lr, logoY - pad);
-      ctx.quadraticCurveTo(
-        logoX + logoW + pad + 120,
-        logoY - pad,
-        logoX + logoW + pad + 120,
-        logoY - pad + lr
-      );
-      ctx.lineTo(logoX + logoW + pad + 120, logoY + logoH + pad - lr);
-      ctx.quadraticCurveTo(
-        logoX + logoW + pad + 120,
-        logoY + logoH + pad,
-        logoX + logoW + pad + 120 - lr,
-        logoY + logoH + pad
-      );
-      ctx.lineTo(logoX - pad + lr, logoY + logoH + pad);
-      ctx.quadraticCurveTo(
-        logoX - pad,
-        logoY + logoH + pad,
-        logoX - pad,
-        logoY + logoH + pad - lr
-      );
-      ctx.lineTo(logoX - pad, logoY - pad + lr);
-      ctx.quadraticCurveTo(
-        logoX - pad,
-        logoY - pad,
-        logoX - pad + lr,
-        logoY - pad
-      );
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.globalAlpha = 0.8;
-      ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
-      ctx.globalAlpha = 1.0;
-
-      // Brand text next to logo
-      ctx.font = 'bold 10px sans-serif';
-      ctx.fillStyle = 'rgba(217, 119, 6, 0.8)'; // amber-600
-      ctx.fillText('3 BOXES LUXURY', logoX + logoW + 5, logoY + logoH / 2 + 4);
-    } catch (e) {
-      console.warn('Could not load logo for watermark:', e);
-      // Text-only watermark fallback
-      ctx.fillStyle = 'rgba(28, 25, 23, 0.7)';
-      ctx.fillRect(10, h - 35, 180, 25);
-      ctx.font = 'bold 14px sans-serif';
-      ctx.fillStyle = 'rgba(217, 119, 6, 0.7)';
-      ctx.fillText('3 BOXES LUXURY', 15, h - 17);
-    }
+    drawWatermark(ctx, w, h);
 
     // "Style Preview" badge in top-left
     ctx.fillStyle = 'rgba(217, 119, 6, 0.9)'; // amber-600
@@ -276,12 +230,7 @@ async function createClientSideComposite(
     ctx.lineTo(badgeX + badgeW - 4, badgeY);
     ctx.quadraticCurveTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + 4);
     ctx.lineTo(badgeX + badgeW, badgeY + badgeH - 4);
-    ctx.quadraticCurveTo(
-      badgeX + badgeW,
-      badgeY + badgeH,
-      badgeX + badgeW - 4,
-      badgeY + badgeH
-    );
+    ctx.quadraticCurveTo(badgeX + badgeW, badgeY + badgeH, badgeX + badgeW - 4, badgeY + badgeH);
     ctx.lineTo(badgeX + 4, badgeY + badgeH);
     ctx.quadraticCurveTo(badgeX, badgeY + badgeH, badgeX, badgeY + badgeH - 4);
     ctx.lineTo(badgeX, badgeY + 4);
@@ -292,14 +241,24 @@ async function createClientSideComposite(
     ctx.fillStyle = '#1c1917'; // stone-950
     ctx.fillText(badgeText, badgeX + 8, badgeY + 16);
 
-    return canvas.toDataURL('image/jpeg', 0.92);
+    try {
+      return canvas.toDataURL('image/jpeg', 0.92);
+    } catch (e) {
+      // Canvas tainted (CORS) — try without the product image overlay
+      console.warn('Canvas tainted, returning selfie with watermark only:', e);
+      // Redraw just the selfie + watermark
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(selfieImg, 0, 0, w, h);
+      drawWatermark(ctx, w, h);
+      return canvas.toDataURL('image/jpeg', 0.92);
+    }
   } catch (e) {
     console.error('Client-side composite failed:', e);
     return null;
   }
 }
 
-// ── Watermark for saved images ───────────────────────────────────
+// ── Draw 3BOXES LUXURY watermark on canvas ─────────────────────
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -322,23 +281,65 @@ function roundRect(
   ctx.closePath();
 }
 
+function drawWatermark(ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) {
+  // Try to draw logo + text watermark
+  try {
+    const logoImg = document.createElement('img');
+    // Synchronous check: if logo is already cached by the browser, draw it
+    // We'll use the text-only watermark as the reliable path and attempt logo async in addWatermark
+    throw new Error('Use text-only watermark for inline drawing');
+  } catch {
+    // Text-only watermark — reliable, no async image loading needed
+    const textHeight = Math.max(28, canvasHeight * 0.035);
+    const padding = 8;
+    const watermarkText = '3 BOXES LUXURY';
+    ctx.font = `bold ${textHeight * 0.5}px sans-serif`;
+    const textW = ctx.measureText(watermarkText).width;
+
+    ctx.fillStyle = 'rgba(28, 25, 23, 0.75)'; // stone-950 with alpha
+    roundRect(
+      ctx,
+      12,
+      canvasHeight - textHeight - padding * 2 - 8,
+      textW + padding * 2 + 8,
+      textHeight + padding * 2,
+      6
+    );
+    ctx.fill();
+
+    // Amber accent line
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.8)'; // amber-600
+    ctx.fillRect(12, canvasHeight - textHeight - padding * 2 - 8, 3, textHeight + padding * 2);
+
+    ctx.font = `bold ${textHeight * 0.5}px sans-serif`;
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.9)';
+    ctx.fillText(watermarkText, 12 + padding + 4, canvasHeight - textHeight / 2 - 4);
+  }
+}
+
+// ── Watermark for saved images (with logo) ──────────────────────
+
 async function addWatermark(imageDataUrl: string): Promise<string> {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) return imageDataUrl;
 
-  const img = await loadImage(imageDataUrl);
-  canvas.width = img.width;
-  canvas.height = img.height;
-  ctx.drawImage(img, 0, 0);
+  try {
+    const img = await loadImage(imageDataUrl, false);
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+  } catch {
+    return imageDataUrl;
+  }
 
   // Draw 3BOXES LUXURY logo watermark in bottom-left
   try {
-    const logoImg = await loadImage('/images/logo.png');
+    const logoImg = await loadImage('/images/logo.png', false);
     const logoW = 100;
     const logoH = Math.round((logoImg.height / logoImg.width) * logoW);
     const logoX = 15;
-    const logoY = img.height - logoH - 15;
+    const logoY = canvas.height - logoH - 15;
 
     // Semi-transparent background
     ctx.fillStyle = 'rgba(28, 25, 23, 0.75)';
@@ -347,31 +348,50 @@ async function addWatermark(imageDataUrl: string): Promise<string> {
       ctx,
       logoX - pad,
       logoY - pad,
-      logoW + pad * 2 + 120,
+      logoW + pad * 2 + 140,
       logoH + pad * 2,
       6
     );
     ctx.fill();
+
+    // Amber accent line on left
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.8)';
+    ctx.fillRect(logoX - pad, logoY - pad, 3, logoH + pad * 2);
 
     ctx.globalAlpha = 0.85;
     ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
     ctx.globalAlpha = 1.0;
 
     // Brand text
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = 'bold 14px sans-serif';
     ctx.fillStyle = 'rgba(217, 119, 6, 0.9)';
-    ctx.fillText('3 BOXES LUXURY', logoX + logoW + 8, logoY + logoH / 2 + 5);
+    ctx.fillText('3 BOXES LUXURY', logoX + logoW + 10, logoY + logoH / 2 + 5);
+
+    // Gifts tagline
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.6)';
+    ctx.fillText('Premium Gifting', logoX + logoW + 10, logoY + logoH / 2 + 18);
   } catch {
     // Text-only watermark fallback
-    ctx.fillStyle = 'rgba(28, 25, 23, 0.7)';
-    roundRect(ctx, 10, img.height - 35, 180, 25, 4);
+    ctx.fillStyle = 'rgba(28, 25, 23, 0.75)';
+    roundRect(ctx, 12, canvas.height - 40, 200, 30, 4);
     ctx.fill();
-    ctx.font = 'bold 12px sans-serif';
+
+    // Amber accent line
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.8)';
+    ctx.fillRect(12, canvas.height - 40, 3, 30);
+
+    ctx.font = 'bold 13px sans-serif';
     ctx.fillStyle = 'rgba(217, 119, 6, 0.9)';
-    ctx.fillText('3 BOXES LUXURY', 18, img.height - 17);
+    ctx.fillText('3 BOXES LUXURY', 20, canvas.height - 20);
   }
 
-  return canvas.toDataURL('image/jpeg', 0.92);
+  try {
+    return canvas.toDataURL('image/jpeg', 0.92);
+  } catch {
+    // Canvas tainted — return original
+    return imageDataUrl;
+  }
 }
 
 // ── Image compression ────────────────────────────────────────────
@@ -570,7 +590,7 @@ export function TryOnDialog({
     } catch (err) {
       // On any network error, try client-side fallback
       if (err instanceof DOMException && err.name === 'AbortError') {
-        setError('Request timed out. Trying visual preview...');
+        setProgress('Request timed out. Trying visual preview...');
       }
 
       // Try client-side composite as last resort
@@ -879,7 +899,7 @@ export function TryOnDialog({
                     className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                   >
                     <Download className="mr-2 h-4 w-4" />
-                    Save Image
+                    Save with Logo
                   </Button>
                 </div>
               </motion.div>

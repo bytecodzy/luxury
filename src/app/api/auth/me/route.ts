@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionAsync, sessionCache } from '@/lib/sessions';
+import { getSessionAsync, sessionCache, verifyJWTSession } from '@/lib/sessions';
 import { db } from '@/lib/db';
 
 export async function GET(request: NextRequest) {
@@ -98,6 +98,38 @@ export async function GET(request: NextRequest) {
             cachedSession.role === 'admin' ? ['admin:full'] : [],
         });
       }
+    }
+
+    // Try JWT verification (works on Vercel where in-memory cache is empty)
+    const jwtUser = verifyJWTSession(token);
+    if (jwtUser) {
+      // Add to in-memory cache for this invocation
+      sessionCache.set(token, {
+        userId: jwtUser.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        id: jwtUser.id,
+        email: jwtUser.email,
+        name: jwtUser.name,
+        role: jwtUser.role,
+      });
+
+      return NextResponse.json({
+        user: {
+          id: jwtUser.id,
+          email: jwtUser.email,
+          name: jwtUser.name,
+          role: jwtUser.role,
+          avatar: jwtUser.avatar,
+          phone: null,
+          isActive: jwtUser.isActive,
+          emailVerified: jwtUser.emailVerified,
+          phoneVerified: jwtUser.phoneVerified,
+          twoFactorEnabled: jwtUser.twoFactorEnabled,
+          approvalStatus: jwtUser.approvalStatus,
+          socialProvider: null,
+        },
+        permissions: jwtUser.role === 'admin' ? ['admin:full'] : [],
+      });
     }
 
     // Fallback to full async session lookup (checks DB session table)

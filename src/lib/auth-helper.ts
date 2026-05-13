@@ -1,14 +1,18 @@
 import jwt from 'jsonwebtoken'
 import { NextRequest, NextResponse } from 'next/server'
-import { getSessionAsync } from '@/lib/sessions'
+import { getSessionAsync, verifyJWTSession } from '@/lib/sessions'
 import { db } from '@/lib/db'
 
-const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key'
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key-change-in-production'
 
 interface JWTPayload {
   userId: string
   email?: string
   role?: string
+  name?: string
+  type?: string
+  isActive?: boolean
+  approvalStatus?: string
 }
 
 export interface AuthUser {
@@ -28,6 +32,9 @@ export interface AuthUser {
 /**
  * Authenticate a request using either JWT or session token from the Authorization header.
  * Returns the authenticated user or an error response.
+ *
+ * On Vercel: primarily uses JWT session tokens (stateless, no DB needed).
+ * Locally: tries JWT, then session cache, then DB session.
  */
 export async function authenticate(
   request: NextRequest
@@ -42,42 +49,113 @@ export async function authenticate(
 
   const token = authHeader.replace('Bearer ', '')
 
-  // Try JWT verification first
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload
-    const dbUser = await db.user.findUnique({
-      where: { id: decoded.userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        adminRole: true,
-        corporateRole: true,
-        isActive: true,
-        approvalStatus: true,
-        emailVerified: true,
-        twoFactorEnabled: true,
-        twoFactorRequired: true,
-      },
-    })
-
-    if (!dbUser || !dbUser.isActive) {
+  // 1. Try JWT session token first (our new createJWTSessionToken format)
+  const jwtSessionUser = verifyJWTSession(token)
+  if (jwtSessionUser) {
+    // For the env-var admin user, return directly without DB lookup
+    if (jwtSessionUser.id === 'admin-env') {
       return {
-        user: null,
-        error: NextResponse.json({ error: 'User not found or inactive' }, { status: 401 }),
+        user: {
+          id: jwtSessionUser.id,
+          email: jwtSessionUser.email,
+          name: jwtSessionUser.name,
+          role: jwtSessionUser.role,
+          adminRole: null,
+          corporateRole: null,
+          approvalStatus: 'approved',
+          isActive: true,
+          emailVerified: true,
+          twoFactorEnabled: false,
+        },
+        error: null,
       }
     }
 
-    return {
-      user: dbUser as AuthUser,
-      error: null,
+    // For regular users, try to get fresh data from DB
+    try {
+      const dbUser = await db.user.findUnique({
+        where: { id: jwtSessionUser.id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          adminRole: true,
+          corporateRole: true,
+          isActive: true,
+          approvalStatus: true,
+          emailVerified: true,
+          twoFactorEnabled: true,
+          twoFactorRequired: true,
+        },
+      })
+
+      if (dbUser && dbUser.isActive) {
+        return {
+          user: dbUser as AuthUser,
+          error: null,
+        }
+      }
+    } catch {
+      // DB unavailable — use JWT data directly
+      return {
+        user: {
+          id: jwtSessionUser.id,
+          email: jwtSessionUser.email,
+          name: jwtSessionUser.name,
+          role: jwtSessionUser.role,
+          adminRole: null,
+          corporateRole: null,
+          approvalStatus: jwtSessionUser.approvalStatus || 'approved',
+          isActive: jwtSessionUser.isActive,
+          emailVerified: jwtSessionUser.emailVerified,
+          twoFactorEnabled: jwtSessionUser.twoFactorEnabled,
+        },
+        error: null,
+      }
+    }
+  }
+
+  // 2. Try legacy JWT verification (old format with userId/email/role)
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload
+    if (decoded.type === 'session') {
+      // Already handled above by verifyJWTSession
+    } else if (decoded.userId) {
+      // Legacy JWT format
+      try {
+        const dbUser = await db.user.findUnique({
+          where: { id: decoded.userId },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            adminRole: true,
+            corporateRole: true,
+            isActive: true,
+            approvalStatus: true,
+            emailVerified: true,
+            twoFactorEnabled: true,
+            twoFactorRequired: true,
+          },
+        })
+
+        if (dbUser && dbUser.isActive) {
+          return {
+            user: dbUser as AuthUser,
+            error: null,
+          }
+        }
+      } catch {
+        // DB unavailable
+      }
     }
   } catch {
     // JWT verification failed, try session-based auth
   }
 
-  // Fall back to session-based auth
+  // 3. Fall back to session-based auth (in-memory cache + DB session)
   try {
     const sessionUser = await getSessionAsync(token)
     if (!sessionUser) {
@@ -87,40 +165,75 @@ export async function authenticate(
       }
     }
 
-    // Fetch extended user data from DB for session-based auth
-    const dbUser = await db.user.findUnique({
-      where: { id: sessionUser.id },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        adminRole: true,
-        corporateRole: true,
-        isActive: true,
-        approvalStatus: true,
-        emailVerified: true,
-        twoFactorEnabled: true,
-        twoFactorRequired: true,
-      },
-    })
-
-    if (!dbUser || !dbUser.isActive) {
+    // For env-var admin user
+    if (sessionUser.id === 'admin-env') {
       return {
-        user: null,
-        error: NextResponse.json({ error: 'User not found or inactive' }, { status: 401 }),
+        user: {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          name: sessionUser.name,
+          role: sessionUser.role,
+          adminRole: null,
+          corporateRole: null,
+          approvalStatus: 'approved',
+          isActive: true,
+          emailVerified: true,
+          twoFactorEnabled: false,
+        },
+        error: null,
       }
     }
 
-    return {
-      user: dbUser as AuthUser,
-      error: null,
+    // Fetch extended user data from DB for session-based auth
+    try {
+      const dbUser = await db.user.findUnique({
+        where: { id: sessionUser.id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          adminRole: true,
+          corporateRole: true,
+          isActive: true,
+          approvalStatus: true,
+          emailVerified: true,
+          twoFactorEnabled: true,
+          twoFactorRequired: true,
+        },
+      })
+
+      if (dbUser && dbUser.isActive) {
+        return {
+          user: dbUser as AuthUser,
+          error: null,
+        }
+      }
+    } catch {
+      // DB unavailable — use session data directly
+      return {
+        user: {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          name: sessionUser.name,
+          role: sessionUser.role,
+          adminRole: null,
+          corporateRole: null,
+          approvalStatus: sessionUser.approvalStatus || 'approved',
+          isActive: sessionUser.isActive,
+          emailVerified: sessionUser.emailVerified,
+          twoFactorEnabled: sessionUser.twoFactorEnabled,
+        },
+        error: null,
+      }
     }
   } catch {
-    return {
-      user: null,
-      error: NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 }),
-    }
+    // All auth methods failed
+  }
+
+  return {
+    user: null,
+    error: NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 }),
   }
 }
 
@@ -219,13 +332,24 @@ export async function requirePermission(
   }
 
   // Look up user permissions from DB
-  const userPerms = await db.userPermission.findMany({
-    where: { userId: result.user.id },
-    select: { permission: true },
-  })
-  const permStrings = userPerms.map((p) => p.permission)
+  try {
+    const userPerms = await db.userPermission.findMany({
+      where: { userId: result.user.id },
+      select: { permission: true },
+    })
+    const permStrings = userPerms.map((p) => p.permission)
 
-  if (!permStrings.includes(permission)) {
+    if (!permStrings.includes(permission)) {
+      return {
+        user: null,
+        error: NextResponse.json(
+          { error: `Forbidden: '${permission}' permission required` },
+          { status: 403 }
+        ),
+      }
+    }
+  } catch {
+    // DB unavailable — if user is admin, allow; otherwise deny
     return {
       user: null,
       error: NextResponse.json(

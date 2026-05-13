@@ -264,7 +264,27 @@ export async function GET(request: NextRequest) {
   const priceMin = searchParams.get('priceMin')
   const priceMax = searchParams.get('priceMax')
 
-  // ─── Try database first ───
+  // ─── On Vercel: skip DB entirely and use Shopify directly ───
+  // This prevents duplications from DB + Shopify, and ensures all images
+  // use Shopify CDN URLs that work on Vercel.
+  const isVercel = !!process.env.VERCEL
+
+  if (isVercel) {
+    console.log('[Products API] Vercel detected, using Shopify directly')
+    const shopifyResult = await tryShopifyFallback({
+      category, search, minPrice, maxPrice, priceMin, priceMax,
+      sort, page, limit, platform, source, isExternalParam,
+      occasion, recipient, relationship,
+    })
+    if (shopifyResult) return shopifyResult
+
+    return NextResponse.json(
+      { error: 'Failed to fetch products from Shopify' },
+      { status: 500 }
+    )
+  }
+
+  // ─── Local development: Try database first ───
   try {
     const skip = (page - 1) * limit
 
