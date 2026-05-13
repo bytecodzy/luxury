@@ -1,14 +1,13 @@
 import { NextRequest } from 'next/server'
-import { sessions, verifyJWTSession, getSessionAsync } from './sessions'
+import { sessions } from './sessions'
+import jwt from 'jsonwebtoken'
+
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key'
 
 /**
  * Extracts and validates the Bearer token from the request Authorization header.
+ * Supports in-memory session cache, JWT tokens, and async session lookup.
  * Returns the session user if valid, or null if invalid/missing.
- *
- * Checks in order:
- * 1. In-memory session cache (fast, works locally)
- * 2. JWT verification (works on Vercel serverless)
- * 3. Full async session lookup (DB fallback)
  */
 export async function verifyAuth(
   request: NextRequest
@@ -23,7 +22,7 @@ export async function verifyAuth(
     return null
   }
 
-  // 1. Check in-memory cache first (fast)
+  // 1. Check in-memory session cache (fastest)
   const session = sessions.get(token)
   if (session) {
     if (session.expiresAt < new Date()) {
@@ -38,35 +37,35 @@ export async function verifyAuth(
     }
   }
 
-  // 2. Try JWT verification (works on Vercel where in-memory cache is empty)
-  const jwtUser = verifyJWTSession(token)
-  if (jwtUser) {
-    // Add to in-memory cache for faster subsequent lookups
-    sessions.set(token, {
-      userId: jwtUser.id,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      id: jwtUser.id,
-      email: jwtUser.email,
-      name: jwtUser.name,
-      role: jwtUser.role,
-    })
-    return {
-      id: jwtUser.id,
-      email: jwtUser.email,
-      name: jwtUser.name,
-      role: jwtUser.role,
+  // 2. Try JWT verification (works on Vercel without DB)
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as Record<string, unknown>
+    if (decoded && decoded.type === 'session' && decoded.userId) {
+      return {
+        id: decoded.userId as string,
+        email: (decoded.email as string) || '',
+        name: (decoded.name as string) || '',
+        role: (decoded.role as string) || 'user',
+      }
     }
+  } catch {
+    // Not a valid JWT session token
   }
 
-  // 3. Full async session lookup (DB fallback)
-  const user = await getSessionAsync(token)
-  if (user) {
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
+  // 3. Fall back to async session lookup (includes DB)
+  try {
+    const { getSessionAsync } = await import('./sessions')
+    const sessionUser = await getSessionAsync(token)
+    if (sessionUser) {
+      return {
+        id: sessionUser.id,
+        email: sessionUser.email,
+        name: sessionUser.name,
+        role: sessionUser.role,
+      }
     }
+  } catch {
+    // Session lookup failed
   }
 
   return null

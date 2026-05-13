@@ -1,6 +1,6 @@
 'use client';
 
-/* TryOnDialog v1.1 — AI Virtual Try-On */
+/* TryOnDialog v1.2 — format via prop */
 
 import { useStore } from '@/lib/store';
 import { useCurrency } from '@/lib/currency';
@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle, Truck, Heart, MessageSquare } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { getProxiedImageUrl } from '@/lib/image-utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -126,7 +127,93 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
   });
 }
 
-// (Canvas composite and watermark functions removed - server-side Sharp handles this now)
+/**
+ * Client-side canvas fallback: overlay the product image on the selfie.
+ * Used when the AI backend service is unavailable (e.g., Vercel serverless).
+ */
+function generateCanvasFallback(selfieData: string, productImageUrl: string, productName: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const selfieImg = document.createElement('img');
+      selfieImg.crossOrigin = 'anonymous';
+      selfieImg.onload = () => {
+        const productImg = document.createElement('img');
+        productImg.crossOrigin = 'anonymous';
+        productImg.onload = () => {
+          const canvas = document.createElement('canvas');
+          const width = Math.max(selfieImg.naturalWidth, 512);
+          const height = Math.max(selfieImg.naturalHeight, 680);
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { resolve(null); return; }
+
+          // Draw the selfie as the base
+          ctx.drawImage(selfieImg, 0, 0, width, height);
+
+          // Overlay product image at bottom-right with semi-transparency
+          const productW = Math.floor(width * 0.35);
+          const productH = Math.floor(height * 0.35);
+          const px = width - productW - 12;
+          const py = height - productH - 12;
+
+          // Rounded rect background
+          ctx.save();
+          ctx.globalAlpha = 0.75;
+          ctx.fillStyle = '#1c1917';
+          ctx.beginPath();
+          ctx.roundRect(px - 6, py - 6, productW + 12, productH + 40, 8);
+          ctx.fill();
+          ctx.restore();
+
+          // Product image
+          ctx.save();
+          ctx.globalAlpha = 0.9;
+          ctx.beginPath();
+          ctx.roundRect(px, py, productW, productH, 6);
+          ctx.clip();
+          ctx.drawImage(productImg, px, py, productW, productH);
+          ctx.restore();
+
+          // Label
+          ctx.save();
+          ctx.globalAlpha = 0.9;
+          ctx.fillStyle = '#daa520';
+          ctx.font = `bold ${Math.max(12, Math.floor(productW * 0.07))}px Arial, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText(productName.substring(0, 28), px + productW / 2, py + productH + 18);
+          ctx.restore();
+
+          // Watermark
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = '#daa520';
+          ctx.font = `bold ${Math.max(10, Math.floor(width * 0.018))}px Arial, sans-serif`;
+          ctx.textAlign = 'right';
+          ctx.fillText('3BOXES GIFTS · Style Preview', width - 12, height - 12);
+          ctx.restore();
+
+          resolve(canvas.toDataURL('image/png'));
+        };
+        productImg.onerror = () => resolve(null);
+        // Route external images through our proxy to avoid CORS issues
+        let imgSrc = productImageUrl;
+        if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
+          imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
+        } else if (imgSrc.startsWith('//')) {
+          imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
+        } else if (imgSrc.startsWith('/') && !imgSrc.startsWith('/api/')) {
+          imgSrc = `${window.location.origin}${imgSrc}`;
+        }
+        productImg.src = imgSrc;
+      };
+      selfieImg.onerror = () => resolve(null);
+      selfieImg.src = selfieData;
+    } catch {
+      resolve(null);
+    }
+  });
+}
 
 // ── Try-On Dialog ──────────────────────────────────────────────
 type Step = 'upload' | 'preview' | 'generating' | 'result';
@@ -246,13 +333,56 @@ function TryOnDialog({
       });
 
       const postData = await postRes.json();
+
+      // Handle canvas mode — AI service unavailable, use client-side canvas fallback
+      if (postData.mode === 'canvas' || postData.code === 'AI_CANVAS_MODE') {
+        setProgressMessage('Creating style preview overlay...');
+        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
+        if (canvasResult) {
+          setResultImage(canvasResult);
+          setWatermarkedResult(canvasResult);
+          setStrategy('canvas-overlay');
+          setStep('result');
+          onBackgroundJob('result');
+          return;
+        }
+        setError('Could not generate style preview. The AI service is currently unavailable.');
+        setStep('preview');
+        onResetBackground();
+        return;
+      }
+
+      // Handle 503 / AI_SERVICE_UNAVAILABLE — try canvas fallback
       if (!postRes.ok) {
+        if (postRes.status === 503 || postData.code === 'AI_SERVICE_UNAVAILABLE') {
+          setProgressMessage('AI service unavailable. Creating style preview overlay...');
+          const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
+          if (canvasResult) {
+            setResultImage(canvasResult);
+            setWatermarkedResult(canvasResult);
+            setStrategy('canvas-overlay');
+            setStep('result');
+            onBackgroundJob('result');
+            return;
+          }
+        }
         throw new Error(postData.error || `Error: ${postRes.status}`);
       }
 
       const jobId = postData.jobId;
       if (!jobId) {
-        throw new Error('No job ID returned from server');
+        // No jobId but response was ok — could be a canvas mode we didn't catch above
+        setProgressMessage('Creating style preview overlay...');
+        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
+        if (canvasResult) {
+          setResultImage(canvasResult);
+          setWatermarkedResult(canvasResult);
+          setStrategy('canvas-overlay');
+          setStep('result');
+          onBackgroundJob('result');
+          return;
+        }
+        throw new Error('No job ID returned from server. Please try again.');
       }
 
       // Step 2: Poll for job completion
@@ -295,17 +425,29 @@ function TryOnDialog({
 
       await pollJob();
     } catch (err) {
+      // On any error, try canvas fallback before showing error
+      setProgressMessage('Trying style preview fallback...');
+      const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
+      if (canvasResult) {
+        setResultImage(canvasResult);
+        setWatermarkedResult(canvasResult);
+        setStrategy('canvas-overlay');
+        setStep('result');
+        onBackgroundJob('result');
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Something went wrong');
       setStep('preview');
       onResetBackground();
     }
-  }, [selfieData, productId, productImage, onBackgroundJob, onResetBackground]);
+  }, [selfieData, productId, productImage, productName, categorySlug, onBackgroundJob, onResetBackground]);
 
   // Get category-specific label
   const getCategoryLabel = () => {
     switch (categorySlug) {
       case 'sarees':
       case 'fashion':
+      case 'mens-shirts-t-shirts':
         return 'see how this outfit looks on you';
       case 'jewelry':
       case 'watches':
@@ -316,6 +458,7 @@ function TryOnDialog({
         return 'see how this bag looks with you';
       case 'romantic-gifts':
       case 'couple-gifts':
+      case 'couple-friendly-gifts':
         return 'see how this gift looks with you';
       case 'toys':
         return 'see how this product looks with you';
@@ -485,7 +628,7 @@ function TryOnDialog({
                   className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                 >
                   <Sparkles className="mr-2 h-4 w-4" />
-                  Create AI Preview
+                  Create Preview
                 </Button>
               </div>
             </div>
@@ -563,7 +706,7 @@ function TryOnDialog({
               </div>
 
               {/* AI Match Scores */}
-              {strategy && strategy !== 'client-preview' && (
+              {strategy && (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-900/15 bg-stone-900/40 p-2.5">
                   <Crown className="h-3.5 w-3.5 text-amber-400/60" />
                   <div className="flex-1">
@@ -605,7 +748,8 @@ function TryOnDialog({
                   <p className="text-[10px] font-bold text-amber-300">3 BOXES GIFTS — AI Style Preview</p>
                 </div>
                 <p className="text-[10px] text-amber-200/40">
-                  AI generates a virtual try-on preview using multiple strategies for the best match. For best results, use a clear, well-lit, front-facing selfie.
+                  AI generates a virtual try-on preview using multiple strategies for the best match. 
+                  For best results, use a clear, well-lit, front-facing selfie.
                 </p>
               </div>
 
@@ -693,7 +837,6 @@ export function ProductDetail() {
   const [isAdding, setIsAdding] = useState(false);
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [tryOnOpen, setTryOnOpen] = useState(false);
-  const [tryOnUnavailable, setTryOnUnavailable] = useState(false);
   const [backgroundJobStep, setBackgroundJobStep] = useState<'generating' | 'result' | null>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
@@ -791,24 +934,7 @@ export function ProductDetail() {
     }
   };
 
-  // For external products with HTTP image URLs, use the image proxy
-  // But Shopify CDN URLs can be used directly (no proxy needed, they support CORS)
-  const getProxiedImageUrl = (url: string): string => {
-    // Shopify CDN URLs work directly — no proxy needed
-    if (url.startsWith('https://cdn.shopify.com') || url.startsWith('https://shopify.com')) {
-      return url;
-    }
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return `/api/image-proxy?url=${encodeURIComponent(url)}&platform=${product?.platform || ''}`;
-    }
-    if (url.startsWith('//')) {
-      if (url.startsWith('//cdn.shopify.com') || url.startsWith('//shopify.com')) {
-        return 'https:' + url;
-      }
-      return `/api/image-proxy?url=${encodeURIComponent('https:' + url)}&platform=${product?.platform || ''}`;
-    }
-    return url;
-  };
+
 
   const handleAddToCart = () => {
     if (!product) return;
@@ -818,7 +944,7 @@ export function ProductDetail() {
         productId: product.id,
         name: product.name,
         price: product.price,
-        image: getProxiedImageUrl(product.images[0] || '/images/placeholder.jpg'),
+        image: getProxiedImageUrl(product.images[0] || '/images/placeholder.jpg', product.platform),
       });
     }
     setTimeout(() => setIsAdding(false), 800);
@@ -891,7 +1017,7 @@ export function ProductDetail() {
               </div>
             ) : (
               <img
-                src={getProxiedImageUrl(product.images[selectedImage] || '/images/hero.png')}
+                src={getProxiedImageUrl(product.images[selectedImage] || '/images/hero.png', product.platform)}
                 alt={product.name}
                 className="absolute inset-0 h-full w-full object-cover"
                 onError={() => {
@@ -926,7 +1052,7 @@ export function ProductDetail() {
                 >
                   {!imageErrors.has(i) ? (
                     <img
-                      src={getProxiedImageUrl(img)}
+                      src={getProxiedImageUrl(img, product.platform)}
                       alt={`${product.name} ${i + 1}`}
                       className="absolute inset-0 h-full w-full object-cover"
                       onError={() => {
@@ -1062,21 +1188,7 @@ export function ProductDetail() {
             transition={{ delay: 0.2 }}
           >
             <button
-              onClick={async () => {
-                try {
-                  const res = await fetch('/api/try-on/status');
-                  const data = await res.json();
-                  // Both 'ai' (direct) and 'proxy' (sandbox-routed) modes support try-on
-                  if (data.available && (data.mode === 'ai' || data.mode === 'proxy')) {
-                    setTryOnUnavailable(false);
-                    setTryOnOpen(true);
-                  } else {
-                    setTryOnUnavailable(true);
-                  }
-                } catch {
-                  setTryOnUnavailable(true);
-                }
-              }}
+              onClick={() => setTryOnOpen(true)}
               className="group flex w-full items-center gap-3 rounded-xl border border-amber-600/30 bg-gradient-to-r from-amber-900/20 via-rose-900/20 to-amber-900/20 p-4 transition-all hover:border-amber-500/50 hover:from-amber-900/30 hover:via-rose-900/30 hover:to-amber-900/30 hover:shadow-lg hover:shadow-amber-900/20"
             >
               <div className="rounded-lg bg-amber-600/20 p-2.5 transition-colors group-hover:bg-amber-600/30">
@@ -1088,15 +1200,6 @@ export function ProductDetail() {
               </div>
               <Sparkles className="h-4 w-4 text-amber-400/50 transition-colors group-hover:text-amber-400" />
             </button>
-            {tryOnUnavailable && (
-              <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-700/30 bg-amber-950/20 p-3">
-                <Sparkles className="h-4 w-4 flex-shrink-0 text-amber-500/60 mt-0.5" />
-                <div>
-                  <p className="text-xs font-medium text-amber-300/80">AI Style Preview Temporarily Unavailable</p>
-                  <p className="text-[10px] text-amber-200/40 mt-0.5">Our AI style service is currently offline. This feature requires a live AI connection. Please try again later.</p>
-                </div>
-              </div>
-            )}
           </motion.div>
 
           {/* External Product Notice */}
@@ -1362,12 +1465,12 @@ export function ProductDetail() {
           onOpenChange={setTryOnOpen}
           productId={product.id}
           productName={product.name}
-          productImage={getProxiedImageUrl(product.images[0] || '/images/hero.png')}
+          productImage={getProxiedImageUrl(product.images[0] || '/images/hero.png', product.platform)}
           categorySlug={product.categorySlug}
-          productImages={product.images.map(img => getProxiedImageUrl(img))}
+          productImages={product.images.map(img => getProxiedImageUrl(img, product.platform))}
           onBackgroundJob={handleBackgroundJob}
           onResetBackground={handleResetBackground}
-        />
+/>
       )}
 
       {/* Floating Pill — shown when dialog is closed but a background job is running */}

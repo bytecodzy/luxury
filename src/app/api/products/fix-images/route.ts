@@ -42,8 +42,8 @@ export async function POST(request: NextRequest) {
       let failed = 0;
       const errors: string[] = [];
 
-      const { createZAI } = await import('@/lib/zai');
-      const zai = await createZAI();
+      const ZAI = (await import('z-ai-web-dev-sdk')).default;
+      const zai = await ZAI.create();
 
       for (const product of products) {
         try {
@@ -107,8 +107,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Product has no source URL' }, { status: 400 });
       }
 
-      const { createZAI } = await import('@/lib/zai');
-      const zai = await createZAI();
+      const ZAI = (await import('z-ai-web-dev-sdk')).default;
+      const zai = await ZAI.create();
 
       const images = await rescrapeImages(zai, product.sourceUrl, product.platform);
 

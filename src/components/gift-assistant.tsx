@@ -6,6 +6,7 @@ import { Sparkles, Gift, Send, X, MessageCircle, ShoppingBag } from 'lucide-reac
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useStore } from '@/lib/store';
+import { getProxiedImageUrl } from '@/lib/image-utils';
 
 interface ChatMessage {
   id: string;
@@ -199,11 +200,7 @@ export function GiftAssistant() {
                             <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-stone-700">
                               {product.image ? (
                                 <img
-                                  src={
-                                    product.image.startsWith('http')
-                                      ? `/api/image-proxy?url=${encodeURIComponent(product.image)}`
-                                      : product.image
-                                  }
+                                  src={getProxiedImageUrl(product.image || '')}
                                   alt={product.name}
                                   className="h-full w-full object-cover"
                                 />

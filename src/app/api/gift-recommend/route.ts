@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import {
+  fetchShopifyProducts,
+  type ShopifyProductTransformed,
+} from '@/lib/shopify'
 
 // POST /api/gift-recommend - Gift recommendation using LLM + local product search
 export async function POST(request: NextRequest) {
@@ -15,30 +19,118 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ── Build local product search ────────────────────────────────────
-    const where: Record<string, unknown> = {}
-
-    // Budget filter
+    // Budget parsing helper
+    const budgetMap: Record<string, [number, number]> = {
+      'under-50': [0, 50],
+      '50-100': [50, 100],
+      '100-250': [100, 250],
+      '250-500': [250, 500],
+      '500-plus': [500, 999999],
+    }
+    let budgetMin: number | null = null
+    let budgetMax: number | null = null
     if (budget) {
-      where.price = {}
-      const budgetMap: Record<string, [number, number]> = {
-        'under-50': [0, 50],
-        '50-100': [50, 100],
-        '100-250': [100, 250],
-        '250-500': [250, 500],
-        '500-plus': [500, 999999],
-      }
-      // Support both mapped budget keys and numeric budget values
       const range = budgetMap[budget]
       if (range) {
-        ;(where.price as Record<string, unknown>).gte = range[0]
-        ;(where.price as Record<string, unknown>).lte = range[1]
+        budgetMin = range[0]
+        budgetMax = range[1]
       } else {
         const budgetNum = parseFloat(budget)
         if (!isNaN(budgetNum) && budgetNum > 0) {
-          ;(where.price as Record<string, unknown>).lte = budgetNum
+          budgetMax = budgetNum
         }
       }
+    }
+
+    // ── Shopify-only path (Vercel) ────────────────────────────────────
+    const preferShopify = process.env.DATA_SOURCE === 'shopify' || !!process.env.VERCEL
+
+    if (preferShopify) {
+      try {
+        let shopifyProducts = await fetchShopifyProducts()
+
+        // Category filter
+        if (category) {
+          const catLower = category.toLowerCase()
+          shopifyProducts = shopifyProducts.filter(p =>
+            p.categorySlug.includes(catLower) || p.category.toLowerCase().includes(catLower)
+          )
+        }
+
+        // Budget filter
+        if (budgetMin !== null) {
+          shopifyProducts = shopifyProducts.filter(p => p.price >= budgetMin!)
+        }
+        if (budgetMax !== null) {
+          shopifyProducts = shopifyProducts.filter(p => p.price <= budgetMax!)
+        }
+
+        // Sort by featured then rating
+        shopifyProducts.sort((a, b) => {
+          if (a.featured !== b.featured) return a.featured ? -1 : 1
+          return b.rating - a.rating
+        })
+
+        // If filters leave no results, fall back to all products
+        if (shopifyProducts.length === 0) {
+          shopifyProducts = await fetchShopifyProducts()
+        }
+
+        const recommendations = shopifyProducts.slice(0, 8).map((p) => ({
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          compareAtPrice: p.compareAtPrice,
+          image: p.images?.[0] || null,
+          category: p.category,
+          categorySlug: p.categorySlug,
+          rating: p.rating,
+          reviewCount: p.reviewCount,
+          description: p.description,
+          tags: p.tags,
+          occasions: p.occasions || [],
+          recipientTypes: p.recipientTypes || [],
+          deliveryEstimate: p.deliveryEstimate,
+          isExternal: p.isExternal,
+          affiliateUrl: p.affiliateUrl,
+        }))
+
+        // Generate a helpful message without LLM
+        const occasionText = occasion ? ` for ${occasion}` : ''
+        const recipientText = recipient ? ` for your ${recipient}` : ''
+        const budgetText = budget ? ` within your budget` : ''
+        const aiMessage = `Here are my top luxury gift recommendations${occasionText}${recipientText}${budgetText}:\n\n${recommendations.map((p, i) => `${i + 1}. ${p.name} - ₹${p.price.toLocaleString('en-IN')}${p.compareAtPrice ? ` (was ₹${p.compareAtPrice.toLocaleString('en-IN')})` : ''} | ${p.category}`).join('\n')}\n\nEach of these premium items would make a wonderful gift. Click on any product to see more details and add luxury gift wrapping at checkout!`
+
+        return NextResponse.json({
+          message: aiMessage,
+          products: recommendations,
+          aiSuggestions: [],
+          criteria: {
+            occasion: occasion || null,
+            recipient: recipient || null,
+            relationship: relationship || null,
+            budget: budget || null,
+            category: category || null,
+          },
+          source: 'shopify',
+        })
+      } catch (shopifyError) {
+        console.error('[Gift Recommend] Shopify fetch failed:', shopifyError)
+        return NextResponse.json(
+          { error: 'Failed to get recommendations. Please try again later.' },
+          { status: 500 }
+        )
+      }
+    }
+
+    // ── DB-first path (local development) ─────────────────────────────
+    const where: Record<string, unknown> = {}
+
+    // Budget filter
+    if (budgetMin !== null || budgetMax !== null) {
+      where.price = {}
+      if (budgetMin !== null) (where.price as Record<string, unknown>).gte = budgetMin
+      if (budgetMax !== null) (where.price as Record<string, unknown>).lte = budgetMax
     }
 
     // Category filter
@@ -118,8 +210,8 @@ export async function POST(request: NextRequest) {
     let aiSuggestions: Array<{ name: string; reason: string; priceRange: string }> = []
 
     try {
-      const { createZAI } = await import('@/lib/zai')
-      const zai = await createZAI()
+      const ZAI = (await import('z-ai-web-dev-sdk')).default
+      const zai = await ZAI.create()
 
       const productContext = recommendations
         .map(

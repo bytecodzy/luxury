@@ -29,7 +29,9 @@ const categoryIcons: Record<string, React.ReactNode> = {
   sarees: <Ribbon className="h-6 w-6" />,
   toys: <ToyBrick className="h-6 w-6" />,
   'romantic-gifts': <Heart className="h-6 w-6" />,
+  'couple-friendly-gifts': <HeartHandshake className="h-6 w-6" />,
   'couple-gifts': <HeartHandshake className="h-6 w-6" />,
+  'mens-shirts-t-shirts': <Shirt className="h-6 w-6" />,
 };
 
 const categoryColors: Record<string, string> = {
@@ -42,7 +44,9 @@ const categoryColors: Record<string, string> = {
   sarees: 'from-pink-900/30 to-stone-900/60',
   toys: 'from-cyan-900/30 to-stone-900/60',
   'romantic-gifts': 'from-red-900/30 to-stone-900/60',
+  'couple-friendly-gifts': 'from-fuchsia-900/30 to-stone-900/60',
   'couple-gifts': 'from-fuchsia-900/30 to-stone-900/60',
+  'mens-shirts-t-shirts': 'from-sky-900/30 to-stone-900/60',
 };
 
 export function CategoryGrid() {

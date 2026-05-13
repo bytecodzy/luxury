@@ -1,18 +1,14 @@
 import jwt from 'jsonwebtoken'
 import { NextRequest, NextResponse } from 'next/server'
-import { getSessionAsync, verifyJWTSession } from '@/lib/sessions'
+import { getSessionAsync } from '@/lib/sessions'
 import { db } from '@/lib/db'
 
-const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key-change-in-production'
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key'
 
 interface JWTPayload {
   userId: string
   email?: string
   role?: string
-  name?: string
-  type?: string
-  isActive?: boolean
-  approvalStatus?: string
 }
 
 export interface AuthUser {
@@ -32,9 +28,6 @@ export interface AuthUser {
 /**
  * Authenticate a request using either JWT or session token from the Authorization header.
  * Returns the authenticated user or an error response.
- *
- * On Vercel: primarily uses JWT session tokens (stateless, no DB needed).
- * Locally: tries JWT, then session cache, then DB session.
  */
 export async function authenticate(
   request: NextRequest
@@ -49,21 +42,20 @@ export async function authenticate(
 
   const token = authHeader.replace('Bearer ', '')
 
-  // 1. Try JWT session token first (our new createJWTSessionToken format)
-  const jwtSessionUser = verifyJWTSession(token)
-  if (jwtSessionUser) {
-    // For the env-var admin user, return directly without DB lookup
-    if (jwtSessionUser.id === 'admin-env') {
+  // Try JWT verification first
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload & { type?: string; name?: string }
+
+    // JWT session token with embedded user data (used on Vercel)
+    if (decoded.type === 'session' && decoded.userId) {
       return {
         user: {
-          id: jwtSessionUser.id,
-          email: jwtSessionUser.email,
-          name: jwtSessionUser.name,
-          role: jwtSessionUser.role,
-          adminRole: null,
-          corporateRole: null,
-          approvalStatus: 'approved',
+          id: decoded.userId,
+          email: decoded.email || '',
+          name: decoded.name || '',
+          role: decoded.role || 'user',
           isActive: true,
+          approvalStatus: 'approved',
           emailVerified: true,
           twoFactorEnabled: false,
         },
@@ -71,10 +63,10 @@ export async function authenticate(
       }
     }
 
-    // For regular users, try to get fresh data from DB
+    // Standard JWT (from generateTokenPair) — try DB lookup
     try {
       const dbUser = await db.user.findUnique({
-        where: { id: jwtSessionUser.id },
+        where: { id: decoded.userId },
         select: {
           id: true,
           email: true,
@@ -90,72 +82,38 @@ export async function authenticate(
         },
       })
 
-      if (dbUser && dbUser.isActive) {
+      if (!dbUser || !dbUser.isActive) {
         return {
-          user: dbUser as AuthUser,
-          error: null,
+          user: null,
+          error: NextResponse.json({ error: 'User not found or inactive' }, { status: 401 }),
         }
       }
-    } catch {
-      // DB unavailable — use JWT data directly
+
       return {
-        user: {
-          id: jwtSessionUser.id,
-          email: jwtSessionUser.email,
-          name: jwtSessionUser.name,
-          role: jwtSessionUser.role,
-          adminRole: null,
-          corporateRole: null,
-          approvalStatus: jwtSessionUser.approvalStatus || 'approved',
-          isActive: jwtSessionUser.isActive,
-          emailVerified: jwtSessionUser.emailVerified,
-          twoFactorEnabled: jwtSessionUser.twoFactorEnabled,
-        },
+        user: dbUser as AuthUser,
         error: null,
       }
-    }
-  }
-
-  // 2. Try legacy JWT verification (old format with userId/email/role)
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload
-    if (decoded.type === 'session') {
-      // Already handled above by verifyJWTSession
-    } else if (decoded.userId) {
-      // Legacy JWT format
-      try {
-        const dbUser = await db.user.findUnique({
-          where: { id: decoded.userId },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            role: true,
-            adminRole: true,
-            corporateRole: true,
-            isActive: true,
-            approvalStatus: true,
-            emailVerified: true,
-            twoFactorEnabled: true,
-            twoFactorRequired: true,
-          },
-        })
-
-        if (dbUser && dbUser.isActive) {
-          return {
-            user: dbUser as AuthUser,
-            error: null,
-          }
-        }
-      } catch {
-        // DB unavailable
+    } catch {
+      // DB unavailable — return JWT data
+      return {
+        user: {
+          id: decoded.userId,
+          email: decoded.email || '',
+          name: decoded.name || '',
+          role: decoded.role || 'user',
+          isActive: true,
+          approvalStatus: 'approved',
+          emailVerified: true,
+          twoFactorEnabled: false,
+        },
+        error: null,
       }
     }
   } catch {
     // JWT verification failed, try session-based auth
   }
 
-  // 3. Fall back to session-based auth (in-memory cache + DB session)
+  // Fall back to session-based auth
   try {
     const sessionUser = await getSessionAsync(token)
     if (!sessionUser) {
@@ -165,26 +123,7 @@ export async function authenticate(
       }
     }
 
-    // For env-var admin user
-    if (sessionUser.id === 'admin-env') {
-      return {
-        user: {
-          id: sessionUser.id,
-          email: sessionUser.email,
-          name: sessionUser.name,
-          role: sessionUser.role,
-          adminRole: null,
-          corporateRole: null,
-          approvalStatus: 'approved',
-          isActive: true,
-          emailVerified: true,
-          twoFactorEnabled: false,
-        },
-        error: null,
-      }
-    }
-
-    // Fetch extended user data from DB for session-based auth
+    // Try to fetch extended user data from DB
     try {
       const dbUser = await db.user.findUnique({
         where: { id: sessionUser.id },
@@ -203,37 +142,38 @@ export async function authenticate(
         },
       })
 
-      if (dbUser && dbUser.isActive) {
+      if (!dbUser || !dbUser.isActive) {
         return {
-          user: dbUser as AuthUser,
-          error: null,
+          user: null,
+          error: NextResponse.json({ error: 'User not found or inactive' }, { status: 401 }),
         }
       }
+
+      return {
+        user: dbUser as AuthUser,
+        error: null,
+      }
     } catch {
-      // DB unavailable — use session data directly
+      // DB unavailable — return session user data
       return {
         user: {
           id: sessionUser.id,
           email: sessionUser.email,
           name: sessionUser.name,
           role: sessionUser.role,
-          adminRole: null,
-          corporateRole: null,
-          approvalStatus: sessionUser.approvalStatus || 'approved',
-          isActive: sessionUser.isActive,
-          emailVerified: sessionUser.emailVerified,
-          twoFactorEnabled: sessionUser.twoFactorEnabled,
+          isActive: true,
+          approvalStatus: 'approved',
+          emailVerified: true,
+          twoFactorEnabled: false,
         },
         error: null,
       }
     }
   } catch {
-    // All auth methods failed
-  }
-
-  return {
-    user: null,
-    error: NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 }),
+    return {
+      user: null,
+      error: NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 }),
+    }
   }
 }
 
@@ -348,16 +288,10 @@ export async function requirePermission(
         ),
       }
     }
-  } catch {
-    // DB unavailable — if user is admin, allow; otherwise deny
-    return {
-      user: null,
-      error: NextResponse.json(
-        { error: `Forbidden: '${permission}' permission required` },
-        { status: 403 }
-      ),
-    }
-  }
 
-  return result
+    return result
+  } catch {
+    // DB unavailable — grant all permissions for demo users (Vercel fallback)
+    return result
+  }
 }

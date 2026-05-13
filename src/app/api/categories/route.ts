@@ -3,20 +3,22 @@ import { db } from '@/lib/db'
 import { fetchShopifyCategories } from '@/lib/shopify'
 
 export async function GET() {
-  // ─── On Vercel: skip DB entirely and use Shopify directly ───
-  // This prevents duplications from DB + Shopify categories
-  const isVercel = !!process.env.VERCEL
+  // ─── Check data source preference ───
+  // On Vercel serverless, SQLite DB is not accessible, so always use Shopify
+  const dataSource = process.env.DATA_SOURCE // 'shopify' to skip DB, 'database' for DB-first (default)
+  const preferShopify = dataSource === 'shopify' || !!process.env.VERCEL
 
-  if (isVercel) {
-    console.log('[Categories API] Vercel detected, using Shopify directly')
+  // ─── Shopify-only path (no DB, no duplication) ───
+  if (preferShopify) {
     try {
       const shopifyCategories = await fetchShopifyCategories()
+
       return NextResponse.json({
         categories: shopifyCategories,
         source: 'shopify',
       })
     } catch (shopifyError) {
-      console.error('[Categories API] Shopify fetch failed on Vercel:', shopifyError)
+      console.error('[Categories API] Shopify fetch failed:', shopifyError)
       return NextResponse.json(
         { error: 'Failed to fetch categories from Shopify' },
         { status: 500 }
@@ -24,7 +26,7 @@ export async function GET() {
     }
   }
 
-  // ─── Local development: Try database first ───
+  // ─── DB-first path (default, with Shopify fallback) ───
   try {
     const categories = await db.category.findMany({
       orderBy: { name: 'asc' },

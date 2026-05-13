@@ -189,36 +189,6 @@ async function shopifyFetch<T>(endpoint: string, params?: Record<string, string>
   return response.json() as Promise<T>
 }
 
-// ─── Category placeholder images ───
-
-const CATEGORY_PLACEHOLDER_MAP: Record<string, string> = {
-  watches: '/images/products/watch-1.jpg',
-  jewelry: '/images/products/jewelry-1.jpg',
-  jewellery: '/images/products/jewelry-1.jpg',
-  rings: '/images/products/jewelry-1.jpg',
-  necklaces: '/images/products/jewelry-1.jpg',
-  earrings: '/images/products/jewelry-1.jpg',
-  bracelets: '/images/products/jewelry-1.jpg',
-  bangles: '/images/products/jewelry-1.jpg',
-  'leather-goods': '/images/products/leather-1.jpg',
-  fragrances: '/images/products/fragrance-1.jpg',
-  fashion: '/images/products/fashion-1.jpg',
-  'home-living': '/images/products/home-1.jpg',
-  sarees: '/images/products/saree-1.jpg',
-  'mens-shirts': '/images/products/mens-shirt-1.jpg',
-  'couple-gifts': '/images/products/couple-1.jpg',
-  'romantic-gifts': '/images/products/couple-1.jpg',
-  toys: '/images/products/toy-1.jpg',
-}
-
-function getCategoryPlaceholder(categorySlug: string): string {
-  if (CATEGORY_PLACEHOLDER_MAP[categorySlug]) return CATEGORY_PLACEHOLDER_MAP[categorySlug]
-  for (const [key, value] of Object.entries(CATEGORY_PLACEHOLDER_MAP)) {
-    if (categorySlug.includes(key) || key.includes(categorySlug)) return value
-  }
-  return '/images/placeholder.jpg'
-}
-
 // ─── Slug Helper ───
 
 function toSlug(text: string): string {
@@ -234,42 +204,61 @@ function toSlug(text: string): string {
 // ─── Category Mapping ───
 
 const PRODUCT_TYPE_TO_CATEGORY: Record<string, { name: string; slug: string }> = {
-  // Jewellery categories
-  'rings': { name: 'Rings', slug: 'rings' },
-  'ring': { name: 'Rings', slug: 'rings' },
-  'necklaces': { name: 'Necklaces', slug: 'necklaces' },
-  'necklace': { name: 'Necklaces', slug: 'necklaces' },
-  'pendants': { name: 'Pendants', slug: 'pendants' },
-  'pendant': { name: 'Pendants', slug: 'pendants' },
-  'earrings': { name: 'Earrings', slug: 'earrings' },
-  'earring': { name: 'Earrings', slug: 'earrings' },
-  'bracelets': { name: 'Bracelets', slug: 'bracelets' },
-  'bracelet': { name: 'Bracelets', slug: 'bracelets' },
-  'bangles': { name: 'Bangles', slug: 'bangles' },
-  'bangle': { name: 'Bangles', slug: 'bangles' },
-  'chains': { name: 'Chains', slug: 'chains' },
-  'chain': { name: 'Chains', slug: 'chains' },
-  'anklets': { name: 'Anklets', slug: 'anklets' },
-  'anklet': { name: 'Anklets', slug: 'anklets' },
-  'brooches': { name: 'Brooches', slug: 'brooches' },
-  'brooch': { name: 'Brooches', slug: 'brooches' },
-  // Watch categories
+  // Primary categories — slugs MUST match Shopify collection handles to avoid duplicates
+  'jewelry': { name: 'Jewelry', slug: 'jewelry' },
+  'jewellery': { name: 'Jewelry', slug: 'jewelry' },
+  'fine jewellery': { name: 'Jewelry', slug: 'jewelry' },
+  'fashion jewellery': { name: 'Jewelry', slug: 'jewelry' },
+  'costume jewellery': { name: 'Jewelry', slug: 'jewelry' },
+  // Sub-categories of jewelry — all map to parent Jewelry category
+  'rings': { name: 'Jewelry', slug: 'jewelry' },
+  'ring': { name: 'Jewelry', slug: 'jewelry' },
+  'necklaces': { name: 'Jewelry', slug: 'jewelry' },
+  'necklace': { name: 'Jewelry', slug: 'jewelry' },
+  'pendants': { name: 'Jewelry', slug: 'jewelry' },
+  'pendant': { name: 'Jewelry', slug: 'jewelry' },
+  'earrings': { name: 'Jewelry', slug: 'jewelry' },
+  'earring': { name: 'Jewelry', slug: 'jewelry' },
+  'bracelets': { name: 'Jewelry', slug: 'jewelry' },
+  'bracelet': { name: 'Jewelry', slug: 'jewelry' },
+  'bangles': { name: 'Jewelry', slug: 'jewelry' },
+  'bangle': { name: 'Jewelry', slug: 'jewelry' },
+  'chains': { name: 'Jewelry', slug: 'jewelry' },
+  'chain': { name: 'Jewelry', slug: 'jewelry' },
+  'anklets': { name: 'Jewelry', slug: 'jewelry' },
+  'anklet': { name: 'Jewelry', slug: 'jewelry' },
+  'brooches': { name: 'Jewelry', slug: 'jewelry' },
+  'brooch': { name: 'Jewelry', slug: 'jewelry' },
+  // Other primary categories
   'watches': { name: 'Watches', slug: 'watches' },
   'watch': { name: 'Watches', slug: 'watches' },
-  // Gift categories
-  'gift sets': { name: 'Gift Sets', slug: 'gift-sets' },
-  'gift set': { name: 'Gift Sets', slug: 'gift-sets' },
-  'gift box': { name: 'Gift Boxes', slug: 'gift-boxes' },
-  'gift boxes': { name: 'Gift Boxes', slug: 'gift-boxes' },
-  // Accessory categories
-  'accessories': { name: 'Accessories', slug: 'accessories' },
-  'accessory': { name: 'Accessories', slug: 'accessories' },
-  // General
-  'jewellery': { name: 'Jewellery', slug: 'jewellery' },
-  'jewelry': { name: 'Jewellery', slug: 'jewellery' },
-  'fine jewellery': { name: 'Fine Jewellery', slug: 'fine-jewellery' },
-  'fashion jewellery': { name: 'Fashion Jewellery', slug: 'fashion-jewellery' },
-  'costume jewellery': { name: 'Fashion Jewellery', slug: 'fashion-jewellery' },
+  'sarees': { name: 'Sarees', slug: 'sarees' },
+  'saree': { name: 'Sarees', slug: 'sarees' },
+  "men's shirts": { name: "Men's Shirts & T-Shirts", slug: 'mens-shirts-t-shirts' },
+  "men's shirts & t-shirts": { name: "Men's Shirts & T-Shirts", slug: 'mens-shirts-t-shirts' },
+  'mens shirts': { name: "Men's Shirts & T-Shirts", slug: 'mens-shirts-t-shirts' },
+  'shirts': { name: "Men's Shirts & T-Shirts", slug: 'mens-shirts-t-shirts' },
+  'fashion': { name: 'Fashion', slug: 'fashion' },
+  'fragrances': { name: 'Fragrances', slug: 'fragrances' },
+  'fragrance': { name: 'Fragrances', slug: 'fragrances' },
+  'perfume': { name: 'Fragrances', slug: 'fragrances' },
+  'leather goods': { name: 'Leather Goods', slug: 'leather-goods' },
+  'leather': { name: 'Leather Goods', slug: 'leather-goods' },
+  'home & living': { name: 'Home & Living', slug: 'home-living' },
+  'home living': { name: 'Home & Living', slug: 'home-living' },
+  'home': { name: 'Home & Living', slug: 'home-living' },
+  'couple friendly gifts': { name: 'Couple Friendly Gifts', slug: 'couple-friendly-gifts' },
+  'couple gifts': { name: 'Couple Friendly Gifts', slug: 'couple-friendly-gifts' },
+  'romantic gifts': { name: 'Romantic Gifts', slug: 'romantic-gifts' },
+  'romantic': { name: 'Romantic Gifts', slug: 'romantic-gifts' },
+  'toys': { name: 'Toys', slug: 'toys' },
+  'toy': { name: 'Toys', slug: 'toys' },
+  'gift sets': { name: 'Couple Friendly Gifts', slug: 'couple-friendly-gifts' },
+  'gift set': { name: 'Couple Friendly Gifts', slug: 'couple-friendly-gifts' },
+  'gift box': { name: 'Romantic Gifts', slug: 'romantic-gifts' },
+  'gift boxes': { name: 'Romantic Gifts', slug: 'romantic-gifts' },
+  'accessories': { name: 'Fashion', slug: 'fashion' },
+  'accessory': { name: 'Fashion', slug: 'fashion' },
 }
 
 function getCategoryForProductType(productType: string): { name: string; slug: string } {
@@ -295,6 +284,117 @@ function getCategoryForProductType(productType: string): { name: string; slug: s
   return { name: productType, slug: toSlug(productType) }
 }
 
+// ─── Category-based Fallback Images ───
+// When Shopify products have no images, assign category-appropriate placeholders.
+
+const CATEGORY_FALLBACK_IMAGES: Record<string, string[]> = {
+  // Primary categories — slugs match Shopify collection handles
+  jewelry: [
+    '/images/products/jewelry-1.jpg',
+    '/images/products/jewelry-2.jpg',
+    '/images/products/jewelry-3.jpg',
+    '/images/products/jewelry-4.jpg',
+    '/images/products/jewelry-5.jpg',
+    '/images/products/jewelry-6.jpg',
+    '/images/products/jewelry-7.jpg',
+    '/images/products/jewelry-8.jpg',
+    '/images/products/jewelry-9.jpg',
+    '/images/products/jewelry-10.jpg',
+    '/images/products/jewelry-1-alt.jpg',
+  ],
+  watches: [
+    '/images/products/watch-1.jpg',
+    '/images/products/watch-2.jpg',
+    '/images/products/watch-3.jpg',
+    '/images/products/watch-4.jpg',
+    '/images/products/watch-1-alt.jpg',
+    '/images/products/watch-2-alt.jpg',
+  ],
+  sarees: [
+    '/images/products/saree-1.jpg',
+    '/images/products/saree-2.jpg',
+    '/images/products/saree-3.jpg',
+    '/images/products/saree-4.jpg',
+    '/images/products/saree-5.jpg',
+    '/images/products/saree-6.jpg',
+    '/images/products/saree-7.jpg',
+    '/images/products/saree-8.jpg',
+    '/images/products/saree-9.jpg',
+    '/images/products/saree-10.jpg',
+  ],
+  'mens-shirts-t-shirts': [
+    '/images/products/mens-shirt-1.jpg',
+    '/images/products/mens-shirt-2.jpg',
+    '/images/products/mens-shirt-3.jpg',
+    '/images/products/mens-shirt-4.jpg',
+    '/images/products/mens-shirt-5.jpg',
+    '/images/products/mens-shirt-6.jpg',
+    '/images/products/mens-shirt-7.jpg',
+    '/images/products/mens-shirt-8.jpg',
+    '/images/products/mens-shirt-9.jpg',
+    '/images/products/mens-shirt-10.jpg',
+  ],
+  fashion: [
+    '/images/products/fashion-1.jpg',
+    '/images/products/fashion-2.jpg',
+    '/images/products/fashion-3.jpg',
+    '/images/products/fashion-1-alt.jpg',
+  ],
+  fragrances: [
+    '/images/products/fragrance-1.jpg',
+    '/images/products/fragrance-2.jpg',
+    '/images/products/fragrance-3.jpg',
+    '/images/products/fragrance-1-alt.jpg',
+  ],
+  'leather-goods': [
+    '/images/products/leather-1.jpg',
+    '/images/products/leather-2.jpg',
+    '/images/products/leather-3.jpg',
+    '/images/products/leather-1-alt.jpg',
+    '/images/products/leather-bag-taupe.jpg',
+  ],
+  'home-living': [
+    '/images/products/home-1.jpg',
+    '/images/products/home-2.jpg',
+    '/images/products/home-3.jpg',
+    '/images/products/home-1-alt.jpg',
+  ],
+  'couple-friendly-gifts': [
+    '/images/products/couple-1.jpg',
+    '/images/products/couple-2.jpg',
+    '/images/products/couple-3.jpg',
+  ],
+  'romantic-gifts': [
+    '/images/products/romantic-1.jpg',
+    '/images/products/romantic-2.jpg',
+    '/images/products/romantic-3.jpg',
+  ],
+  toys: [
+    '/images/products/toy-1.jpg',
+    '/images/products/toy-2.jpg',
+    '/images/products/toy-3.jpg',
+  ],
+  uncategorized: [
+    '/images/placeholder.jpg',
+  ],
+}
+
+// Deterministic image selection based on product ID so the same product always gets the same image
+function getFallbackImages(categorySlug: string, productId: number): string[] {
+  const pool = CATEGORY_FALLBACK_IMAGES[categorySlug]
+  if (pool && pool.length > 0) {
+    // Use product ID to deterministically pick 1-2 images from the pool
+    const idx = productId % pool.length
+    const images = [pool[idx]]
+    if (pool.length > 1) {
+      const secondIdx = (productId + 1) % pool.length
+      if (secondIdx !== idx) images.push(pool[secondIdx])
+    }
+    return images
+  }
+  return ['/images/placeholder.jpg']
+}
+
 // ─── Public API ───
 
 /**
@@ -308,6 +408,8 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
 
   try {
     // Fetch products with up to 250 per page
+    // Note: Shopify REST API uses Link header pagination, not page param.
+    // For stores with <= 250 products, a single request suffices.
     const data = await shopifyFetch<{ products: ShopifyProduct[] }>(
       '/products.json',
       { limit: '250', status: 'active' }
@@ -315,7 +417,15 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
 
     const products = data.products || []
 
-    const transformed: ShopifyProductTransformed[] = products.map((p) => {
+    // Deduplicate by Shopify product ID (in case of data anomalies)
+    const seenIds = new Set<number>()
+    const uniqueProducts = products.filter(p => {
+      if (seenIds.has(p.id)) return false
+      seenIds.add(p.id)
+      return true
+    })
+
+    const transformed: ShopifyProductTransformed[] = uniqueProducts.map((p) => {
       const firstVariant = p.variants?.[0]
       const category = getCategoryForProductType(p.product_type)
       const tags = p.tags ? p.tags.split(',').map((t) => t.trim()).filter(Boolean) : []
@@ -329,9 +439,9 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
         compareAtPrice: firstVariant?.compare_at_price
           ? parseFloat(firstVariant.compare_at_price)
           : null,
-        images: p.images?.map((img) => img.src).length > 0
+        images: (p.images && p.images.length > 0)
           ? p.images.map((img) => img.src)
-          : [getCategoryPlaceholder(category.slug)],
+          : getFallbackImages(category.slug, p.id),
         category: category.name,
         categorySlug: category.slug,
         stock: firstVariant?.inventory_quantity ?? 0,
@@ -362,22 +472,8 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
 }
 
 /**
- * Normalize a category name for deduplication.
- * Handles singular/plural, case differences, and common variations.
- */
-function normalizeCategoryName(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/s$/, '') // Remove trailing 's' for plural→singular normalization
-    .replace(/-/g, ' ')
-    .replace(/\s+/g, ' ')
-}
-
-/**
  * Fetch categories derived from Shopify collections and product types.
  * Results are cached for 5 minutes.
- * Deduplicates by normalizing names (e.g., "Rings" and "ring" → same category).
  */
 export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransformed[]> {
   if (isCacheValid(categoriesCache)) {
@@ -401,50 +497,36 @@ export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransform
     const customCollections = customData.custom_collections || []
     const smartCollections = smartData.smart_collections || []
 
-    // Build category map from collections — key by normalized name for dedup
+    // Build category map — collections are the primary source
     const categoryMap = new Map<string, ShopifyCategoryTransformed>()
-    const normalizedToSlug = new Map<string, string>() // normalized name → canonical slug
 
-    // Add categories from collections (these take priority — they have images/descriptions)
+    // Add categories from collections first (these are the canonical categories)
     for (const col of [...customCollections, ...smartCollections]) {
       const slug = col.handle || toSlug(col.title)
-      const normalizedName = normalizeCategoryName(col.title)
-
-      // Skip if we already have a category with this normalized name
-      if (normalizedToSlug.has(normalizedName)) continue
-
-      normalizedToSlug.set(normalizedName, slug)
-      categoryMap.set(slug, {
-        id: `shopify-col-${col.id}`,
-        name: col.title,
-        slug,
-        description: col.body_html?.replace(/<[^>]*>/g, '').trim() || null,
-        image: col.image?.src || null,
-        productCount: 0,
-      })
+      // Skip "frontpage" / "uncategorized" — not real browsing categories
+      if (slug === 'frontpage' || slug === 'uncategorized') continue
+      if (!categoryMap.has(slug)) {
+        categoryMap.set(slug, {
+          id: `shopify-col-${col.id}`,
+          name: col.title,
+          slug,
+          description: col.body_html?.replace(/<[^>]*>/g, '').trim() || null,
+          image: col.image?.src || null,
+          productCount: 0,
+        })
+      }
     }
 
-    // Count products per category (from product_type)
+    // Count products per category (from product_type mapping)
     const productCountMap = new Map<string, number>()
     for (const product of products) {
       const count = productCountMap.get(product.categorySlug) || 0
       productCountMap.set(product.categorySlug, count + 1)
     }
 
-    // Also derive categories from product types if not already in collections
-    // Use normalized name for deduplication
+    // Only add product-type categories if no matching collection exists
     for (const product of products) {
-      const normalizedName = normalizeCategoryName(product.category)
-      const existingSlug = normalizedToSlug.get(normalizedName)
-
-      if (existingSlug) {
-        // Category already exists (from collection) — just accumulate product count
-        // Also update product's categorySlug to match the existing canonical slug
-        product.categorySlug = existingSlug
-        product.category = categoryMap.get(existingSlug)?.name || product.category
-      } else if (!categoryMap.has(product.categorySlug)) {
-        // New category from product type
-        normalizedToSlug.set(normalizedName, product.categorySlug)
+      if (!categoryMap.has(product.categorySlug)) {
         categoryMap.set(product.categorySlug, {
           id: `shopify-cat-${product.categorySlug}`,
           name: product.category,
@@ -456,15 +538,20 @@ export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransform
       }
     }
 
-    // Update product counts
+    // Update product counts and remove categories with 0 products
     for (const [slug, cat] of categoryMap) {
       cat.productCount = productCountMap.get(slug) || 0
     }
+    // Remove empty categories (except if they came from collections)
+    for (const [slug, cat] of categoryMap) {
+      if (cat.productCount === 0 && cat.id.startsWith('shopify-cat-')) {
+        categoryMap.delete(slug)
+      }
+    }
 
-    // Filter out categories with 0 products (empty collections with no matching products)
-    const categories = Array.from(categoryMap.values())
-      .filter(cat => cat.productCount > 0)
-      .sort((a, b) => a.name.localeCompare(b.name))
+    const categories = Array.from(categoryMap.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
 
     categoriesCache = { data: categories, timestamp: Date.now() }
     return categories

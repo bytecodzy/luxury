@@ -3,7 +3,6 @@ versions/
 flutter_app/
 shopify-theme/
 agent-ctx/
-*.sh
+# *.sh removed - needed for vercel-build.sh
 screenshot*.png
 test-*.png
-.z-ai-config

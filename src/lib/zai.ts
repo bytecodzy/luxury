@@ -12,14 +12,10 @@ const PROXY_HEALTH_CACHE_TTL = 60_000 // 60 seconds
 
 /**
  * Get the 'Abc' header value for authenticating with the sandbox gateway.
- * The sandbox gateway requires this header for access.
- * The value is derived from the proxy URL hostname (e.g., 'preview-chat-xxx').
  */
 function getAbcHeader(urlStr: string): string | undefined {
   try {
     const hostname = new URL(urlStr).hostname
-    // The hostname is like 'preview-chat-97b5f242-82cb-4d42-801a-52a64cae9d47.space-z.ai'
-    // The Abc header value is the part before '.space-z.ai'
     if (hostname.includes('.space-z.ai')) {
       return hostname.split('.')[0]
     }
@@ -31,8 +27,6 @@ function getAbcHeader(urlStr: string): string | undefined {
 
 /**
  * Check if the ZAI AI service endpoint is actually reachable.
- * Uses a cached result to avoid adding latency on every request.
- * Supports both internal IPs (local) and gateway URLs (cloud).
  */
 export async function isAIReachable(baseUrl: string): Promise<boolean> {
   const now = Date.now()
@@ -41,13 +35,10 @@ export async function isAIReachable(baseUrl: string): Promise<boolean> {
   }
 
   try {
-    // For internal IPs, check the dashboard directly
-    // For gateway URLs, check via the /api/try-on/status endpoint (which requires Abc header)
     const isInternalIP = baseUrl.includes('172.25.') || baseUrl.includes('192.168.') || baseUrl.includes('10.')
       || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')
 
     if (isInternalIP) {
-      // Direct health check to internal AI service
       const healthUrl = baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 4000)
@@ -61,7 +52,6 @@ export async function isAIReachable(baseUrl: string): Promise<boolean> {
       healthCache = { reachable: true, timestamp: now }
       return true
     } else {
-      // Gateway URL — check via the status endpoint with Abc header
       const healthUrl = baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')
       const abcHeader = getAbcHeader(healthUrl)
       const headers: Record<string, string> = { 'User-Agent': '3BOXES-HealthCheck/1.0' }
@@ -92,8 +82,6 @@ export async function isAIReachable(baseUrl: string): Promise<boolean> {
 
 /**
  * Check if the sandbox proxy URL is reachable.
- * Uses the 'Abc' header for authentication with the sandbox gateway.
- * Caches results to avoid adding latency.
  */
 export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
   const now = Date.now()
@@ -130,14 +118,18 @@ export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
 
 /**
  * Get the ZAI config from environment variables or file.
- * Returns null if no config is available.
  */
-export function getZAIConfig(): { baseUrl: string; apiKey: string } | null {
-  // Check environment variables first (works everywhere)
+export function getZAIConfig(): { baseUrl: string; apiKey: string; chatId?: string; token?: string; userId?: string } | null {
   const envBaseUrl = process.env.ZAI_BASE_URL
   const envApiKey = process.env.ZAI_API_KEY
   if (envBaseUrl && envApiKey) {
-    return { baseUrl: envBaseUrl, apiKey: envApiKey }
+    return {
+      baseUrl: envBaseUrl,
+      apiKey: envApiKey,
+      chatId: process.env.ZAI_CHAT_ID || undefined,
+      token: process.env.ZAI_TOKEN || undefined,
+      userId: process.env.ZAI_USER_ID || undefined,
+    }
   }
 
   // On Vercel, don't check config files
@@ -157,14 +149,20 @@ export function getZAIConfig(): { baseUrl: string; apiKey: string } | null {
         const configStr = fs.readFileSync(filePath, 'utf-8')
         const config = JSON.parse(configStr)
         if (config.baseUrl && config.apiKey) {
-          return { baseUrl: config.baseUrl, apiKey: config.apiKey }
+          return {
+            baseUrl: config.baseUrl,
+            apiKey: config.apiKey,
+            chatId: config.chatId || undefined,
+            token: config.token || undefined,
+            userId: config.userId || undefined,
+          }
         }
       } catch {
         // Continue to next path
       }
     }
   } catch {
-    // fs not available (edge runtime)
+    // fs not available
   }
 
   return null
@@ -172,11 +170,6 @@ export function getZAIConfig(): { baseUrl: string; apiKey: string } | null {
 
 /**
  * Check if the ZAI AI service is available AND reachable.
- * Async because it performs a health check.
- * Returns mode:
- *   'ai' — direct AI connection (local dev or gateway URL)
- *   'proxy' — proxy through sandbox (Vercel with unreachable AI)
- *   'unavailable' — no AI service available
  */
 export async function isZAIAvailable(): Promise<{
   available: boolean
@@ -186,9 +179,7 @@ export async function isZAIAvailable(): Promise<{
   const config = getZAIConfig()
 
   if (!config) {
-    // No config at all — try proxy
     if (process.env.ZAI_PROXY_URL) {
-      // Verify the proxy is reachable
       const proxyReachable = await isProxyReachable(process.env.ZAI_PROXY_URL)
       if (proxyReachable) {
         return { available: true, mode: 'proxy', reason: 'Using proxy to sandbox AI service' }
@@ -206,7 +197,6 @@ export async function isZAIAvailable(): Promise<{
     }
   }
 
-  // Config exists — verify the service is actually reachable
   const reachable = await isAIReachable(config.baseUrl)
 
   if (reachable) {
@@ -231,7 +221,6 @@ export async function isZAIAvailable(): Promise<{
 
 /**
  * Create a ZAI SDK instance.
- * Works with environment variables or file-based config.
  */
 export async function createZAI(): Promise<InstanceType<typeof ZAI>> {
   const config = getZAIConfig()
@@ -241,9 +230,9 @@ export async function createZAI(): Promise<InstanceType<typeof ZAI>> {
       return new ZAI({
         baseUrl: config.baseUrl,
         apiKey: config.apiKey,
-        chatId: process.env.ZAI_CHAT_ID || '',
-        token: process.env.ZAI_TOKEN || '',
-        userId: process.env.ZAI_USER_ID || '',
+        chatId: config.chatId || process.env.ZAI_CHAT_ID || '',
+        token: config.token || process.env.ZAI_TOKEN || '',
+        userId: config.userId || process.env.ZAI_USER_ID || '',
       }) as InstanceType<typeof ZAI>
     } catch (err) {
       console.error('[ZAI] Failed to create from config:', err)

@@ -4,34 +4,25 @@ import { isZAIAvailable } from '@/lib/zai'
 /**
  * GET /api/try-on/status
  *
- * Checks if the AI style service is available and reachable.
- * On Vercel: always returns unavailable (client uses canvas fallback).
- * Locally: performs real health checks.
+ * Lightweight availability check for the AI try-on feature.
+ * Checks both env vars and file-based config, then verifies reachability.
+ * Returns { available: boolean, mode: string, reason?: string }
  */
 export async function GET() {
-  // On Vercel: AI service is always unreachable
-  const isVercel = !!process.env.VERCEL
-
-  if (isVercel) {
-    return NextResponse.json({
-      available: false,
-      mode: 'unavailable',
-      message: 'AI style service is not available on this deployment. Use visual style preview instead.',
-    })
-  }
-
   try {
-    const status = await isZAIAvailable()
+    const aiCheck = await isZAIAvailable()
     return NextResponse.json({
-      available: status.available,
-      mode: status.mode,
-      message: status.reason,
+      available: aiCheck.available,
+      mode: aiCheck.mode,
+      reason: aiCheck.reason || null,
     })
   } catch {
     return NextResponse.json({
       available: false,
       mode: 'unavailable',
-      message: 'Could not check AI service availability.',
+      reason: 'AI service check failed',
     })
   }
 }
+
+export const dynamic = 'force-dynamic'

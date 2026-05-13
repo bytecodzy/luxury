@@ -282,8 +282,8 @@ interface SyncContext {
 }
 
 async function performPartnerSync(integration: SyncContext): Promise<SyncResult> {
-  const { createZAI } = await import('@/lib/zai');
-  const zai = await createZAI();
+  const ZAI = (await import('z-ai-web-dev-sdk')).default;
+  const zai = await ZAI.create();
 
   const partnerCategories: string[] = JSON.parse(integration.categories || '[]');
   let productsFound = 0;

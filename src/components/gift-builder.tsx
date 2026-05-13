@@ -32,6 +32,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useStore } from '@/lib/store';
+import { getProxiedImageUrl } from '@/lib/image-utils';
 import { useQuery } from '@tanstack/react-query';
 
 // ─── Step definitions ───
@@ -164,9 +165,7 @@ export function GiftBuilder() {
   const handleAddToCart = (product: (typeof filteredProducts)[0]) => {
     const mainImage =
       product.images.length > 0
-        ? product.images[0].startsWith('http')
-          ? `/api/image-proxy?url=${encodeURIComponent(product.images[0])}`
-          : product.images[0]
+        ? getProxiedImageUrl(product.images[0], product.platform)
         : '/images/placeholder.jpg';
 
     addItem({
@@ -427,9 +426,7 @@ export function GiftBuilder() {
                         const isSelected = selection.selectedProducts.includes(product.id);
                         const mainImage =
                           product.images.length > 0
-                            ? product.images[0].startsWith('http')
-                              ? `/api/image-proxy?url=${encodeURIComponent(product.images[0])}`
-                              : product.images[0]
+                            ? getProxiedImageUrl(product.images[0], product.platform)
                             : '/images/placeholder.jpg';
 
                         return (
@@ -549,9 +546,7 @@ export function GiftBuilder() {
                         {getSelectedProducts().map((product) => {
                           const mainImage =
                             product.images.length > 0
-                              ? product.images[0].startsWith('http')
-                                ? `/api/image-proxy?url=${encodeURIComponent(product.images[0])}`
-                                : product.images[0]
+                              ? getProxiedImageUrl(product.images[0], product.platform)
                               : '/images/placeholder.jpg';
                           const isAdded = addedToCart.has(product.id);
 

@@ -35,8 +35,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { createZAI } = await import('@/lib/zai');
-    const zai = await createZAI();
+    const ZAI = (await import('z-ai-web-dev-sdk')).default;
+    const zai = await ZAI.create();
     const results = await zai.functions.invoke('web_search', {
       query: searchQuery,
       num: 15,

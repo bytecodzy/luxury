@@ -10,6 +10,7 @@ import { motion } from 'framer-motion';
 import { Star, ShoppingCart, ExternalLink } from 'lucide-react';
 
 import { useState } from 'react';
+import { getProxiedImageUrl } from '@/lib/image-utils';
 
 interface Product {
   id: string;
@@ -88,29 +89,8 @@ export function ProductCard({ product }: { product: Product }) {
   const [isAdding, setIsAdding] = useState(false);
   const [imageError, setImageError] = useState(false);
 
-  // For external products with HTTP image URLs, use the image proxy
-  // But Shopify CDN URLs can be used directly (no proxy needed, they support CORS)
-  const getProxiedImageUrl = (url: string): string => {
-    // Shopify CDN URLs work directly — no proxy needed
-    if (url.startsWith('https://cdn.shopify.com') || url.startsWith('https://shopify.com')) {
-      return url;
-    }
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      // Use our image proxy to bypass CORS/hotlink protection
-      return `/api/image-proxy?url=${encodeURIComponent(url)}&platform=${product.platform || ''}`;
-    }
-    if (url.startsWith('//')) {
-      // Check if it's a Shopify CDN URL with protocol-relative
-      if (url.startsWith('//cdn.shopify.com') || url.startsWith('//shopify.com')) {
-        return 'https:' + url;
-      }
-      return `/api/image-proxy?url=${encodeURIComponent('https:' + url)}&platform=${product.platform || ''}`;
-    }
-    return url;
-  };
-
   const mainImage = product.images.length > 0
-    ? getProxiedImageUrl(product.images[0])
+    ? getProxiedImageUrl(product.images[0], product.platform)
     : '/images/placeholder.jpg';
   const isExternal = product.isExternal && product.platform;
   const platformSlug = product.platform?.toLowerCase() || '';

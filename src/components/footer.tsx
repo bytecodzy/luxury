@@ -11,6 +11,12 @@ export function Footer() {
     // Try to trigger PWA install prompt
     const event = new Event('trigger-pwa-install');
     window.dispatchEvent(event);
+
+    // Fallback: scroll to the app download section
+    const downloadSection = document.getElementById('app-download-section');
+    if (downloadSection) {
+      downloadSection.scrollIntoView({ behavior: 'smooth' });
+    }
   };
 
   return (
