@@ -33,11 +33,358 @@ interface TryOnDialogProps {
 
 type Step = 'upload' | 'preview' | 'generating' | 'result';
 
+// ── Image loading helper ─────────────────────────────────────────
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = document.createElement('img');
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
+    img.src = src;
+  });
+}
+
+// ── Poll for AI job result ───────────────────────────────────────
+
+async function pollForResult(
+  jobId: string,
+  maxAttempts = 60,
+  intervalMs = 2000
+): Promise<string | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    try {
+      const res = await fetch(`/api/try-on?jobId=${jobId}`);
+      const data = await res.json();
+      if (data.status === 'completed' && data.imageUrl) return data.imageUrl;
+      if (data.status === 'failed')
+        throw new Error(data.error || 'Generation failed');
+    } catch (e) {
+      if (i === maxAttempts - 1) throw e;
+    }
+  }
+  return null;
+}
+
+// ── Client-side canvas compositing fallback ──────────────────────
+
+async function createClientSideComposite(
+  selfieDataUrl: string,
+  productImageUrl: string,
+  productName: string
+): Promise<string | null> {
+  try {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // Load selfie
+    const selfieImg = await loadImage(selfieDataUrl);
+
+    // Set canvas size to selfie dimensions (max 1024)
+    let w = selfieImg.width;
+    let h = selfieImg.height;
+    if (w > 1024 || h > 1024) {
+      if (w > h) {
+        h = Math.round((h * 1024) / w);
+        w = 1024;
+      } else {
+        w = Math.round((w * 1024) / h);
+        h = 1024;
+      }
+    }
+    canvas.width = w;
+    canvas.height = h;
+
+    // Draw selfie as background
+    ctx.drawImage(selfieImg, 0, 0, w, h);
+
+    // Load and draw product image overlay in bottom-right area
+    try {
+      let productSrc = productImageUrl;
+      if (productSrc.startsWith('/api/image-proxy?url=')) {
+        const urlParam = new URL(productSrc, 'http://localhost').searchParams.get(
+          'url'
+        );
+        if (urlParam) productSrc = urlParam;
+      }
+
+      const productImg = await loadImage(productSrc);
+      const prodSize = Math.min(w * 0.35, 300);
+      const prodX = w - prodSize - 20;
+      const prodY = h - prodSize - 60;
+
+      // Draw product with rounded corners and shadow
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 15;
+      ctx.shadowOffsetX = 3;
+      ctx.shadowOffsetY = 3;
+
+      // Rounded rect clip
+      const r = 12;
+      ctx.beginPath();
+      ctx.moveTo(prodX + r, prodY);
+      ctx.lineTo(prodX + prodSize - r, prodY);
+      ctx.quadraticCurveTo(
+        prodX + prodSize,
+        prodY,
+        prodX + prodSize,
+        prodY + r
+      );
+      ctx.lineTo(prodX + prodSize, prodY + prodSize - r);
+      ctx.quadraticCurveTo(
+        prodX + prodSize,
+        prodY + prodSize,
+        prodX + prodSize - r,
+        prodY + prodSize
+      );
+      ctx.lineTo(prodX + r, prodY + prodSize);
+      ctx.quadraticCurveTo(
+        prodX,
+        prodY + prodSize,
+        prodX,
+        prodY + prodSize - r
+      );
+      ctx.lineTo(prodX, prodY + r);
+      ctx.quadraticCurveTo(prodX, prodY, prodX + r, prodY);
+      ctx.closePath();
+      ctx.clip();
+
+      ctx.drawImage(productImg, prodX, prodY, prodSize, prodSize);
+      ctx.restore();
+
+      // Border around product
+      ctx.strokeStyle = 'rgba(217, 119, 6, 0.6)'; // amber-600
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(prodX + r, prodY);
+      ctx.lineTo(prodX + prodSize - r, prodY);
+      ctx.quadraticCurveTo(
+        prodX + prodSize,
+        prodY,
+        prodX + prodSize,
+        prodY + r
+      );
+      ctx.lineTo(prodX + prodSize, prodY + prodSize - r);
+      ctx.quadraticCurveTo(
+        prodX + prodSize,
+        prodY + prodSize,
+        prodX + prodSize - r,
+        prodY + prodSize
+      );
+      ctx.lineTo(prodX + r, prodY + prodSize);
+      ctx.quadraticCurveTo(
+        prodX,
+        prodY + prodSize,
+        prodX,
+        prodY + prodSize - r
+      );
+      ctx.lineTo(prodX, prodY + r);
+      ctx.quadraticCurveTo(prodX, prodY, prodX + r, prodY);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Product name label below product image
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillStyle = 'rgba(217, 119, 6, 0.9)';
+      const nameText =
+        productName.length > 25
+          ? productName.substring(0, 25) + '...'
+          : productName;
+      ctx.fillText(nameText, prodX, prodY + prodSize + 16);
+    } catch (e) {
+      console.warn('Could not load product image for composite:', e);
+    }
+
+    // Draw 3BOXES LUXURY watermark in bottom-left
+    try {
+      const logoImg = await loadImage('/images/logo.png');
+      const logoW = 80;
+      const logoH = Math.round((logoImg.height / logoImg.width) * logoW);
+      const logoX = 15;
+      const logoY = h - logoH - 15;
+
+      // Semi-transparent background for logo
+      ctx.fillStyle = 'rgba(28, 25, 23, 0.7)'; // stone-950 with alpha
+      ctx.beginPath();
+      const lr = 6;
+      const pad = 5;
+      ctx.moveTo(logoX - pad + lr, logoY - pad);
+      ctx.lineTo(logoX + logoW + pad + 120 - lr, logoY - pad);
+      ctx.quadraticCurveTo(
+        logoX + logoW + pad + 120,
+        logoY - pad,
+        logoX + logoW + pad + 120,
+        logoY - pad + lr
+      );
+      ctx.lineTo(logoX + logoW + pad + 120, logoY + logoH + pad - lr);
+      ctx.quadraticCurveTo(
+        logoX + logoW + pad + 120,
+        logoY + logoH + pad,
+        logoX + logoW + pad + 120 - lr,
+        logoY + logoH + pad
+      );
+      ctx.lineTo(logoX - pad + lr, logoY + logoH + pad);
+      ctx.quadraticCurveTo(
+        logoX - pad,
+        logoY + logoH + pad,
+        logoX - pad,
+        logoY + logoH + pad - lr
+      );
+      ctx.lineTo(logoX - pad, logoY - pad + lr);
+      ctx.quadraticCurveTo(
+        logoX - pad,
+        logoY - pad,
+        logoX - pad + lr,
+        logoY - pad
+      );
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.globalAlpha = 0.8;
+      ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
+      ctx.globalAlpha = 1.0;
+
+      // Brand text next to logo
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillStyle = 'rgba(217, 119, 6, 0.8)'; // amber-600
+      ctx.fillText('3 BOXES LUXURY', logoX + logoW + 5, logoY + logoH / 2 + 4);
+    } catch (e) {
+      console.warn('Could not load logo for watermark:', e);
+      // Text-only watermark fallback
+      ctx.fillStyle = 'rgba(28, 25, 23, 0.7)';
+      ctx.fillRect(10, h - 35, 180, 25);
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillStyle = 'rgba(217, 119, 6, 0.7)';
+      ctx.fillText('3 BOXES LUXURY', 15, h - 17);
+    }
+
+    // "Style Preview" badge in top-left
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.9)'; // amber-600
+    const badgeText = '\u2728 STYLE PREVIEW';
+    ctx.font = 'bold 11px sans-serif';
+    const textWidth = ctx.measureText(badgeText).width;
+    const badgeX = 12;
+    const badgeY = 12;
+    const badgeW = textWidth + 16;
+    const badgeH = 24;
+
+    ctx.beginPath();
+    ctx.moveTo(badgeX + 4, badgeY);
+    ctx.lineTo(badgeX + badgeW - 4, badgeY);
+    ctx.quadraticCurveTo(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + 4);
+    ctx.lineTo(badgeX + badgeW, badgeY + badgeH - 4);
+    ctx.quadraticCurveTo(
+      badgeX + badgeW,
+      badgeY + badgeH,
+      badgeX + badgeW - 4,
+      badgeY + badgeH
+    );
+    ctx.lineTo(badgeX + 4, badgeY + badgeH);
+    ctx.quadraticCurveTo(badgeX, badgeY + badgeH, badgeX, badgeY + badgeH - 4);
+    ctx.lineTo(badgeX, badgeY + 4);
+    ctx.quadraticCurveTo(badgeX, badgeY, badgeX + 4, badgeY);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#1c1917'; // stone-950
+    ctx.fillText(badgeText, badgeX + 8, badgeY + 16);
+
+    return canvas.toDataURL('image/jpeg', 0.92);
+  } catch (e) {
+    console.error('Client-side composite failed:', e);
+    return null;
+  }
+}
+
+// ── Watermark for saved images ───────────────────────────────────
+
+function roundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+async function addWatermark(imageDataUrl: string): Promise<string> {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return imageDataUrl;
+
+  const img = await loadImage(imageDataUrl);
+  canvas.width = img.width;
+  canvas.height = img.height;
+  ctx.drawImage(img, 0, 0);
+
+  // Draw 3BOXES LUXURY logo watermark in bottom-left
+  try {
+    const logoImg = await loadImage('/images/logo.png');
+    const logoW = 100;
+    const logoH = Math.round((logoImg.height / logoImg.width) * logoW);
+    const logoX = 15;
+    const logoY = img.height - logoH - 15;
+
+    // Semi-transparent background
+    ctx.fillStyle = 'rgba(28, 25, 23, 0.75)';
+    const pad = 6;
+    roundRect(
+      ctx,
+      logoX - pad,
+      logoY - pad,
+      logoW + pad * 2 + 120,
+      logoH + pad * 2,
+      6
+    );
+    ctx.fill();
+
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(logoImg, logoX, logoY, logoW, logoH);
+    ctx.globalAlpha = 1.0;
+
+    // Brand text
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.9)';
+    ctx.fillText('3 BOXES LUXURY', logoX + logoW + 8, logoY + logoH / 2 + 5);
+  } catch {
+    // Text-only watermark fallback
+    ctx.fillStyle = 'rgba(28, 25, 23, 0.7)';
+    roundRect(ctx, 10, img.height - 35, 180, 25, 4);
+    ctx.fill();
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillStyle = 'rgba(217, 119, 6, 0.9)';
+    ctx.fillText('3 BOXES LUXURY', 18, img.height - 17);
+  }
+
+  return canvas.toDataURL('image/jpeg', 0.92);
+}
+
+// ── Image compression ────────────────────────────────────────────
+
 /**
  * Compress an image file to reduce payload size before sending to the API.
  * Resizes to max 1024px on the longest side and reduces quality.
  */
-function compressImage(file: File, maxSize = 1024, quality = 0.8): Promise<string> {
+function compressImage(
+  file: File,
+  maxSize = 1024,
+  quality = 0.8
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -80,6 +427,8 @@ function compressImage(file: File, maxSize = 1024, quality = 0.8): Promise<strin
   });
 }
 
+// ── Main Component ───────────────────────────────────────────────
+
 export function TryOnDialog({
   open,
   onOpenChange,
@@ -94,6 +443,7 @@ export function TryOnDialog({
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string>('');
+  const [isClientComposite, setIsClientComposite] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
@@ -103,6 +453,7 @@ export function TryOnDialog({
     setResultImage(null);
     setError(null);
     setProgress('');
+    setIsClientComposite(false);
   }, []);
 
   const handleFileSelect = useCallback(
@@ -166,57 +517,82 @@ export function TryOnDialog({
     setStep('generating');
     setError(null);
     setProgress('Uploading your photo...');
+    setIsClientComposite(false);
 
     try {
-      const controller = new AbortController();
-      // Set a generous timeout (2 minutes) since AI generation takes time
-      const timeoutId = setTimeout(() => controller.abort(), 120000);
-
+      // Try server-side AI generation first
       const response = await fetch('/api/try-on', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           productId,
           selfieData,
-          // Send product details for Vercel/DB-unavailable scenarios
           productImageUrl: productImage,
           productName,
           categorySlug: categorySlug || '',
         }),
-        signal: controller.signal,
+        signal: AbortSignal.timeout(120000),
       });
-
-      clearTimeout(timeoutId);
-
-      // Check if response is JSON before trying to parse
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        // Response is not JSON (probably HTML error page)
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.error('Non-JSON response:', response.status, errorText.substring(0, 200));
-        throw new Error(
-          response.status === 413
-            ? 'Image is too large. Please try a smaller photo.'
-            : response.status === 503
-            ? 'AI service is currently busy. Please try again in a moment.'
-            : `Server error (${response.status}). Please try again.`
-        );
-      }
 
       const data = await response.json();
 
-      if (!response.ok) {
-        throw new Error(data.error || `Error: ${response.status}`);
+      if (response.ok && data.jobId) {
+        // Poll for AI result
+        setProgress('AI is generating your try-on look...');
+        const result = await pollForResult(data.jobId);
+        if (result) {
+          setResultImage(result);
+          setStep('result');
+          return;
+        }
       }
 
-      setResultImage(data.imageUrl);
-      setStep('result');
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        setError('Request timed out. The AI service may be busy — please try again.');
-      } else {
-        setError(err instanceof Error ? err.message : 'Something went wrong');
+      // If AI service unavailable, use client-side canvas fallback
+      if (
+        data.code === 'AI_SERVICE_UNAVAILABLE' ||
+        response.status === 503
+      ) {
+        setProgress('AI service unavailable. Creating visual preview...');
+        const compositeResult = await createClientSideComposite(
+          selfieData,
+          productImage,
+          productName
+        );
+        if (compositeResult) {
+          setResultImage(compositeResult);
+          setIsClientComposite(true);
+          setStep('result');
+          return;
+        }
       }
+
+      throw new Error(data.error || 'Failed to generate try-on');
+    } catch (err) {
+      // On any network error, try client-side fallback
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError('Request timed out. Trying visual preview...');
+      }
+
+      // Try client-side composite as last resort
+      try {
+        const compositeResult = await createClientSideComposite(
+          selfieData,
+          productImage,
+          productName
+        );
+        if (compositeResult) {
+          setResultImage(compositeResult);
+          setIsClientComposite(true);
+          setStep('result');
+          return;
+        }
+      } catch {
+        // Client-side composite also failed
+      }
+
+      setError(
+        err instanceof Error ? err.message : 'Something went wrong'
+      );
       setStep('preview');
     }
   }, [selfieData, productId, productImage, productName, categorySlug]);
@@ -224,6 +600,27 @@ export function TryOnDialog({
   const handleReset = useCallback(() => {
     reset();
   }, [reset]);
+
+  const handleSaveImage = useCallback(async () => {
+    if (!resultImage) return;
+    try {
+      const watermarked = await addWatermark(resultImage);
+      const link = document.createElement('a');
+      link.href = watermarked;
+      link.download = `3boxes-tryon-${productName
+        .replace(/\s+/g, '-')
+        .toLowerCase()}.jpg`;
+      link.click();
+    } catch {
+      // Fallback: save without watermark
+      const link = document.createElement('a');
+      link.href = resultImage;
+      link.download = `3boxes-tryon-${productName
+        .replace(/\s+/g, '-')
+        .toLowerCase()}.jpg`;
+      link.click();
+    }
+  }, [resultImage, productName]);
 
   return (
     <Dialog
@@ -426,14 +823,15 @@ export function TryOnDialog({
                   Creating Your Look
                 </h3>
                 <p className="mt-2 text-center text-sm text-amber-200/40">
-                  Our AI is analyzing your photo and generating a virtual try-on.
+                  Our AI is analyzing your photo and generating a virtual
+                  try-on.
                   <br />
                   This may take 30–60 seconds...
                 </p>
                 <div className="mt-6 flex items-center gap-1">
                   <Loader2 className="h-4 w-4 animate-spin text-amber-400/60" />
                   <span className="text-xs text-amber-200/30">
-                    Processing with AI...
+                    {progress || 'Processing with AI...'}
                   </span>
                 </div>
               </motion.div>
@@ -457,13 +855,14 @@ export function TryOnDialog({
                     sizes="500px"
                   />
                   <div className="absolute left-3 top-3 rounded-full bg-emerald-600/90 px-3 py-1 text-xs font-medium text-white shadow-lg">
-                    AI Generated
+                    {isClientComposite ? 'Style Preview' : 'AI Generated'}
                   </div>
                 </div>
 
                 <p className="text-center text-xs text-amber-200/30">
-                  This is an AI-generated visualization. Actual appearance may
-                  vary.
+                  {isClientComposite
+                    ? 'This is a visual style preview. For AI-generated results, try again when the AI service is available.'
+                    : 'This is an AI-generated visualization. Actual appearance may vary.'}
                 </p>
 
                 <div className="flex gap-3">
@@ -475,14 +874,13 @@ export function TryOnDialog({
                     <RotateCcw className="mr-2 h-4 w-4" />
                     Try Again
                   </Button>
-                  <a
-                    href={resultImage}
-                    download
-                    className="flex flex-1 items-center justify-center rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-stone-950 transition-all hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
+                  <Button
+                    onClick={handleSaveImage}
+                    className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                   >
                     <Download className="mr-2 h-4 w-4" />
                     Save Image
-                  </a>
+                  </Button>
                 </div>
               </motion.div>
             )}

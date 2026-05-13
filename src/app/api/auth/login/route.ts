@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
-import { createSession, generateToken } from '@/lib/sessions';
+import { createSession, generateToken, sessionCache } from '@/lib/sessions';
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,12 +15,69 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find user by email
-    const user = await db.user.findUnique({
-      where: { email: email.toLowerCase().trim() },
-    });
+    // Try to find user by email in database first
+    let user = null;
+    try {
+      user = await db.user.findUnique({
+        where: { email: email.toLowerCase().trim() },
+      });
+    } catch (dbError) {
+      console.log('[Auth] Database unavailable for login, trying env var fallback');
+    }
 
+    // If DB unavailable or user not found, try env var admin credentials
     if (!user) {
+      const adminEmail = process.env.ADMIN_EMAIL;
+      const adminPassword = process.env.ADMIN_PASSWORD;
+
+      if (
+        adminEmail &&
+        adminPassword &&
+        email.toLowerCase().trim() === adminEmail.toLowerCase() &&
+        password === adminPassword
+      ) {
+        // Create a virtual admin session from env vars
+        const token = generateToken();
+        const virtualAdminUser = {
+          id: 'admin-env',
+          email: adminEmail,
+          name: 'Admin',
+          role: 'admin',
+          avatar: null,
+          isActive: true,
+          approvalStatus: 'approved',
+          emailVerified: true,
+          phoneVerified: false,
+          twoFactorEnabled: false,
+        };
+
+        // Try to create session in DB, but don't fail if DB is unavailable
+        try {
+          await createSession(token, virtualAdminUser);
+        } catch {
+          // DB unavailable — session will be in-memory only
+          console.log(
+            '[Auth] DB unavailable for session creation, using in-memory session'
+          );
+          // Store in the in-memory cache directly so getSessionAsync can find it
+          const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+          sessionCache.set(token, {
+            userId: virtualAdminUser.id,
+            expiresAt,
+            id: virtualAdminUser.id,
+            email: virtualAdminUser.email,
+            name: virtualAdminUser.name,
+            role: virtualAdminUser.role,
+          });
+        }
+
+        return NextResponse.json({
+          user: virtualAdminUser,
+          token,
+        });
+      }
+
+      // Original error response — no user found and env var didn't match
       return NextResponse.json(
         { error: 'Invalid email or password' },
         { status: 401 }
@@ -62,7 +119,10 @@ export async function POST(request: NextRequest) {
 
     if (user.approvalStatus === 'rejected') {
       return NextResponse.json(
-        { error: 'Your account has been rejected. Please contact support.', approvalStatus: 'rejected' },
+        {
+          error: 'Your account has been rejected. Please contact support.',
+          approvalStatus: 'rejected',
+        },
         { status: 403 }
       );
     }

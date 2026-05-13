@@ -189,6 +189,36 @@ async function shopifyFetch<T>(endpoint: string, params?: Record<string, string>
   return response.json() as Promise<T>
 }
 
+// ─── Category placeholder images ───
+
+const CATEGORY_PLACEHOLDER_MAP: Record<string, string> = {
+  watches: '/images/products/watch-1.jpg',
+  jewelry: '/images/products/jewelry-1.jpg',
+  jewellery: '/images/products/jewelry-1.jpg',
+  rings: '/images/products/jewelry-1.jpg',
+  necklaces: '/images/products/jewelry-1.jpg',
+  earrings: '/images/products/jewelry-1.jpg',
+  bracelets: '/images/products/jewelry-1.jpg',
+  bangles: '/images/products/jewelry-1.jpg',
+  'leather-goods': '/images/products/leather-1.jpg',
+  fragrances: '/images/products/fragrance-1.jpg',
+  fashion: '/images/products/fashion-1.jpg',
+  'home-living': '/images/products/home-1.jpg',
+  sarees: '/images/products/saree-1.jpg',
+  'mens-shirts': '/images/products/mens-shirt-1.jpg',
+  'couple-gifts': '/images/products/couple-1.jpg',
+  'romantic-gifts': '/images/products/couple-1.jpg',
+  toys: '/images/products/toy-1.jpg',
+}
+
+function getCategoryPlaceholder(categorySlug: string): string {
+  if (CATEGORY_PLACEHOLDER_MAP[categorySlug]) return CATEGORY_PLACEHOLDER_MAP[categorySlug]
+  for (const [key, value] of Object.entries(CATEGORY_PLACEHOLDER_MAP)) {
+    if (categorySlug.includes(key) || key.includes(categorySlug)) return value
+  }
+  return '/images/placeholder.jpg'
+}
+
 // ─── Slug Helper ───
 
 function toSlug(text: string): string {
@@ -299,7 +329,9 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
         compareAtPrice: firstVariant?.compare_at_price
           ? parseFloat(firstVariant.compare_at_price)
           : null,
-        images: p.images?.map((img) => img.src) || [],
+        images: p.images?.map((img) => img.src).length > 0
+          ? p.images.map((img) => img.src)
+          : [getCategoryPlaceholder(category.slug)],
         category: category.name,
         categorySlug: category.slug,
         stock: firstVariant?.inventory_quantity ?? 0,
@@ -330,8 +362,22 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
 }
 
 /**
+ * Normalize a category name for deduplication.
+ * Handles singular/plural, case differences, and common variations.
+ */
+function normalizeCategoryName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/s$/, '') // Remove trailing 's' for plural→singular normalization
+    .replace(/-/g, ' ')
+    .replace(/\s+/g, ' ')
+}
+
+/**
  * Fetch categories derived from Shopify collections and product types.
  * Results are cached for 5 minutes.
+ * Deduplicates by normalizing names (e.g., "Rings" and "ring" → same category).
  */
 export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransformed[]> {
   if (isCacheValid(categoriesCache)) {
@@ -355,22 +401,27 @@ export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransform
     const customCollections = customData.custom_collections || []
     const smartCollections = smartData.smart_collections || []
 
-    // Build category map from collections
+    // Build category map from collections — key by normalized name for dedup
     const categoryMap = new Map<string, ShopifyCategoryTransformed>()
+    const normalizedToSlug = new Map<string, string>() // normalized name → canonical slug
 
-    // Add categories from collections
+    // Add categories from collections (these take priority — they have images/descriptions)
     for (const col of [...customCollections, ...smartCollections]) {
       const slug = col.handle || toSlug(col.title)
-      if (!categoryMap.has(slug)) {
-        categoryMap.set(slug, {
-          id: `shopify-col-${col.id}`,
-          name: col.title,
-          slug,
-          description: col.body_html?.replace(/<[^>]*>/g, '').trim() || null,
-          image: col.image?.src || null,
-          productCount: 0,
-        })
-      }
+      const normalizedName = normalizeCategoryName(col.title)
+
+      // Skip if we already have a category with this normalized name
+      if (normalizedToSlug.has(normalizedName)) continue
+
+      normalizedToSlug.set(normalizedName, slug)
+      categoryMap.set(slug, {
+        id: `shopify-col-${col.id}`,
+        name: col.title,
+        slug,
+        description: col.body_html?.replace(/<[^>]*>/g, '').trim() || null,
+        image: col.image?.src || null,
+        productCount: 0,
+      })
     }
 
     // Count products per category (from product_type)
@@ -381,8 +432,19 @@ export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransform
     }
 
     // Also derive categories from product types if not already in collections
+    // Use normalized name for deduplication
     for (const product of products) {
-      if (!categoryMap.has(product.categorySlug)) {
+      const normalizedName = normalizeCategoryName(product.category)
+      const existingSlug = normalizedToSlug.get(normalizedName)
+
+      if (existingSlug) {
+        // Category already exists (from collection) — just accumulate product count
+        // Also update product's categorySlug to match the existing canonical slug
+        product.categorySlug = existingSlug
+        product.category = categoryMap.get(existingSlug)?.name || product.category
+      } else if (!categoryMap.has(product.categorySlug)) {
+        // New category from product type
+        normalizedToSlug.set(normalizedName, product.categorySlug)
         categoryMap.set(product.categorySlug, {
           id: `shopify-cat-${product.categorySlug}`,
           name: product.category,
@@ -399,9 +461,10 @@ export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransform
       cat.productCount = productCountMap.get(slug) || 0
     }
 
-    const categories = Array.from(categoryMap.values()).sort((a, b) =>
-      a.name.localeCompare(b.name)
-    )
+    // Filter out categories with 0 products (empty collections with no matching products)
+    const categories = Array.from(categoryMap.values())
+      .filter(cat => cat.productCount > 0)
+      .sort((a, b) => a.name.localeCompare(b.name))
 
     categoriesCache = { data: categories, timestamp: Date.now() }
     return categories

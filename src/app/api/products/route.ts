@@ -7,6 +7,32 @@ import {
   type ShopifyProductTransformed,
 } from '@/lib/shopify'
 
+// Category slug to placeholder image mapping
+const CATEGORY_PLACEHOLDER_MAP: Record<string, string> = {
+  watches: '/images/products/watch-1.jpg',
+  jewelry: '/images/products/jewelry-1.jpg',
+  'leather-goods': '/images/products/leather-1.jpg',
+  fragrances: '/images/products/fragrance-1.jpg',
+  fashion: '/images/products/fashion-1.jpg',
+  'home-living': '/images/products/home-1.jpg',
+  sarees: '/images/products/saree-1.jpg',
+  'mens-shirts': '/images/products/mens-shirt-1.jpg',
+  'couple-gifts': '/images/products/couple-1.jpg',
+  'romantic-gifts': '/images/products/couple-1.jpg',
+  toys: '/images/products/toy-1.jpg',
+}
+
+function getCategoryPlaceholder(categorySlug?: string): string {
+  if (!categorySlug) return '/images/placeholder.jpg'
+  // Try exact match first
+  if (CATEGORY_PLACEHOLDER_MAP[categorySlug]) return CATEGORY_PLACEHOLDER_MAP[categorySlug]
+  // Try partial match
+  for (const [key, value] of Object.entries(CATEGORY_PLACEHOLDER_MAP)) {
+    if (categorySlug.includes(key) || key.includes(categorySlug)) return value
+  }
+  return '/images/placeholder.jpg'
+}
+
 // Platform slug to logo URL mapping
 const PLATFORM_LOGO_MAP: Record<string, string> = {
   myntra: '/logos/myntra.png',
@@ -138,6 +164,84 @@ function filterAndPaginateShopifyProducts(
   }
 }
 
+/**
+ * Shared Shopify fallback logic used both when DB throws an error
+ * and when DB returns 0 results.
+ * Returns a NextResponse with Shopify products, or null if Shopify also fails.
+ */
+async function tryShopifyFallback(params: {
+  category: string | null
+  search: string | null
+  minPrice: string | null
+  maxPrice: string | null
+  priceMin: string | null
+  priceMax: string | null
+  sort: string
+  page: number
+  limit: number
+  platform: string | null
+  source: string | null
+  isExternalParam: string | null
+  occasion: string | null
+  recipient: string | null
+  relationship: string | null
+}): Promise<NextResponse | null> {
+  try {
+    let shopifyProducts: ShopifyProductTransformed[]
+
+    // Use targeted fetch if we have a category or search filter
+    if (params.category && !params.search) {
+      shopifyProducts = await fetchShopifyProductsByCategory(params.category)
+    } else if (params.search && !params.category) {
+      shopifyProducts = await searchShopifyProducts(params.search)
+    } else if (params.category && params.search) {
+      // Both filters: get by category, then search within
+      const categoryProducts = await fetchShopifyProductsByCategory(params.category)
+      const q = params.search.toLowerCase()
+      shopifyProducts = categoryProducts.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.description.toLowerCase().includes(q) ||
+          p.tags.some((t) => t.toLowerCase().includes(q))
+      )
+    } else {
+      shopifyProducts = await fetchShopifyProducts()
+    }
+
+    // Apply all the same filters, sorting, and pagination
+    const effectiveMinPriceNum = (params.priceMin || params.minPrice)
+      ? parseFloat(params.priceMin || params.minPrice || '0')
+      : null
+    const effectiveMaxPriceNum = (params.priceMax || params.maxPrice)
+      ? parseFloat(params.priceMax || params.maxPrice || '0')
+      : null
+
+    const result = filterAndPaginateShopifyProducts(shopifyProducts, {
+      category: params.category || null,
+      search: params.search || null,
+      minPrice: effectiveMinPriceNum,
+      maxPrice: effectiveMaxPriceNum,
+      sort: params.sort,
+      page: params.page,
+      limit: params.limit,
+      platform: params.platform || null,
+      source: params.source || null,
+      isExternalParam: params.isExternalParam || null,
+      occasion: params.occasion || null,
+      recipient: params.recipient || null,
+      relationship: params.relationship || null,
+    })
+
+    return NextResponse.json({
+      ...result,
+      source: 'shopify',
+    })
+  } catch (shopifyError) {
+    console.error('[Products API] Shopify fallback also failed:', shopifyError)
+    return null
+  }
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const category = searchParams.get('category')
@@ -254,35 +358,65 @@ export async function GET(request: NextRequest) {
       db.product.count({ where }),
     ])
 
+    // If DB returned 0 results, try Shopify fallback before returning empty
+    if (total === 0) {
+      console.warn('[Products API] Database returned 0 results, trying Shopify fallback')
+      const shopifyResult = await tryShopifyFallback({
+        category, search, minPrice, maxPrice, priceMin, priceMax,
+        sort, page, limit, platform, source, isExternalParam,
+        occasion, recipient, relationship,
+      })
+      if (shopifyResult) return shopifyResult
+    }
+
     // Transform products for frontend
-    const transformedProducts = products.map((p) => ({
-      id: p.id,
-      name: p.name,
-      slug: p.slug,
-      description: p.description,
-      price: p.price,
-      compareAtPrice: p.compareAtPrice,
-      images: JSON.parse(p.images || '[]') as string[],
-      category: p.category.name,
-      categorySlug: p.category.slug,
-      stock: p.stock,
-      rating: p.rating,
-      reviewCount: p.reviewCount,
-      featured: p.featured,
-      tags: JSON.parse(p.tags || '[]') as string[],
-      occasions: JSON.parse(p.occasions || '[]') as string[],
-      recipientTypes: JSON.parse(p.recipientTypes || '[]') as string[],
-      relationships: JSON.parse(p.relationships || '[]') as string[],
-      deliveryEstimate: p.deliveryEstimate || null,
-      // Platform aggregation fields
-      platform: p.platform,
-      isExternal: p.isExternal,
-      sourceUrl: p.sourceUrl,
-      affiliateUrl: p.affiliateUrl,
-      platformLogo: p.platform ? (PLATFORM_LOGO_MAP[p.platform] || null) : null,
-      commission: p.commission,
-      syncStatus: p.syncStatus,
-    }))
+    // Ensure Shopify CDN images are kept as direct URLs (not routed through image proxy)
+    const transformedProducts = products.map((p) => {
+      let rawImages = JSON.parse(p.images || '[]') as string[]
+
+      // If product has no images, assign a category-specific placeholder
+      if (rawImages.length === 0) {
+        rawImages = [getCategoryPlaceholder(p.category?.slug)]
+      }
+
+      // Keep Shopify CDN URLs as-is; local paths also kept as-is
+      const images = rawImages.map((img) => {
+        // If it's a Shopify CDN URL, return it directly (no proxy needed)
+        if (img.startsWith('https://cdn.shopify.com') || img.startsWith('https://shopify.com')) {
+          return img
+        }
+        return img
+      })
+
+      return {
+        id: p.id,
+        name: p.name,
+        slug: p.slug,
+        description: p.description,
+        price: p.price,
+        compareAtPrice: p.compareAtPrice,
+        images,
+        category: p.category.name,
+        categorySlug: p.category.slug,
+        stock: p.stock,
+        rating: p.rating,
+        reviewCount: p.reviewCount,
+        featured: p.featured,
+        tags: JSON.parse(p.tags || '[]') as string[],
+        occasions: JSON.parse(p.occasions || '[]') as string[],
+        recipientTypes: JSON.parse(p.recipientTypes || '[]') as string[],
+        relationships: JSON.parse(p.relationships || '[]') as string[],
+        deliveryEstimate: p.deliveryEstimate || null,
+        // Platform aggregation fields
+        platform: p.platform,
+        isExternal: p.isExternal,
+        sourceUrl: p.sourceUrl,
+        affiliateUrl: p.affiliateUrl,
+        platformLogo: p.platform ? (PLATFORM_LOGO_MAP[p.platform] || null) : null,
+        commission: p.commission,
+        syncStatus: p.syncStatus,
+      }
+    })
 
     return NextResponse.json({
       products: transformedProducts,
@@ -295,62 +429,16 @@ export async function GET(request: NextRequest) {
     console.warn('[Products API] Database query failed, falling back to Shopify:', dbError)
 
     // ─── Fallback to Shopify Admin API ───
-    try {
-      let shopifyProducts: ShopifyProductTransformed[]
+    const shopifyResult = await tryShopifyFallback({
+      category, search, minPrice, maxPrice, priceMin, priceMax,
+      sort, page, limit, platform, source, isExternalParam,
+      occasion, recipient, relationship,
+    })
+    if (shopifyResult) return shopifyResult
 
-      // Use targeted fetch if we have a category or search filter
-      if (category && !search) {
-        shopifyProducts = await fetchShopifyProductsByCategory(category)
-      } else if (search && !category) {
-        shopifyProducts = await searchShopifyProducts(search)
-      } else if (category && search) {
-        // Both filters: get by category, then search within
-        const categoryProducts = await fetchShopifyProductsByCategory(category)
-        const q = search.toLowerCase()
-        shopifyProducts = categoryProducts.filter(
-          (p) =>
-            p.name.toLowerCase().includes(q) ||
-            p.description.toLowerCase().includes(q) ||
-            p.tags.some((t) => t.toLowerCase().includes(q))
-        )
-      } else {
-        shopifyProducts = await fetchShopifyProducts()
-      }
-
-      // Apply all the same filters, sorting, and pagination
-      const effectiveMinPriceNum = (priceMin || minPrice)
-        ? parseFloat(priceMin || minPrice || '0')
-        : null
-      const effectiveMaxPriceNum = (priceMax || maxPrice)
-        ? parseFloat(priceMax || maxPrice || '0')
-        : null
-
-      const result = filterAndPaginateShopifyProducts(shopifyProducts, {
-        category: category || null,
-        search: search || null,
-        minPrice: effectiveMinPriceNum,
-        maxPrice: effectiveMaxPriceNum,
-        sort,
-        page,
-        limit,
-        platform: platform || null,
-        source: source || null,
-        isExternalParam: isExternalParam || null,
-        occasion: occasion || null,
-        recipient: recipient || null,
-        relationship: relationship || null,
-      })
-
-      return NextResponse.json({
-        ...result,
-        source: 'shopify',
-      })
-    } catch (shopifyError) {
-      console.error('[Products API] Shopify fallback also failed:', shopifyError)
-      return NextResponse.json(
-        { error: 'Failed to fetch products from both database and Shopify' },
-        { status: 500 }
-      )
-    }
+    return NextResponse.json(
+      { error: 'Failed to fetch products from both database and Shopify' },
+      { status: 500 }
+    )
   }
 }

@@ -8,7 +8,7 @@ const sessionCache = new Map<string, { userId: string; expiresAt: Date; id: stri
 /**
  * Export the session cache for synchronous lookups (used by auth.ts verifyAuth).
  */
-export { sessionCache as sessions };
+export { sessionCache as sessions, sessionCache };
 
 // Clean expired sessions from cache every 5 minutes
 setInterval(() => {
@@ -83,66 +83,104 @@ export async function getSessionAsync(
       return null;
     }
 
-    // Fetch user from DB to get fresh data
-    const user = await db.user.findUnique({
-      where: { id: cached.userId },
-    });
+    // For env-var admin users (id === 'admin-env'), skip DB lookup
+    if (cached.id === 'admin-env') {
+      return {
+        id: cached.id,
+        email: cached.email,
+        name: cached.name,
+        role: cached.role,
+        avatar: null,
+        isActive: true,
+        approvalStatus: 'approved',
+        emailVerified: true,
+        phoneVerified: false,
+        twoFactorEnabled: false,
+      };
+    }
 
-    if (!user || !user.isActive) return null;
+    // Try to fetch user from DB to get fresh data
+    try {
+      const user = await db.user.findUnique({
+        where: { id: cached.userId },
+      });
 
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      avatar: user.avatar,
-      isActive: user.isActive,
-      approvalStatus: user.approvalStatus,
-      emailVerified: user.emailVerified,
-      phoneVerified: user.phoneVerified,
-      twoFactorEnabled: user.twoFactorEnabled,
-    };
+      if (!user || !user.isActive) return null;
+
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        avatar: user.avatar,
+        isActive: user.isActive,
+        approvalStatus: user.approvalStatus,
+        emailVerified: user.emailVerified,
+        phoneVerified: user.phoneVerified,
+        twoFactorEnabled: user.twoFactorEnabled,
+      };
+    } catch {
+      // DB unavailable — return data from cache
+      console.log('[Sessions] DB unavailable for user lookup, using cached session data');
+      return {
+        id: cached.id,
+        email: cached.email,
+        name: cached.name,
+        role: cached.role,
+        avatar: null,
+        isActive: true,
+        approvalStatus: 'approved',
+        emailVerified: true,
+        phoneVerified: false,
+        twoFactorEnabled: false,
+      };
+    }
   }
 
   // Fallback to DB
-  const session = await db.session.findUnique({
-    where: { token },
-    include: { user: true },
-  });
+  try {
+    const session = await db.session.findUnique({
+      where: { token },
+      include: { user: true },
+    });
 
-  if (!session) return null;
+    if (!session) return null;
 
-  // Check expiration
-  if (session.expiresAt < new Date()) {
-    await db.session.delete({ where: { token } });
+    // Check expiration
+    if (session.expiresAt < new Date()) {
+      await db.session.delete({ where: { token } });
+      return null;
+    }
+
+    // Check user is still active
+    if (!session.user.isActive) return null;
+
+    // Add to cache
+    sessionCache.set(token, {
+      userId: session.userId,
+      expiresAt: session.expiresAt,
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      role: session.user.role,
+    });
+
+    return {
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+      role: session.user.role,
+      avatar: session.user.avatar,
+      isActive: session.user.isActive,
+      approvalStatus: session.user.approvalStatus,
+      emailVerified: session.user.emailVerified,
+      phoneVerified: session.user.phoneVerified,
+      twoFactorEnabled: session.user.twoFactorEnabled,
+    };
+  } catch {
+    // DB unavailable — no session found in cache or DB
     return null;
   }
-
-  // Check user is still active
-  if (!session.user.isActive) return null;
-
-  // Add to cache
-  sessionCache.set(token, {
-    userId: session.userId,
-    expiresAt: session.expiresAt,
-    id: session.user.id,
-    email: session.user.email,
-    name: session.user.name,
-    role: session.user.role,
-  });
-
-  return {
-    id: session.user.id,
-    email: session.user.email,
-    name: session.user.name,
-    role: session.user.role,
-    avatar: session.user.avatar,
-    isActive: session.user.isActive,
-    approvalStatus: session.user.approvalStatus,
-    emailVerified: session.user.emailVerified,
-    phoneVerified: session.user.phoneVerified,
-    twoFactorEnabled: session.user.twoFactorEnabled,
-  };
 }
 
 /**
