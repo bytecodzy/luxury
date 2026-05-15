@@ -477,20 +477,30 @@ const server = createServer(async (req, res) => {
         return
       }
 
-      const { productId, selfieData, productImageUrl, productName, categorySlug } = body
+      const { productId, selfieData, productImageUrl, productImageBase64: providedBase64, productName, categorySlug } = body
       if (!productId || !selfieData) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Product ID and selfie are required' }))
         return
       }
 
-      // Get product image
-      const productImageBase64 = productImageUrl ? await getProductImageBase64(productImageUrl) : null
+      // Debug: log what we received
+      console.log(`[ai-proxy] Received request: productId=${productId}, productImageUrl=${productImageUrl?.substring(0, 80)}, hasProvidedBase64=${!!providedBase64}, productName=${productName}, categorySlug=${categorySlug}`)
+
+      // Use provided base64 directly if available (from Vercel proxy), otherwise fetch from URL
+      let productImageBase64: string | null = providedBase64 || null
+      if (!productImageBase64 && productImageUrl) {
+        console.log(`[ai-proxy] Fetching product image from URL: ${productImageUrl}`)
+        productImageBase64 = await getProductImageBase64(productImageUrl)
+        console.log(`[ai-proxy] Fetch result: ${productImageBase64 ? 'success' : 'failed'}`)
+      }
       if (!productImageBase64) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Product image not available' }))
         return
       }
+
+      console.log(`[ai-proxy] Product image source: ${providedBase64 ? 'base64 (provided)' : productImageUrl ? 'fetched from URL' : 'none'}`)
 
       const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
       jobs.set(jobId, {

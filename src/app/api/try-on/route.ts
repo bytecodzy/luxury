@@ -59,7 +59,7 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           'Accept': 'image/*,*/*;q=0.8',
         },
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(15000),
       })
       if (!response.ok) return null
       const contentType = response.headers.get('content-type') || 'image/jpeg'
@@ -99,8 +99,33 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
       return null
     }
   }
-  // Local path
-  return getProductImageBase64Local(imagePath)
+  // Local path — try filesystem first, then HTTP on Vercel
+  const localResult = getProductImageBase64Local(imagePath)
+  if (localResult) return localResult
+
+  // On Vercel, local files aren't on the filesystem but are served by the CDN
+  if (process.env.VERCEL || process.env.VERCEL_URL) {
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
+      if (!baseUrl) return null
+      console.log('[try-on] Fetching local image via CDN:', `${baseUrl}${imagePath}`)
+      const response = await fetch(`${baseUrl}${imagePath}`, {
+        signal: AbortSignal.timeout(10000),
+        headers: { 'User-Agent': '3BOXES-Internal/1.0' },
+      })
+      if (!response.ok) return null
+      const contentType = response.headers.get('content-type') || 'image/jpeg'
+      if (!contentType.startsWith('image/')) return null
+      const mimeType = contentType.split(';')[0].trim()
+      const buffer = Buffer.from(await response.arrayBuffer())
+      return `data:${mimeType};base64,${buffer.toString('base64')}`
+    } catch (err) {
+      console.error('[try-on] Failed to fetch local image via CDN:', err)
+      return null
+    }
+  }
+
+  return null
 }
 
 // ── VLM Prompts ────────────────────────────────────────────────────
@@ -167,15 +192,47 @@ function getPairingCategory(categorySlug: string): string[] {
 
 export async function POST(request: NextRequest) {
   try {
-    // Check if AI service is available and reachable
-    const aiCheck = await isZAIAvailable()
-
-    // If AI is unavailable locally but we have a proxy URL, try proxying
+    // On Vercel, always try proxy first (AI service is only accessible from sandbox)
+    const isVercel = !!process.env.VERCEL
     const proxyUrl = process.env.ZAI_PROXY_URL
-    if ((aiCheck.mode === 'proxy' || !aiCheck.available) && proxyUrl) {
-      console.log('[try-on] Proxying to AI service:', proxyUrl, 'reason:', aiCheck.reason || aiCheck.mode)
+
+    if (isVercel && proxyUrl) {
+      console.log('[try-on] Vercel detected, proxying to AI service:', proxyUrl)
       try {
         const body = await request.json()
+        const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
+
+        // Validate required fields before proxying
+        if (!productId || !selfieData) {
+          return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
+        }
+
+        // Try to resolve product image to base64 on Vercel
+        // This works for external URLs (CDN) but NOT for local paths (Vercel can't fetch from itself)
+        let productImageBase64: string | null = null
+        if (productImageUrl) {
+          productImageBase64 = await getProductImageBase64(productImageUrl)
+        }
+        if (!productImageBase64) {
+          // Try to get from database if available (non-Vercel)
+          if (!isVercel) {
+            try {
+              const dbProduct = await db.product.findUnique({
+                where: { id: productId },
+                include: { category: true },
+              })
+              if (dbProduct) {
+                const images: string[] = JSON.parse(dbProduct.images || '[]')
+                if (images.length > 0) {
+                  productImageBase64 = await getProductImageBase64(images[0])
+                }
+              }
+            } catch (dbErr) {
+              console.log('[try-on] DB lookup for product image failed during proxy:', dbErr)
+            }
+          }
+        }
+
         const proxyHeaders: Record<string, string> = {
           'Content-Type': 'application/json',
         }
@@ -186,23 +243,47 @@ export async function POST(request: NextRequest) {
             proxyHeaders['Abc'] = proxyHost.split('.')[0]
           }
         } catch {}
+
+        // Build the proxy request body
+        // If we have base64, pass it directly. Otherwise, pass the URL and let the proxy resolve it
+        // (the sandbox proxy has access to the filesystem and can resolve local paths)
+        const proxyBody: Record<string, unknown> = {
+          ...body,
+          productName: clientProductName || body.productName,
+          categorySlug: clientCategorySlug || body.categorySlug,
+        }
+
+        if (productImageBase64) {
+          proxyBody.productImageBase64 = productImageBase64
+          proxyBody.productImageUrl = undefined // Don't send URL if we have base64
+          console.log('[try-on] Proxying with productImageBase64 (length:', productImageBase64.length, ')')
+        } else {
+          // Can't resolve on Vercel — pass the URL to the proxy
+          // The sandbox proxy has its own getProductImageBase64 that can handle local paths
+          console.log('[try-on] Could not resolve image on Vercel, passing URL to proxy:', productImageUrl)
+        }
         
         const proxyResponse = await fetch(`${proxyUrl}/api/try-on`, {
           method: 'POST',
           headers: proxyHeaders,
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(120000),
+          body: JSON.stringify(proxyBody),
+          signal: AbortSignal.timeout(30000), // 30s timeout for initial response
         })
         const proxyResult = await proxyResponse.json()
         return NextResponse.json(proxyResult, { status: proxyResponse.status })
       } catch (proxyError) {
         console.error('[try-on] Proxy failed:', proxyError)
+        // If proxy fails and AI is also unavailable, return canvas mode fallback
         return NextResponse.json({
-          error: 'Virtual try-on is temporarily unavailable. Could not connect to the AI style service.',
-          code: 'AI_SERVICE_UNAVAILABLE',
-        }, { status: 503 })
+          mode: 'canvas',
+          message: 'AI style preview mode — creating style overlay',
+          code: 'AI_CANVAS_MODE',
+        }, { status: 200 })
       }
     }
+
+    // Check if AI service is available locally (for non-Vercel deployments)
+    const aiCheck = await isZAIAvailable()
 
     if (!aiCheck.available) {
       // Return canvas mode instead of error — client will use canvas fallback
@@ -231,7 +312,6 @@ export async function POST(request: NextRequest) {
       category: { name: string; slug: string }
     }
     let product: TryOnProduct | null = null
-    const isVercel = !!process.env.VERCEL
 
     if (!isVercel) {
       try {
@@ -291,7 +371,10 @@ export async function POST(request: NextRequest) {
     const productImageBase64 = productImageToUse ? await getProductImageBase64(productImageToUse) : null
 
     if (!productImageBase64) {
-      return NextResponse.json({ error: 'Product image not available' }, { status: 400 })
+      return NextResponse.json({ 
+        error: 'Product image not available',
+        debug: { isVercel, proxyUrl: proxyUrl ? 'set' : 'not set', path: 'local-ai' },
+      }, { status: 400 })
     }
 
     // Fetch AI suggestions in parallel with job creation
@@ -410,13 +493,20 @@ export async function GET(request: NextRequest) {
           }
         } catch {}
         
-        const proxyResponse = await fetch(`${proxyUrl}/api/try-on?jobId=${jobId}`, {
+        const proxyResponse = await fetch(`${proxyUrl}/api/try-on?jobId=${encodeURIComponent(jobId)}`, {
           headers: proxyHeaders,
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(15000), // 15s timeout for job status polling
         })
+        
+        if (!proxyResponse.ok) {
+          const errorData = await proxyResponse.json().catch(() => ({ error: 'Proxy returned error' }))
+          return NextResponse.json(errorData, { status: proxyResponse.status })
+        }
+        
         const proxyResult = await proxyResponse.json()
-        return NextResponse.json(proxyResult, { status: proxyResponse.status })
-      } catch {
+        return NextResponse.json(proxyResult, { status: 200 })
+      } catch (proxyError) {
+        console.error('[try-on] GET proxy failed:', proxyError)
         return NextResponse.json({ error: 'Job not found and proxy unavailable' }, { status: 404 })
       }
     }

@@ -28,6 +28,8 @@ interface TryOnDialogProps {
   productId: string;
   productName: string;
   productImage: string;
+  categorySlug?: string;
+  rawProductImage?: string;
 }
 
 type Step = 'upload' | 'preview' | 'generating' | 'result';
@@ -85,6 +87,8 @@ export function TryOnDialog({
   productId,
   productName,
   productImage,
+  categorySlug,
+  rawProductImage,
 }: TryOnDialogProps) {
   const [step, setStep] = useState<Step>('upload');
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
@@ -266,9 +270,9 @@ export function TryOnDialog({
         body: JSON.stringify({
           productId,
           selfieData,
-          productImageUrl: productImage,
+          productImageUrl: rawProductImage || productImage, // Use original URL for API — resolves correctly on Vercel
           productName,
-          categorySlug: '', // client provides for Vercel fallback
+          categorySlug: categorySlug || '', // Pass actual category for proper AI generation
         }),
         signal: controller.signal,
       });

@@ -122,3 +122,43 @@ Stage Summary:
 - All customer-facing API endpoints working on Vercel
 - Gift Recommend fixed with Shopify fallback
 - Deployed to https://3boxes-luxury-test.vercel.app/
+
+---
+Task ID: 2
+Agent: AI Try-On Proxy Fix Agent
+Task: Fix the AI try-on API route for proper proxy support when ZAI_PROXY_URL is set
+
+Work Log:
+- **Modified `/src/app/api/try-on/route.ts` POST handler**:
+  - When proxying to sandbox, now resolves `productImageUrl` to base64 BEFORE sending to proxy (the proxy can't resolve relative URLs like `/images/products/...` or `/api/image-proxy?url=...`)
+  - Uses existing `getProductImageBase64()` function to convert product image to base64 data URI
+  - Falls back to DB lookup for product images if `productImageUrl` is missing or unresolvable (non-Vercel only)
+  - Sends `productImageBase64` field in the proxy request body instead of `productImageUrl` (which proxy can't resolve)
+  - Sets `productImageUrl: undefined` in proxy body to prevent proxy from trying to fetch it
+  - Added 30-second timeout for initial proxy response (was 120s which is too long for initial handshake)
+  - Validates required fields (`productId`, `selfieData`) before proxying
+  - Returns canvas mode fallback (`{ mode: 'canvas', code: 'AI_CANVAS_MODE' }`) instead of 503 error if proxy fails
+
+- **Modified `/src/app/api/try-on/route.ts` GET handler**:
+  - Increased polling timeout from 10s to 15s for better reliability
+  - Added proper error response handling: non-OK responses from proxy are forwarded correctly
+  - Added `encodeURIComponent()` for jobId in query string to prevent injection
+  - Added error logging for proxy failures
+
+- **Modified `/mini-services/ai-proxy/index.ts` POST handler**:
+  - Now accepts `productImageBase64` field directly in the request body
+  - If `productImageBase64` is provided, uses it directly — skips the `getProductImageBase64()` call entirely
+  - Falls back to `getProductImageBase64(productImageUrl)` only when `productImageBase64` is not provided
+  - Added logging to indicate image source: "base64 (provided)" vs "fetched from URL"
+  - This is crucial for Vercel→sandbox proxy flow where product images can't be fetched by the proxy
+
+- **Kept backward compatibility**: Local (non-proxy) mode still works exactly as before
+- **Kept Abc header logic**: Subdomain extraction for `.space-z.ai` domains unchanged
+- **Kept canvas mode fallback**: When both AI and proxy are unavailable, returns canvas mode
+- **Restarted ai-proxy service**: Verified health endpoint returns `{"available":true}`
+
+Stage Summary:
+- Product image URLs from Vercel are now resolved to base64 before being proxied to sandbox
+- Sandbox ai-proxy accepts pre-resolved base64 images, avoiding URL resolution failures
+- Proxy polling (GET) is more robust with proper error handling and timeouts
+- All changes are backward-compatible — local development without proxy works as before

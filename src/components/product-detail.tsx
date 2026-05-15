@@ -130,6 +130,7 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
 /**
  * Client-side canvas fallback: overlay the product image on the selfie.
  * Used when the AI backend service is unavailable (e.g., Vercel serverless).
+ * Creates a visually compelling style preview with product overlay and branding.
  */
 function generateCanvasFallback(selfieData: string, productImageUrl: string, productName: string): Promise<string | null> {
   return new Promise((resolve) => {
@@ -148,49 +149,98 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
           const ctx = canvas.getContext('2d');
           if (!ctx) { resolve(null); return; }
 
-          // Draw the selfie as the base
+          // Draw the selfie as the base with slight overlay
           ctx.drawImage(selfieImg, 0, 0, width, height);
 
-          // Overlay product image at bottom-right with semi-transparency
-          const productW = Math.floor(width * 0.35);
-          const productH = Math.floor(height * 0.35);
-          const px = width - productW - 12;
-          const py = height - productH - 12;
+          // Subtle dark vignette overlay for premium feel
+          const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
+          vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+          vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
+          ctx.fillStyle = vignetteGrad;
+          ctx.fillRect(0, 0, width, height);
 
-          // Rounded rect background
+          // Product showcase panel at bottom-right
+          const productW = Math.floor(width * 0.38);
+          const productH = Math.floor(width * 0.38);
+          const panelW = productW + 20;
+          const panelH = productH + 56;
+          const px = width - panelW - 14;
+          const py = height - panelH - 40;
+
+          // Panel shadow
           ctx.save();
-          ctx.globalAlpha = 0.75;
+          ctx.shadowColor = 'rgba(0,0,0,0.5)';
+          ctx.shadowBlur = 20;
+          ctx.shadowOffsetX = 4;
+          ctx.shadowOffsetY = 4;
+          ctx.globalAlpha = 0.85;
           ctx.fillStyle = '#1c1917';
           ctx.beginPath();
-          ctx.roundRect(px - 6, py - 6, productW + 12, productH + 40, 8);
+          ctx.roundRect(px, py, panelW, panelH, 12);
           ctx.fill();
           ctx.restore();
 
-          // Product image
+          // Panel border
           ctx.save();
-          ctx.globalAlpha = 0.9;
+          ctx.globalAlpha = 0.6;
+          ctx.strokeStyle = '#daa520';
+          ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.roundRect(px, py, productW, productH, 6);
+          ctx.roundRect(px, py, panelW, panelH, 12);
+          ctx.stroke();
+          ctx.restore();
+
+          // Product image inside panel
+          ctx.save();
+          ctx.globalAlpha = 1.0;
+          ctx.beginPath();
+          ctx.roundRect(px + 10, py + 10, productW, productH, 8);
           ctx.clip();
-          ctx.drawImage(productImg, px, py, productW, productH);
+          ctx.drawImage(productImg, px + 10, py + 10, productW, productH);
           ctx.restore();
 
-          // Label
+          // Product name label
           ctx.save();
-          ctx.globalAlpha = 0.9;
+          ctx.globalAlpha = 1.0;
           ctx.fillStyle = '#daa520';
-          ctx.font = `bold ${Math.max(12, Math.floor(productW * 0.07))}px Arial, sans-serif`;
+          ctx.font = `bold ${Math.max(11, Math.floor(productW * 0.065))}px Arial, sans-serif`;
           ctx.textAlign = 'center';
-          ctx.fillText(productName.substring(0, 28), px + productW / 2, py + productH + 18);
+          const labelY = py + productH + 28;
+          const maxLabelWidth = productW;
+          let label = productName.substring(0, 30);
+          while (ctx.measureText(label).width > maxLabelWidth && label.length > 3) {
+            label = label.slice(0, -4) + '...';
+          }
+          ctx.fillText(label, px + panelW / 2, labelY);
           ctx.restore();
 
-          // Watermark
+          // Top-left "STYLE PREVIEW" badge
           ctx.save();
-          ctx.globalAlpha = 0.5;
+          ctx.globalAlpha = 0.92;
+          const badgeW = Math.floor(width * 0.35);
+          const badgeH = Math.floor(height * 0.04);
+          ctx.fillStyle = '#1c1917';
+          ctx.beginPath();
+          ctx.roundRect(12, 12, badgeW, badgeH, 6);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(218,165,32,0.5)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(12, 12, badgeW, badgeH, 6);
+          ctx.stroke();
+          ctx.fillStyle = '#daa520';
+          ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.5))}px Arial, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('✨ STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
+          ctx.restore();
+
+          // Bottom watermark
+          ctx.save();
+          ctx.globalAlpha = 0.6;
           ctx.fillStyle = '#daa520';
           ctx.font = `bold ${Math.max(10, Math.floor(width * 0.018))}px Arial, sans-serif`;
           ctx.textAlign = 'right';
-          ctx.fillText('3BOXES GIFTS · Style Preview', width - 12, height - 12);
+          ctx.fillText('3BOXES GIFTS · AI Style Preview', width - 14, height - 14);
           ctx.restore();
 
           resolve(canvas.toDataURL('image/png'));
@@ -233,6 +283,7 @@ function TryOnDialog({
   productId,
   productName,
   productImage,
+  rawProductImage,
   categorySlug,
   productImages,
   onBackgroundJob,
@@ -242,7 +293,8 @@ function TryOnDialog({
   onOpenChange: (open: boolean) => void;
   productId: string;
   productName: string;
-  productImage: string;
+  productImage: string; // proxied image for display
+  rawProductImage: string; // original image URL for API (resolves correctly on Vercel)
   categorySlug: string;
   productImages: string[];
   onBackgroundJob: (step: 'generating' | 'result') => void;
@@ -326,7 +378,7 @@ function TryOnDialog({
         body: JSON.stringify({
           productId,
           selfieData,
-          productImageUrl: productImage,
+          productImageUrl: rawProductImage || productImage, // Use original URL for API — resolves correctly on Vercel
           productName,
           categorySlug,
         }),
@@ -1466,6 +1518,7 @@ export function ProductDetail() {
           productId={product.id}
           productName={product.name}
           productImage={getProxiedImageUrl(product.images[0] || '/images/hero.png', product.platform)}
+          rawProductImage={product.images[0] || '/images/hero.png'}
           categorySlug={product.categorySlug}
           productImages={product.images.map(img => getProxiedImageUrl(img, product.platform))}
           onBackgroundJob={handleBackgroundJob}
