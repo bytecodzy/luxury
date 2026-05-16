@@ -51,6 +51,8 @@ function getProductImageBase64Local(imagePath: string): string | null {
 }
 
 async function getProductImageBase64(imagePath: string): Promise<string | null> {
+  if (!imagePath) return null
+
   // Handle external URLs (http/https)
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
     try {
@@ -84,7 +86,6 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
         const directResult = await getProductImageBase64(originalUrl.startsWith('//') ? `https:${originalUrl}` : originalUrl)
         if (directResult) return directResult
       }
-      // Fallback: try self-fetching through the proxy
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
       const response = await fetch(`${baseUrl}${imagePath}`, {
         signal: AbortSignal.timeout(10000),
@@ -103,12 +104,10 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
   const localResult = getProductImageBase64Local(imagePath)
   if (localResult) return localResult
 
-  // On Vercel, local files aren't on the filesystem but are served by the CDN
   if (process.env.VERCEL || process.env.VERCEL_URL) {
     try {
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
       if (!baseUrl) return null
-      console.log('[try-on] Fetching local image via CDN:', `${baseUrl}${imagePath}`)
       const response = await fetch(`${baseUrl}${imagePath}`, {
         signal: AbortSignal.timeout(10000),
         headers: { 'User-Agent': '3BOXES-Internal/1.0' },
@@ -130,23 +129,9 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
 
 // ── VLM Prompts ────────────────────────────────────────────────────
 
-const VLM_PERSON_PROMPT = `Analyze this person's face and appearance in EXACT detail for a virtual try-on. Describe:
-1. Face shape (round/oval/square/heart/oblong), skin tone (light/fair/medium/olive/brown/dark, with warm/cool/neutral undertone)
-2. Hair: color, texture (straight/wavy/curly), length, style
-3. Body type and build (slim/average/athletic/plus-size)
-4. Current expression, pose, and what part of body is visible
-5. Any distinctive features
-Be extremely specific about skin tone, hair, and face shape. 3-4 sentences.`
+const VLM_PERSON_PROMPT = `Describe this person's appearance briefly for a virtual try-on: face shape, skin tone, hair color/style, body type. 2-3 sentences.`
 
-const VLM_PRODUCT_PROMPT = `Describe this fashion/luxury product in EXACT detail for a virtual try-on. Describe:
-1. Type and name (saree, necklace, shirt, watch, etc.)
-2. EXACT primary color (not just "red" - say "deep maroon red" or "rose pink")
-3. Secondary colors and accents
-4. Pattern: floral/geometric/solid/striped/paisley/embroidered - describe the pattern precisely
-5. Material and texture: silk sheen/matte cotton/shiny gold/satin/mesh - be specific
-6. Key design details: borders, embellishments, gemstones, stitching, collar style
-7. How it would be worn on the body (draped, fitted, layered, etc.)
-Be extremely specific about color, material, and pattern. 3-4 sentences.`
+const VLM_PRODUCT_PROMPT = `Describe this product for a virtual try-on: type, exact color, material/texture, key design details, how it would be worn. 2-3 sentences.`
 
 // ── Product placement helpers ──────────────────────────────────────
 
@@ -154,8 +139,8 @@ function getProductPlacement(categorySlug: string, productName: string): string 
   const n = productName.toLowerCase()
   if (categorySlug === 'jewelry') {
     if (n.includes('earring') || n.includes('jhumka') || n.includes('stud')) return 'wearing earrings on both earlobes'
-    if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple')) return 'wearing a necklace around the neck'
-    if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle')) return 'wearing a bracelet on the wrist'
+    if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple') || n.includes('haar') || n.includes('mala')) return 'wearing a necklace around the neck'
+    if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle') || n.includes('kada')) return 'wearing a bracelet on the wrist'
     if (n.includes('ring')) return 'wearing a ring on the finger'
     if (n.includes('set') || n.includes('bridal')) return 'wearing a matching jewelry set of necklace and earrings'
     return 'wearing the jewelry piece'
@@ -188,105 +173,93 @@ function getPairingCategory(categorySlug: string): string[] {
   return pairs[categorySlug] || ['jewelry']
 }
 
+// ── Rate-limit-aware delay ─────────────────────────────────────────
+
+const API_CALL_DELAY = 1500 // 1.5s between API calls to respect 2 QPS limit
+
+function delay(ms: number): Promise<void> {
+  return new Promise(r => setTimeout(r, ms))
+}
+
 // ── POST /api/try-on ───────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   try {
-    // On Vercel, always try proxy first (AI service is only accessible from sandbox)
     const isVercel = !!process.env.VERCEL
     const proxyUrl = process.env.ZAI_PROXY_URL
 
-    if (isVercel && proxyUrl) {
-      console.log('[try-on] Vercel detected, proxying to AI service:', proxyUrl)
-      try {
-        const body = await request.json()
-        const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
+    // On Vercel, AI service is only accessible via proxy to sandbox.
+    // If proxy is unreachable, fall back to canvas mode for client-side generation.
+    if (isVercel) {
+      const body = await request.json()
+      const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
 
-        // Validate required fields before proxying
-        if (!productId || !selfieData) {
-          return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
-        }
-
-        // Try to resolve product image to base64 on Vercel
-        // This works for external URLs (CDN) but NOT for local paths (Vercel can't fetch from itself)
-        let productImageBase64: string | null = null
-        if (productImageUrl) {
-          productImageBase64 = await getProductImageBase64(productImageUrl)
-        }
-        if (!productImageBase64) {
-          // Try to get from database if available (non-Vercel)
-          if (!isVercel) {
-            try {
-              const dbProduct = await db.product.findUnique({
-                where: { id: productId },
-                include: { category: true },
-              })
-              if (dbProduct) {
-                const images: string[] = JSON.parse(dbProduct.images || '[]')
-                if (images.length > 0) {
-                  productImageBase64 = await getProductImageBase64(images[0])
-                }
-              }
-            } catch (dbErr) {
-              console.log('[try-on] DB lookup for product image failed during proxy:', dbErr)
-            }
-          }
-        }
-
-        const proxyHeaders: Record<string, string> = {
-          'Content-Type': 'application/json',
-        }
-        // Add Abc header only for .space-z.ai domains
-        try {
-          const proxyHost = new URL(proxyUrl).hostname
-          if (proxyHost.includes('.space-z.ai')) {
-            proxyHeaders['Abc'] = proxyHost.split('.')[0]
-          }
-        } catch {}
-
-        // Build the proxy request body
-        // If we have base64, pass it directly. Otherwise, pass the URL and let the proxy resolve it
-        // (the sandbox proxy has access to the filesystem and can resolve local paths)
-        const proxyBody: Record<string, unknown> = {
-          ...body,
-          productName: clientProductName || body.productName,
-          categorySlug: clientCategorySlug || body.categorySlug,
-        }
-
-        if (productImageBase64) {
-          proxyBody.productImageBase64 = productImageBase64
-          proxyBody.productImageUrl = undefined // Don't send URL if we have base64
-          console.log('[try-on] Proxying with productImageBase64 (length:', productImageBase64.length, ')')
-        } else {
-          // Can't resolve on Vercel — pass the URL to the proxy
-          // The sandbox proxy has its own getProductImageBase64 that can handle local paths
-          console.log('[try-on] Could not resolve image on Vercel, passing URL to proxy:', productImageUrl)
-        }
-        
-        const proxyResponse = await fetch(`${proxyUrl}/api/try-on`, {
-          method: 'POST',
-          headers: proxyHeaders,
-          body: JSON.stringify(proxyBody),
-          signal: AbortSignal.timeout(30000), // 30s timeout for initial response
-        })
-        const proxyResult = await proxyResponse.json()
-        return NextResponse.json(proxyResult, { status: proxyResponse.status })
-      } catch (proxyError) {
-        console.error('[try-on] Proxy failed:', proxyError)
-        // If proxy fails and AI is also unavailable, return canvas mode fallback
-        return NextResponse.json({
-          mode: 'canvas',
-          message: 'AI style preview mode — creating style overlay',
-          code: 'AI_CANVAS_MODE',
-        }, { status: 200 })
+      if (!productId || !selfieData) {
+        return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
       }
+
+      // Try proxy if URL is configured and reachable
+      if (proxyUrl) {
+        console.log('[try-on] Vercel detected, proxying to AI service:', proxyUrl)
+        try {
+          const clientProvidedBase64 = body.productImageBase64 as string | undefined
+          let resolvedBase64: string | null = null
+          if (productImageUrl && !clientProvidedBase64) {
+            resolvedBase64 = await getProductImageBase64(productImageUrl)
+          }
+          const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64 || null
+
+          const proxyHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+          }
+          try {
+            const proxyHost = new URL(proxyUrl).hostname
+            if (proxyHost.includes('.space-z.ai')) {
+              proxyHeaders['Abc'] = proxyHost.split('.')[0]
+            }
+          } catch {}
+
+          const proxyBody: Record<string, unknown> = {
+            productId,
+            selfieData,
+            productName: clientProductName || body.productName,
+            categorySlug: clientCategorySlug || body.categorySlug,
+          }
+
+          if (finalProductImageBase64) {
+            proxyBody.productImageBase64 = finalProductImageBase64
+            console.log('[try-on] Proxying with productImageBase64 (source:', clientProvidedBase64 ? 'client' : 'resolved', ', length:', finalProductImageBase64.length, ')')
+          } else if (productImageUrl) {
+            proxyBody.productImageUrl = productImageUrl
+            console.log('[try-on] Could not resolve image on Vercel, passing URL to proxy:', productImageUrl)
+          }
+          
+          const proxyResponse = await fetch(`${proxyUrl}/api/try-on`, {
+            method: 'POST',
+            headers: proxyHeaders,
+            body: JSON.stringify(proxyBody),
+            signal: AbortSignal.timeout(30000),
+          })
+          const proxyResult = await proxyResponse.json()
+          return NextResponse.json(proxyResult, { status: proxyResponse.status })
+        } catch (proxyError) {
+          console.error('[try-on] Proxy failed:', proxyError)
+        }
+      }
+
+      // Proxy unavailable or failed — return canvas mode for client-side fallback
+      console.log('[try-on] Proxy unavailable on Vercel, returning canvas mode')
+      return NextResponse.json({
+        mode: 'canvas',
+        message: 'AI style preview mode — creating style overlay',
+        code: 'AI_CANVAS_MODE',
+      }, { status: 200 })
     }
 
-    // Check if AI service is available locally (for non-Vercel deployments)
+    // Check if AI service is available locally (non-Vercel)
     const aiCheck = await isZAIAvailable()
 
     if (!aiCheck.available) {
-      // Return canvas mode instead of error — client will use canvas fallback
       return NextResponse.json({
         mode: 'canvas',
         message: 'AI style preview mode — creating style overlay',
@@ -304,7 +277,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid image format' }, { status: 400 })
     }
 
-    // Try to fetch product from database first (skip on Vercel), then client-provided data, then Shopify fallback
+    // Resolve product info
     interface TryOnProduct {
       id: string
       name: string
@@ -332,7 +305,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Client-provided data (most reliable on Vercel where DB may be unavailable)
     if (!product && clientProductName && clientCategorySlug) {
       console.log('[try-on] Using client-provided product details')
       product = {
@@ -343,7 +315,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // If not in DB and no client data, try Shopify fallback
     if (!product) {
       try {
         const { fetchShopifyProducts } = await import('@/lib/shopify')
@@ -363,7 +334,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!product) {
-      return NextResponse.json({ error: 'Product not found. Please ensure the product is loaded before trying on.' }, { status: 404 })
+      return NextResponse.json({ error: 'Product not found.' }, { status: 404 })
     }
 
     const productImages: string[] = JSON.parse(product.images || '[]')
@@ -373,16 +344,14 @@ export async function POST(request: NextRequest) {
     if (!productImageBase64) {
       return NextResponse.json({ 
         error: 'Product image not available',
-        debug: { isVercel, proxyUrl: proxyUrl ? 'set' : 'not set', path: 'local-ai' },
       }, { status: 400 })
     }
 
-    // Fetch AI suggestions in parallel with job creation
+    // Fetch AI suggestions in parallel
     const pairingCategories = getPairingCategory(product.category?.slug || '')
     let suggestionsPromise: Promise<any[]>
 
     if (isVercel) {
-      // On Vercel, use Shopify directly for suggestions
       suggestionsPromise = (async () => {
         try {
           const { fetchShopifyProducts } = await import('@/lib/shopify')
@@ -445,7 +414,6 @@ export async function POST(request: NextRequest) {
       progress: 'Analyzing your photo and product...',
     })
 
-    // Start background processing
     backgroundProcess(jobId, product.name, product.category.slug, selfieData, productImageBase64, suggestionsPromise)
       .catch((err) => console.error('[try-on] Background job failed:', err))
 
@@ -463,9 +431,10 @@ export async function POST(request: NextRequest) {
     const message = error instanceof Error ? error.message : 'Unexpected error occurred'
     if (message.includes('AI_STYLE_SERVICE_UNAVAILABLE') || message.includes('.z-ai-config') || message.includes('not configured')) {
       return NextResponse.json({
-        error: 'Virtual try-on is currently unavailable. This feature requires our AI style service which is not configured.',
-        code: 'AI_SERVICE_UNAVAILABLE',
-      }, { status: 503 })
+        mode: 'canvas',
+        message: 'AI style preview mode — creating style overlay',
+        code: 'AI_CANVAS_MODE',
+      }, { status: 200 })
     }
     return NextResponse.json({ error: 'An unexpected error occurred while generating your style preview.' }, { status: 500 })
   }
@@ -480,7 +449,6 @@ export async function GET(request: NextRequest) {
 
   const job = jobs.get(jobId)
 
-  // If job not found locally, try proxying to sandbox
   if (!job) {
     const proxyUrl = process.env.ZAI_PROXY_URL
     if (proxyUrl) {
@@ -495,7 +463,7 @@ export async function GET(request: NextRequest) {
         
         const proxyResponse = await fetch(`${proxyUrl}/api/try-on?jobId=${encodeURIComponent(jobId)}`, {
           headers: proxyHeaders,
-          signal: AbortSignal.timeout(15000), // 15s timeout for job status polling
+          signal: AbortSignal.timeout(15000),
         })
         
         if (!proxyResponse.ok) {
@@ -531,7 +499,7 @@ export async function GET(request: NextRequest) {
 
 // ── VLM Analysis Helper ────────────────────────────────────────────
 
-async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs = 45000): Promise<string> {
+async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs = 30000): Promise<string> {
   try {
     const result = await Promise.race([
       zai.chat.completions.createVision({
@@ -545,116 +513,75 @@ async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs 
       new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
     ])
     return result ? (result.choices[0]?.message?.content || '') : ''
-  } catch { return '' }
+  } catch (err) {
+    console.error('[try-on] VLM analysis failed:', (err as Error).message?.substring(0, 200))
+    return ''
+  }
 }
 
-// ── Generation strategies ──────────────────────────────────────────
+// ── Safe image generation wrappers ─────────────────────────────────
 
-async function strategyEditBoth(
-  zai: any, selfieData: string, productImageBase64: string,
-  productName: string, categorySlug: string, personDesc: string, productDesc: string,
-): Promise<string | null> {
+/**
+ * Safely call images.generations.edit with proper error handling.
+ * Returns the base64 data URL or null on failure.
+ */
+async function safeImageEdit(zai: any, params: { prompt: string; images: { url: string }[]; size: ImageSize }): Promise<string | null> {
   try {
-    const placement = getProductPlacement(categorySlug, productName)
-    const size = getImageSize(categorySlug)
-
-    const prompt = `Professional fashion photograph. The FIRST image is the person, the SECOND image is the ${productName}. Combine them: show this person ${placement}. Keep the exact same face, hair, skin tone from the first image. Apply the exact product from the second image. ${personDesc ? `Person: ${personDesc}.` : ''} ${productDesc ? `Product: ${productDesc}.` : ''} Studio lighting, photorealistic, 8K quality.`
-
-    console.log(`[try-on] Strategy: edit-both, prompt: ${prompt.substring(0, 150)}...`)
-
     const response = await zai.images.generations.edit({
-      prompt,
-      images: [{ url: selfieData }, { url: productImageBase64 }],
-      size,
+      prompt: params.prompt,
+      images: params.images,
+      size: params.size,
     } as any)
 
-    const b64 = response.data?.[0]?.base64
-    if (!b64) return null
-    return `data:image/png;base64,${b64}`
+    // Handle both response formats: direct base64 or URL that needs download
+    if (response?.data?.[0]?.base64) {
+      return `data:image/png;base64,${response.data[0].base64}`
+    }
+    // If response has URL instead of base64, the SDK should have downloaded it already
+    // But check just in case
+    if (response?.data?.[0]?.url && !response.data[0].base64) {
+      console.warn('[try-on] Edit API returned URL instead of base64, SDK download may have failed')
+      return null
+    }
+    // No usable data
+    if (!response?.data || !Array.isArray(response.data) || response.data.length === 0) {
+      console.warn('[try-on] Edit API returned unexpected response:', JSON.stringify(response)?.substring(0, 200))
+      return null
+    }
+    return null
   } catch (err) {
-    console.error('[try-on] Strategy edit-both failed:', (err as Error).message?.substring(0, 200))
+    const msg = (err as Error).message?.substring(0, 200) || 'Unknown error'
+    console.error('[try-on] Image edit failed:', msg)
     return null
   }
 }
 
-async function strategyEditSelfie(
-  zai: any, selfieData: string, _productImageBase64: string,
-  productName: string, categorySlug: string, personDesc: string, productDesc: string,
-): Promise<string | null> {
+/**
+ * Safely call images.generations.create with proper error handling.
+ * Returns the base64 data URL or null on failure.
+ */
+async function safeImageCreate(zai: any, params: { prompt: string; size: ImageSize }): Promise<string | null> {
   try {
-    const placement = getProductPlacement(categorySlug, productName)
-    const size = getImageSize(categorySlug)
+    const response = await zai.images.generations.create({
+      prompt: params.prompt,
+      size: params.size,
+    })
 
-    const prompt = `Edit this photo: show this exact same person now ${placement}. The product is: ${productDesc}. CRITICAL: Keep the EXACT same face, skin tone, hair color, eye color, and body type. Do NOT change the person's identity. Only add/modify the clothing/jewelry/accessory. ${personDesc ? `Person: ${personDesc}.` : ''} Studio lighting, photorealistic, 8K quality.`
-
-    console.log(`[try-on] Strategy: edit-selfie, prompt: ${prompt.substring(0, 150)}...`)
-
-    const response = await zai.images.generations.edit({
-      prompt,
-      images: [{ url: selfieData }],
-      size,
-    } as any)
-
-    const b64 = response.data?.[0]?.base64
-    if (!b64) return null
-    return `data:image/png;base64,${b64}`
-  } catch (err) {
-    console.error('[try-on] Strategy edit-selfie failed:', (err as Error).message?.substring(0, 200))
+    if (response?.data?.[0]?.base64) {
+      return `data:image/png;base64,${response.data[0].base64}`
+    }
+    if (response?.data?.[0]?.url && !response.data[0].base64) {
+      console.warn('[try-on] Create API returned URL instead of base64, SDK download may have failed')
+      return null
+    }
+    if (!response?.data || !Array.isArray(response.data)) {
+      console.warn('[try-on] Create API returned unexpected response:', JSON.stringify(response)?.substring(0, 200))
+      return null
+    }
     return null
-  }
-}
-
-async function strategyEditProduct(
-  zai: any, _selfieData: string, productImageBase64: string,
-  productName: string, categorySlug: string, personDesc: string, productDesc: string,
-): Promise<string | null> {
-  try {
-    const placement = getProductPlacement(categorySlug, productName)
-    const size = getImageSize(categorySlug)
-
-    const prompt = `Show this product being worn by a person. The person is ${placement}. Person: ${personDesc}. Product: ${productDesc}. Show the person wearing this exact product with accurate colors and details. Studio lighting, photorealistic, 8K quality.`
-
-    console.log(`[try-on] Strategy: edit-product, prompt: ${prompt.substring(0, 150)}...`)
-
-    const response = await zai.images.generations.edit({
-      prompt,
-      images: [{ url: productImageBase64 }],
-      size,
-    } as any)
-
-    const b64 = response.data?.[0]?.base64
-    if (!b64) return null
-    return `data:image/png;base64,${b64}`
   } catch (err) {
-    console.error('[try-on] Strategy edit-product failed:', (err as Error).message?.substring(0, 200))
-    return null
-  }
-}
-
-async function strategyCreateDetailed(
-  zai: any, _selfieData: string, _productImageBase64: string,
-  productName: string, categorySlug: string, personDesc: string, productDesc: string,
-): Promise<string | null> {
-  try {
-    const placement = getProductPlacement(categorySlug, productName)
-    const size = getImageSize(categorySlug)
-
-    const bodyType = categorySlug === 'sarees' || categorySlug === 'fashion'
-      ? 'Full-body professional fashion photograph'
-      : categorySlug === 'jewelry' || categorySlug === 'watches'
-      ? 'Close-up professional beauty photograph from chest up'
-      : 'Professional fashion photograph'
-
-    const prompt = `${bodyType} of a person ${placement}. Person: ${personDesc}. Product: ${productDesc}. The person is ${placement}. Photorealistic, studio lighting, 8K, high detail.`
-
-    console.log(`[try-on] Strategy: create-detailed, prompt: ${prompt.substring(0, 150)}...`)
-
-    const response = await zai.images.generations.create({ prompt, size })
-    const b64 = response.data?.[0]?.base64
-    if (!b64) return null
-    return `data:image/png;base64,${b64}`
-  } catch (err) {
-    console.error('[try-on] Strategy create-detailed failed:', (err as Error).message?.substring(0, 200))
+    const msg = (err as Error).message?.substring(0, 200) || 'Unknown error'
+    console.error('[try-on] Image create failed:', msg)
     return null
   }
 }
@@ -689,70 +616,97 @@ async function backgroundProcess(
     }))
     if (job) job.suggestions = formattedSuggestions
 
-    // Step 2: VLM analysis (parallel)
-    if (job) job.progress = 'AI is analyzing your face and product details...'
+    // Step 2: VLM analysis (parallel) with rate-limit-aware approach
+    if (job) job.progress = 'AI is analyzing your photo and product...'
     console.log(`[try-on] Starting VLM analysis for job ${jobId}`)
 
     const zai = await createZAI()
-    const [personDesc, productDesc] = await Promise.all([
-      vlmAnalyze(zai, VLM_PERSON_PROMPT, selfieData),
-      vlmAnalyze(zai, VLM_PRODUCT_PROMPT, productImageBase64),
-    ])
-    console.log(`[try-on] Person: ${personDesc.substring(0, 150)}...`)
-    console.log(`[try-on] Product: ${productDesc.substring(0, 150)}...`)
+    
+    // Run VLM sequentially with delay to avoid rate limiting (2 QPS limit)
+    const personDesc = await vlmAnalyze(zai, VLM_PERSON_PROMPT, selfieData)
+    console.log(`[try-on] Person desc: ${personDesc.substring(0, 100)}...`)
+    
+    await delay(API_CALL_DELAY)
+    
+    const productDesc = await vlmAnalyze(zai, VLM_PRODUCT_PROMPT, productImageBase64)
+    console.log(`[try-on] Product desc: ${productDesc.substring(0, 100)}...`)
 
-    // Step 3: Try generation strategies (with delays to avoid rate limiting)
+    // Step 3: Try generation strategies with rate-limit-aware delays
     const results: GenResult[] = []
-    const STRATEGY_DELAY = 2000 // 2 second delay between strategies
+    const placement = getProductPlacement(categorySlug, productName)
+    const size = getImageSize(categorySlug)
 
-    // Strategy A: Edit with BOTH images (best quality if it works)
-    if (job) { job.attempt = 1; job.progress = 'Generating your try-on look (Strategy 1/4)...' }
-    const aResult = await strategyEditBoth(zai, selfieData, productImageBase64, productName, categorySlug, personDesc, productDesc)
-    if (aResult) {
-      console.log(`[try-on] Strategy A (edit-both) succeeded`)
-      results.push({ imageUrl: aResult, strategy: 'edit-both', faceScore: 7, productScore: 7 })
+    // Strategy 1: Edit selfie with product description (BEST for face preservation + product mapping)
+    if (job) { job.attempt = 1; job.progress = 'Generating your try-on look...' }
+    await delay(API_CALL_DELAY)
+    console.log(`[try-on] Strategy 1: edit-selfie-with-product`)
+    const s1Result = await safeImageEdit(zai, {
+      prompt: `Professional fashion photograph. Edit this person's photo to show them ${placement}. The product is "${productName}": ${productDesc || 'a luxury fashion item'}. CRITICAL: Keep the EXACT same face, skin tone, hair, and body type. Only add the product on the person. Studio lighting, photorealistic, 8K quality.`,
+      images: [{ url: selfieData }],
+      size,
+    })
+    if (s1Result) {
+      console.log(`[try-on] Strategy 1 (edit-selfie) succeeded`)
+      results.push({ imageUrl: s1Result, strategy: 'edit-selfie', faceScore: 8, productScore: 7 })
     }
 
-    // If first strategy worked, skip to result (avoid rate limiting)
+    // Strategy 2: Edit with both images (if strategy 1 failed)
     if (results.length === 0) {
-      await new Promise(r => setTimeout(r, STRATEGY_DELAY))
-
-      // Strategy B: Edit with selfie only
-      if (job) { job.attempt = 2; job.progress = 'Preserving your face details (Strategy 2/4)...' }
-      const bResult = await strategyEditSelfie(zai, selfieData, productImageBase64, productName, categorySlug, personDesc, productDesc)
-      if (bResult) {
-        console.log(`[try-on] Strategy B (edit-selfie) succeeded`)
-        results.push({ imageUrl: bResult, strategy: 'edit-selfie', faceScore: 8, productScore: 6 })
+      if (job) { job.attempt = 2; job.progress = 'Combining your photo with product...' }
+      await delay(API_CALL_DELAY)
+      console.log(`[try-on] Strategy 2: edit-both`)
+      const s2Result = await safeImageEdit(zai, {
+        prompt: `Professional fashion photograph. The FIRST image is the person, the SECOND image is the product "${productName}". Combine them: show this person ${placement}. Keep the exact same face and skin tone from the first image. Apply the exact product from the second image. Studio lighting, photorealistic, 8K quality.`,
+        images: [{ url: selfieData }, { url: productImageBase64 }],
+        size,
+      })
+      if (s2Result) {
+        console.log(`[try-on] Strategy 2 (edit-both) succeeded`)
+        results.push({ imageUrl: s2Result, strategy: 'edit-both', faceScore: 7, productScore: 8 })
       }
     }
 
-    // If still no results, try product edit
+    // Strategy 3: Edit product image with person description (good for product accuracy)
     if (results.length === 0) {
-      await new Promise(r => setTimeout(r, STRATEGY_DELAY))
-
-      // Strategy C: Edit with product only
-      if (job) { job.attempt = 3; job.progress = 'Optimizing product accuracy (Strategy 3/4)...' }
-      const cResult = await strategyEditProduct(zai, selfieData, productImageBase64, productName, categorySlug, personDesc, productDesc)
-      if (cResult) {
-        console.log(`[try-on] Strategy C (edit-product) succeeded`)
-        results.push({ imageUrl: cResult, strategy: 'edit-product', faceScore: 6, productScore: 8 })
+      if (job) { job.attempt = 3; job.progress = 'Creating product-focused preview...' }
+      await delay(API_CALL_DELAY)
+      console.log(`[try-on] Strategy 3: edit-product`)
+      const s3Result = await safeImageEdit(zai, {
+        prompt: `Show this product "${productName}" being worn by a person who is ${placement}. Person description: ${personDesc || 'a person'}. Product: ${productDesc || 'luxury item'}. The person is wearing this exact product with accurate colors and details. Studio lighting, photorealistic, 8K quality.`,
+        images: [{ url: productImageBase64 }],
+        size,
+      })
+      if (s3Result) {
+        console.log(`[try-on] Strategy 3 (edit-product) succeeded`)
+        results.push({ imageUrl: s3Result, strategy: 'edit-product', faceScore: 5, productScore: 8 })
       }
     }
 
-    // If still no results, try text-to-image as last resort
+    // Strategy 4: Text-to-image as fallback (no reference images needed)
     if (results.length === 0) {
-      await new Promise(r => setTimeout(r, STRATEGY_DELAY))
+      if (job) { job.attempt = 4; job.progress = 'Generating from descriptions...' }
+      await delay(API_CALL_DELAY)
+      console.log(`[try-on] Strategy 4: create-detailed`)
 
-      // Strategy D: Create from detailed description
-      if (job) { job.attempt = 4; job.progress = 'Generating from descriptions (Strategy 4/4)...' }
-      const dResult = await strategyCreateDetailed(zai, selfieData, productImageBase64, productName, categorySlug, personDesc, productDesc)
-      if (dResult) {
-        console.log(`[try-on] Strategy D (create-detailed) succeeded`)
-        results.push({ imageUrl: dResult, strategy: 'create-detailed', faceScore: 5, productScore: 5 })
+      const bodyType = categorySlug === 'sarees' || categorySlug === 'fashion' || categorySlug === 'mens-shirts-t-shirts'
+        ? 'Full-body professional fashion photograph'
+        : categorySlug === 'jewelry' || categorySlug === 'watches'
+        ? 'Close-up professional beauty photograph from chest up'
+        : 'Professional fashion photograph'
+
+      const s4Result = await safeImageCreate(zai, {
+        prompt: `${bodyType} of a person ${placement}. The product is "${productName}": ${productDesc || 'a luxury fashion item'}. Person: ${personDesc || 'a person'}. Show the product being worn with accurate colors, materials, and details. Photorealistic, studio lighting, 8K, high detail.`,
+        size,
+      })
+      if (s4Result) {
+        console.log(`[try-on] Strategy 4 (create-detailed) succeeded`)
+        results.push({ imageUrl: s4Result, strategy: 'create-detailed', faceScore: 4, productScore: 6 })
       }
     }
 
-    if (results.length === 0) throw new Error('All strategies failed')
+    if (results.length === 0) {
+      throw new Error('All AI generation strategies failed. Please try again.')
+    }
 
     // Step 4: Pick best result
     const best = results.reduce((a, b) => {
@@ -764,7 +718,7 @@ async function backgroundProcess(
     console.log(`[try-on] Best: ${best.strategy}, Face=${best.faceScore}/10, Product=${best.productScore}/10`)
 
     // Step 5: Apply 3BOXES GIFTS watermark
-    if (job) { job.progress = 'Adding finishing touches...' }
+    if (job) job.progress = 'Adding finishing touches...'
     let finalImageUrl = best.imageUrl
     try {
       finalImageUrl = await addWatermark(best.imageUrl)
@@ -795,3 +749,4 @@ async function backgroundProcess(
     }
   }
 }
+// Force rebuild Sat May 16 10:06:19 UTC 2026
