@@ -172,76 +172,139 @@ export function TryOnDialog({
         const selfieImg = document.createElement('img');
         selfieImg.crossOrigin = 'anonymous';
         selfieImg.onload = () => {
-          const productImg = document.createElement('img');
-          productImg.crossOrigin = 'anonymous';
-          productImg.onload = () => {
-            const canvas = document.createElement('canvas');
-            const width = Math.max(selfieImg.naturalWidth, 512);
-            const height = Math.max(selfieImg.naturalHeight, 680);
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) { resolve(null); return; }
+          const canvas = document.createElement('canvas');
+          const width = Math.max(selfieImg.naturalWidth, 512);
+          const height = Math.max(selfieImg.naturalHeight, 680);
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { resolve(null); return; }
 
-            // Draw the selfie as the base
-            ctx.drawImage(selfieImg, 0, 0, width, height);
+          // Draw the selfie as the base
+          ctx.drawImage(selfieImg, 0, 0, width, height);
 
-            // Overlay product image at bottom-right with semi-transparency
-            const productW = Math.floor(width * 0.35);
-            const productH = Math.floor(height * 0.35);
-            const px = width - productW - 12;
-            const py = height - productH - 12;
+          // Vignette overlay
+          const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
+          vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+          vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
+          ctx.fillStyle = vignetteGrad;
+          ctx.fillRect(0, 0, width, height);
 
-            // Rounded rect background
+          // Render product panel
+          const renderProductPanel = (pImg?: HTMLImageElement) => {
+            const productW = Math.floor(width * 0.38);
+            const productH = pImg ? Math.floor(width * 0.38) : Math.floor(width * 0.25);
+            const panelW = productW + 20;
+            const panelH = productH + 56;
+            const px = width - panelW - 14;
+            const py = height - panelH - 40;
+
             ctx.save();
-            ctx.globalAlpha = 0.75;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 20;
+            ctx.shadowOffsetX = 4;
+            ctx.shadowOffsetY = 4;
+            ctx.globalAlpha = 0.85;
             ctx.fillStyle = '#1c1917';
             ctx.beginPath();
-            ctx.roundRect(px - 6, py - 6, productW + 12, productH + 40, 8);
+            ctx.roundRect(px, py, panelW, panelH, 12);
             ctx.fill();
             ctx.restore();
 
-            // Product image
             ctx.save();
-            ctx.globalAlpha = 0.9;
+            ctx.globalAlpha = 0.6;
+            ctx.strokeStyle = '#daa520';
+            ctx.lineWidth = 1.5;
             ctx.beginPath();
-            ctx.roundRect(px, py, productW, productH, 6);
-            ctx.clip();
-            ctx.drawImage(productImg, px, py, productW, productH);
+            ctx.roundRect(px, py, panelW, panelH, 12);
+            ctx.stroke();
             ctx.restore();
 
-            // Label
+            if (pImg) {
+              ctx.save();
+              ctx.globalAlpha = 1.0;
+              ctx.beginPath();
+              ctx.roundRect(px + 10, py + 10, productW, productH, 8);
+              ctx.clip();
+              ctx.drawImage(pImg, px + 10, py + 10, productW, productH);
+              ctx.restore();
+            } else {
+              ctx.save();
+              ctx.globalAlpha = 0.6;
+              ctx.beginPath();
+              ctx.roundRect(px + 10, py + 10, productW, productH, 8);
+              ctx.fillStyle = '#292524';
+              ctx.fill();
+              ctx.restore();
+            }
+
             ctx.save();
-            ctx.globalAlpha = 0.9;
+            ctx.globalAlpha = 1.0;
             ctx.fillStyle = '#daa520';
-            ctx.font = `bold ${Math.max(12, Math.floor(productW * 0.07))}px Arial, sans-serif`;
+            ctx.font = `bold ${Math.max(11, Math.floor(productW * 0.065))}px Arial, sans-serif`;
             ctx.textAlign = 'center';
-            ctx.fillText(productName.substring(0, 28), px + productW / 2, py + productH + 18);
+            const labelY = py + productH + 28;
+            let label = productName.substring(0, 30);
+            while (ctx.measureText(label).width > productW && label.length > 3) {
+              label = label.slice(0, -4) + '...';
+            }
+            ctx.fillText(label, px + panelW / 2, labelY);
             ctx.restore();
+          };
 
-            // Watermark
+          // Badge
+          ctx.save();
+          ctx.globalAlpha = 0.92;
+          const badgeW = Math.floor(width * 0.35);
+          const badgeH = Math.floor(height * 0.04);
+          ctx.fillStyle = '#1c1917';
+          ctx.beginPath();
+          ctx.roundRect(12, 12, badgeW, badgeH, 6);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(218,165,32,0.5)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(12, 12, badgeW, badgeH, 6);
+          ctx.stroke();
+          ctx.fillStyle = '#daa520';
+          ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.5))}px Arial, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('✨ STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
+          ctx.restore();
+
+          // Try loading product image with timeout
+          const productImg = document.createElement('img');
+          productImg.crossOrigin = 'anonymous';
+
+          let resolved = false;
+          const finish = (img?: HTMLImageElement) => {
+            if (resolved) return;
+            resolved = true;
+            renderProductPanel(img);
+
             ctx.save();
-            ctx.globalAlpha = 0.5;
+            ctx.globalAlpha = 0.6;
             ctx.fillStyle = '#daa520';
             ctx.font = `bold ${Math.max(10, Math.floor(width * 0.018))}px Arial, sans-serif`;
             ctx.textAlign = 'right';
-            ctx.fillText('3BOXES GIFTS · Style Preview', width - 12, height - 12);
+            ctx.fillText('3BOXES GIFTS · AI Style Preview', width - 14, height - 14);
             ctx.restore();
 
             resolve(canvas.toDataURL('image/png'));
           };
-          productImg.onerror = () => resolve(null);
-          // Route external images through our proxy to avoid CORS issues with canvas
+
+          productImg.onload = () => finish(productImg);
+          productImg.onerror = () => finish();
+          setTimeout(() => finish(), 5000);
+
           let imgSrc = productImage;
           if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
-            // Route external images through our proxy to avoid CORS issues with canvas
             imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
           } else if (imgSrc.startsWith('//')) {
             imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
           } else if (imgSrc.startsWith('/') && !imgSrc.startsWith('/api/')) {
             imgSrc = `${window.location.origin}${imgSrc}`;
           }
-          // For /api/image-proxy URLs, use them directly (already have CORS headers)
           productImg.src = imgSrc;
         };
         selfieImg.onerror = () => resolve(null);

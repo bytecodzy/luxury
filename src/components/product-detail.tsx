@@ -138,30 +138,28 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
       const selfieImg = document.createElement('img');
       selfieImg.crossOrigin = 'anonymous';
       selfieImg.onload = () => {
-        const productImg = document.createElement('img');
-        productImg.crossOrigin = 'anonymous';
-        productImg.onload = () => {
-          const canvas = document.createElement('canvas');
-          const width = Math.max(selfieImg.naturalWidth, 512);
-          const height = Math.max(selfieImg.naturalHeight, 680);
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) { resolve(null); return; }
+        const canvas = document.createElement('canvas');
+        const width = Math.max(selfieImg.naturalWidth, 512);
+        const height = Math.max(selfieImg.naturalHeight, 680);
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(null); return; }
 
-          // Draw the selfie as the base with slight overlay
-          ctx.drawImage(selfieImg, 0, 0, width, height);
+        // Draw the selfie as the base
+        ctx.drawImage(selfieImg, 0, 0, width, height);
 
-          // Subtle dark vignette overlay for premium feel
-          const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
-          vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-          vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
-          ctx.fillStyle = vignetteGrad;
-          ctx.fillRect(0, 0, width, height);
+        // Subtle dark vignette overlay for premium feel
+        const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
+        vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+        vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
+        ctx.fillStyle = vignetteGrad;
+        ctx.fillRect(0, 0, width, height);
 
-          // Product showcase panel at bottom-right
+        // Render the product overlay panel
+        const renderProductPanel = (productImg?: HTMLImageElement) => {
           const productW = Math.floor(width * 0.38);
-          const productH = Math.floor(width * 0.38);
+          const productH = productImg ? Math.floor(width * 0.38) : Math.floor(width * 0.25);
           const panelW = productW + 20;
           const panelH = productH + 56;
           const px = width - panelW - 14;
@@ -191,13 +189,30 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
           ctx.restore();
 
           // Product image inside panel
-          ctx.save();
-          ctx.globalAlpha = 1.0;
-          ctx.beginPath();
-          ctx.roundRect(px + 10, py + 10, productW, productH, 8);
-          ctx.clip();
-          ctx.drawImage(productImg, px + 10, py + 10, productW, productH);
-          ctx.restore();
+          if (productImg) {
+            ctx.save();
+            ctx.globalAlpha = 1.0;
+            ctx.beginPath();
+            ctx.roundRect(px + 10, py + 10, productW, productH, 8);
+            ctx.clip();
+            ctx.drawImage(productImg, px + 10, py + 10, productW, productH);
+            ctx.restore();
+          } else {
+            // Fallback: draw a product icon placeholder
+            ctx.save();
+            ctx.globalAlpha = 0.6;
+            ctx.beginPath();
+            ctx.roundRect(px + 10, py + 10, productW, productH, 8);
+            ctx.fillStyle = '#292524';
+            ctx.fill();
+            const iconSize = Math.floor(productH * 0.4);
+            ctx.fillStyle = '#daa520';
+            ctx.font = `${iconSize}px Arial, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('👗', px + 10 + productW / 2, py + 10 + productH / 2);
+            ctx.restore();
+          }
 
           // Product name label
           ctx.save();
@@ -213,26 +228,37 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
           }
           ctx.fillText(label, px + panelW / 2, labelY);
           ctx.restore();
+        };
 
-          // Top-left "STYLE PREVIEW" badge
-          ctx.save();
-          ctx.globalAlpha = 0.92;
-          const badgeW = Math.floor(width * 0.35);
-          const badgeH = Math.floor(height * 0.04);
-          ctx.fillStyle = '#1c1917';
-          ctx.beginPath();
-          ctx.roundRect(12, 12, badgeW, badgeH, 6);
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(218,165,32,0.5)';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.roundRect(12, 12, badgeW, badgeH, 6);
-          ctx.stroke();
-          ctx.fillStyle = '#daa520';
-          ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.5))}px Arial, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.fillText('✨ STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
-          ctx.restore();
+        // Top-left "STYLE PREVIEW" badge
+        ctx.save();
+        ctx.globalAlpha = 0.92;
+        const badgeW = Math.floor(width * 0.35);
+        const badgeH = Math.floor(height * 0.04);
+        ctx.fillStyle = '#1c1917';
+        ctx.beginPath();
+        ctx.roundRect(12, 12, badgeW, badgeH, 6);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(218,165,32,0.5)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(12, 12, badgeW, badgeH, 6);
+        ctx.stroke();
+        ctx.fillStyle = '#daa520';
+        ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.5))}px Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('✨ STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
+        ctx.restore();
+
+        // Try loading the product image with timeout
+        const productImg = document.createElement('img');
+        productImg.crossOrigin = 'anonymous';
+
+        let resolved = false;
+        const finish = (img?: HTMLImageElement) => {
+          if (resolved) return;
+          resolved = true;
+          renderProductPanel(img);
 
           // Bottom watermark
           ctx.save();
@@ -245,7 +271,13 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
 
           resolve(canvas.toDataURL('image/png'));
         };
-        productImg.onerror = () => resolve(null);
+
+        productImg.onload = () => finish(productImg);
+        productImg.onerror = () => finish(); // Continue without product image
+
+        // Timeout: if product image doesn't load in 5s, continue without it
+        setTimeout(() => finish(), 5000);
+
         // Route external images through our proxy to avoid CORS issues
         let imgSrc = productImageUrl;
         if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
