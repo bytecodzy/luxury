@@ -162,3 +162,25 @@ Stage Summary:
 - Sandbox ai-proxy accepts pre-resolved base64 images, avoiding URL resolution failures
 - Proxy polling (GET) is more robust with proper error handling and timeouts
 - All changes are backward-compatible — local development without proxy works as before
+
+---
+Task ID: 4
+Agent: main
+Task: Fix mobile app install and product image upload issues on production link
+
+Work Log:
+- Created missing `/api/upload/route.ts` — was called by admin ProductForm but didn't exist, causing image upload failures
+- Fixed AI try-on "all strategies failed" error — when all 4 AI generation strategies fail, now returns canvas-fallback mode instead of throwing error
+- Updated try-on dialog (`try-on-dialog.tsx`) to properly poll for job completion and handle canvas-fallback strategy
+- Added progress messages during AI generation polling
+- Fixed mobile app install — removed hardcoded `?XTransformPort=3002` from app download components (only works in sandbox, not Vercel production)
+- Updated `app-download-section.tsx` and `app-download-banner.tsx` to use correct URLs
+- Added proper headers for service worker (`sw.js`) and manifest (`manifest.json`) in next.config.ts
+- Created `/api/try-on/status/route.ts` for AI availability health checks
+- Added `categorySlug` and `rawProductImage` to handleGenerate callback dependencies
+
+Stage Summary:
+- Product image upload now works: POST /api/upload saves files to public/uploads/products/ and returns URLs
+- AI try-on gracefully handles "all strategies failed" by falling back to canvas overlay
+- PWA install components now work correctly on both sandbox and Vercel production
+- Try-on polling properly handles canvas-fallback responses

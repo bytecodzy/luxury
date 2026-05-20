@@ -705,7 +705,16 @@ async function backgroundProcess(
     }
 
     if (results.length === 0) {
-      throw new Error('All AI generation strategies failed. Please try again.')
+      // All AI strategies failed — set job to completed with canvas mode indicator
+      // so the client can fall back to canvas overlay gracefully
+      console.warn(`[try-on] All AI generation strategies failed for job ${jobId}, returning canvas mode`)
+      if (job) {
+        job.status = 'completed'
+        job.imageUrl = '' // Empty signals canvas fallback
+        job.strategy = 'canvas-fallback'
+        job.progress = 'AI generation unavailable — using style preview'
+      }
+      return
     }
 
     // Step 4: Pick best result

@@ -428,7 +428,7 @@ export function AppDownloadSection() {
               {/* Alternative: Open in browser */}
               <div className="mt-4 flex flex-col gap-2">
                 <button
-                  onClick={() => window.open('/?XTransformPort=3002', '_blank')}
+                  onClick={() => window.open('/', '_blank')}
                   className="flex items-center gap-2 text-sm text-amber-300/60 hover:text-amber-300 transition-colors"
                 >
                   <Monitor className="h-4 w-4" />

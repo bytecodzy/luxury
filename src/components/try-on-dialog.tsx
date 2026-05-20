@@ -325,8 +325,67 @@ export function TryOnDialog({
         throw new Error(data.error || `Error: ${response.status}`);
       }
 
-      setResultImage(data.imageUrl);
-      setStep('result');
+      // If server returned a jobId, poll for completion
+      if (data.jobId) {
+        setProgress('Generating your try-on look...');
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/try-on?jobId=${data.jobId}`);
+            const statusData = await statusRes.json();
+
+            if (statusData.progress) {
+              setProgress(statusData.progress);
+            }
+
+            if (statusData.status === 'completed') {
+              clearInterval(pollInterval);
+              // Check if this is a canvas fallback (empty imageUrl)
+              if (!statusData.imageUrl || statusData.strategy === 'canvas-fallback') {
+                setProgress('Creating style preview overlay...');
+                const canvasResult = await generateCanvasFallback();
+                if (canvasResult) {
+                  setResultImage(canvasResult);
+                  setStep('result');
+                } else {
+                  setError('Could not generate style preview. Please try again later.');
+                  setStep('preview');
+                }
+                return;
+              }
+              setResultImage(statusData.imageUrl);
+              setStep('result');
+            } else if (statusData.status === 'failed') {
+              clearInterval(pollInterval);
+              // Try canvas fallback before showing error
+              setProgress('AI generation failed. Trying style preview...');
+              const canvasResult = await generateCanvasFallback();
+              if (canvasResult) {
+                setResultImage(canvasResult);
+                setStep('result');
+              } else {
+                setError(statusData.error || 'Generation failed. Please try again.');
+                setStep('preview');
+              }
+            }
+          } catch (pollErr) {
+            console.error('Polling error:', pollErr);
+          }
+        }, 3000);
+
+        // Safety timeout: stop polling after 2 minutes
+        setTimeout(() => clearInterval(pollInterval), 120000);
+        return;
+      }
+
+      // Direct imageUrl returned (immediate result)
+      if (data.imageUrl) {
+        setResultImage(data.imageUrl);
+        setStep('result');
+        return;
+      }
+
+      // If no jobId and no imageUrl, this shouldn't happen but handle gracefully
+      throw new Error('Unexpected response from server');
     } catch (err) {
       // On any error, try the canvas fallback
       if (err instanceof DOMException && err.name === 'AbortError') {
@@ -345,7 +404,7 @@ export function TryOnDialog({
         }
       }
     }
-  }, [selfieData, productId, productImage, productName, generateCanvasFallback]);
+  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, generateCanvasFallback]);
 
   const handleReset = useCallback(() => {
     reset();
@@ -552,14 +611,14 @@ export function TryOnDialog({
                   Creating Your Look
                 </h3>
                 <p className="mt-2 text-center text-sm text-amber-200/40">
-                  Our AI is analyzing your photo and generating a virtual try-on.
+                  {progress || 'Our AI is analyzing your photo and generating a virtual try-on.'}
                   <br />
                   This may take 30–60 seconds...
                 </p>
                 <div className="mt-6 flex items-center gap-1">
                   <Loader2 className="h-4 w-4 animate-spin text-amber-400/60" />
                   <span className="text-xs text-amber-200/30">
-                    Processing with AI...
+                    {progress || 'Processing with AI...'}
                   </span>
                 </div>
               </motion.div>

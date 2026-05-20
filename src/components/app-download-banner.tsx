@@ -141,7 +141,7 @@ export function AppDownloadBanner() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => window.open('/?XTransformPort=3002', '_blank')}
+                  onClick={() => window.open('/', '_blank')}
                   className="border-amber-500/30 bg-amber-900/10 text-amber-300 hover:bg-amber-900/20 hover:text-amber-200 h-8 gap-1.5 text-xs"
                 >
                   <Monitor className="h-3.5 w-3.5" />
