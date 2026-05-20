@@ -418,8 +418,110 @@ function TryOnDialog({
 
       const postData = await postRes.json();
 
-      // Handle canvas mode — AI service unavailable, use client-side canvas fallback
+      // Handle canvas mode — AI service unavailable on server, try direct client-to-proxy
       if (postData.mode === 'canvas' || postData.code === 'AI_CANVAS_MODE') {
+        // ── Strategy: Try direct client-side proxy call to sandbox AI service ──
+        // Get proxy URL from config API (runtime, not build-time)
+        let proxyUrl = '';
+        try {
+          const configRes = await fetch('/api/config', { signal: AbortSignal.timeout(3000) });
+          if (configRes.ok) {
+            const configData = await configRes.json();
+            proxyUrl = configData.aiProxyUrl || '';
+          }
+        } catch {}
+        // Also check NEXT_PUBLIC_ env var as fallback
+        if (!proxyUrl) {
+          proxyUrl = process.env.NEXT_PUBLIC_AI_PROXY_URL || '';
+        }
+        if (proxyUrl) {
+          try {
+            setProgressMessage('Connecting to AI service...');
+            let proxyFetchUrl: string;
+            if (proxyUrl.includes('.space-z.ai')) {
+              proxyFetchUrl = `${proxyUrl}/api/try-on?XTransformPort=3030`;
+            } else {
+              proxyFetchUrl = `${proxyUrl}/api/try-on`;
+            }
+
+            const proxyRes = await fetch(proxyFetchUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                productId,
+                selfieData,
+                productImageUrl: rawProductImage || productImage,
+                productName,
+                categorySlug,
+              }),
+              signal: AbortSignal.timeout(90000),
+            });
+
+            if (proxyRes.ok) {
+              const proxyData = await proxyRes.json();
+              const proxyJobId = proxyData.jobId;
+
+              if (proxyJobId) {
+                // Poll the proxy for results
+                const maxProxyPolls = 120;
+                let proxyPollCount = 0;
+
+                const pollProxy = async (): Promise<void> => {
+                  proxyPollCount++;
+                  if (proxyPollCount > maxProxyPolls) throw new Error('Generation timed out');
+
+                  let statusUrl: string;
+                  if (proxyUrl.includes('.space-z.ai')) {
+                    statusUrl = `${proxyUrl}/api/try-on?XTransformPort=3030&jobId=${encodeURIComponent(proxyJobId)}`;
+                  } else {
+                    statusUrl = `${proxyUrl}/api/try-on?jobId=${encodeURIComponent(proxyJobId)}`;
+                  }
+
+                  const pollRes = await fetch(statusUrl);
+                  const pollData = await pollRes.json();
+
+                  if (pollData.progress) setProgressMessage(pollData.progress);
+
+                  if (pollData.status === 'completed' && pollData.imageUrl) {
+                    setResultImage(pollData.imageUrl);
+                    setWatermarkedResult(pollData.imageUrl);
+                    setStrategy(pollData.strategy || 'ai-proxy');
+                    if (pollData.faceScore) setFaceScore(pollData.faceScore);
+                    if (pollData.productScore) setProductScore(pollData.productScore);
+                    if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
+                    setStep('result');
+                    onBackgroundJob('result');
+                    return;
+                  }
+
+                  if (pollData.status === 'failed') {
+                    throw new Error(pollData.error || 'Proxy generation failed');
+                  }
+
+                  await new Promise(r => setTimeout(r, 2000));
+                  return pollProxy();
+                };
+
+                await pollProxy();
+                return;
+              }
+
+              if (proxyData.imageUrl) {
+                setResultImage(proxyData.imageUrl);
+                setWatermarkedResult(proxyData.imageUrl);
+                setStrategy('ai-proxy');
+                setStep('result');
+                onBackgroundJob('result');
+                return;
+              }
+            }
+            console.log('[try-on] Direct proxy call failed, falling back to canvas');
+          } catch (directProxyErr) {
+            console.log('[try-on] Direct proxy unavailable:', directProxyErr instanceof Error ? directProxyErr.message : String(directProxyErr));
+          }
+        }
+
+        // Canvas fallback
         setProgressMessage('Creating style preview overlay...');
         const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
         if (canvasResult) {

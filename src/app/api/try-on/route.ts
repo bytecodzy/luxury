@@ -143,6 +143,29 @@ function getProxyHeaders(proxyUrl: string): Record<string, string> {
   return headers
 }
 
+/**
+ * Build the proxy URL for a given path, using XTransformPort query param
+ * when the proxy is on the .space-z.ai gateway (Caddy).
+ */
+function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<string, string>): string {
+  try {
+    const proxyHost = new URL(proxyUrl).hostname
+    if (proxyHost.includes('.space-z.ai')) {
+      // Use XTransformPort so Caddy routes to port 3030 (ai-proxy mini-service)
+      const base = proxyUrl.replace(/\/+$/, '')
+      const params = new URLSearchParams({ XTransformPort: '3030', ...queryParams })
+      return `${base}${path}?${params.toString()}`
+    }
+  } catch {}
+  // Fallback: direct URL
+  const base = proxyUrl.replace(/\/+$/, '')
+  if (queryParams && Object.keys(queryParams).length > 0) {
+    const params = new URLSearchParams(queryParams)
+    return `${base}${path}?${params.toString()}`
+  }
+  return `${base}${path}`
+}
+
 // ── VLM Prompts ────────────────────────────────────────────────────
 
 const VLM_PERSON_PROMPT = `Describe this person's appearance briefly for a virtual try-on: face shape, skin tone, hair color/style, body type. 2-3 sentences.`
@@ -243,7 +266,9 @@ export async function POST(request: NextRequest) {
             console.log('[try-on] Could not resolve image on Vercel, passing URL to proxy:', productImageUrl)
           }
           
-          const proxyResponse = await fetch(`${proxyUrl}/api/try-on`, {
+          const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on')
+          console.log('[try-on] Proxy fetch URL:', proxyFetchUrl)
+          const proxyResponse = await fetch(proxyFetchUrl, {
             method: 'POST',
             headers: proxyHeaders,
             body: JSON.stringify(proxyBody),
@@ -522,7 +547,8 @@ export async function GET(request: NextRequest) {
       try {
         const proxyHeaders = getProxyHeaders(proxyUrl)
         
-        const proxyResponse = await fetch(`${proxyUrl}/api/try-on?jobId=${encodeURIComponent(jobId)}`, {
+        const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on', { jobId: jobId })
+        const proxyResponse = await fetch(proxyFetchUrl, {
           headers: proxyHeaders,
           signal: AbortSignal.timeout(15000),
         })
@@ -548,7 +574,8 @@ export async function GET(request: NextRequest) {
     if (proxyUrl) {
       try {
         const proxyHeaders = getProxyHeaders(proxyUrl)
-        const proxyResponse = await fetch(`${proxyUrl}/api/try-on?jobId=${encodeURIComponent(job.proxyJobId!)}`, {
+        const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on', { jobId: job.proxyJobId! })
+        const proxyResponse = await fetch(proxyFetchUrl, {
           headers: proxyHeaders,
           signal: AbortSignal.timeout(15000),
         })

@@ -97,7 +97,16 @@ export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
 
-    const response = await fetch(`${proxyUrl}/api/try-on/status`, {
+    // Build URL with XTransformPort for Caddy gateway routing
+    let statusUrl = `${proxyUrl}/api/try-on/status`
+    try {
+      const proxyHost = new URL(proxyUrl).hostname
+      if (proxyHost.includes('.space-z.ai')) {
+        statusUrl = `${proxyUrl}/api/try-on/status?XTransformPort=3030`
+      }
+    } catch {}
+
+    const response = await fetch(statusUrl, {
       signal: controller.signal,
       headers,
     })

@@ -315,6 +315,54 @@ export function TryOnDialog({
     });
   }, [selfieData, productImage, productName]);
 
+  /**
+   * Poll a try-on job until completed or failed.
+   * Works with both local /api/try-on and direct proxy URLs.
+   */
+  const pollJob = useCallback(async (
+    jobId: string,
+    baseUrl: string,
+    onComplete: (imageUrl: string) => void,
+    onFailed: (error: string) => void,
+  ) => {
+    setProgress('Generating your try-on look...');
+
+    const pollInterval = setInterval(async () => {
+      try {
+        let statusUrl: string;
+        if (baseUrl.includes('.space-z.ai')) {
+          statusUrl = `${baseUrl}/api/try-on?XTransformPort=3030&jobId=${encodeURIComponent(jobId)}`;
+        } else {
+          statusUrl = `${baseUrl}/api/try-on?jobId=${encodeURIComponent(jobId)}`;
+        }
+
+        const statusRes = await fetch(statusUrl);
+        const statusData = await statusRes.json();
+
+        if (statusData.progress) {
+          setProgress(statusData.progress);
+        }
+
+        if (statusData.status === 'completed') {
+          clearInterval(pollInterval);
+          if (!statusData.imageUrl || statusData.strategy === 'canvas-fallback') {
+            onFailed('AI generation unavailable');
+            return;
+          }
+          onComplete(statusData.imageUrl);
+        } else if (statusData.status === 'failed') {
+          clearInterval(pollInterval);
+          onFailed(statusData.error || 'Generation failed. Please try again.');
+        }
+      } catch (pollErr) {
+        console.error('Polling error:', pollErr);
+      }
+    }, 3000);
+
+    // Safety timeout: stop polling after 2 minutes
+    setTimeout(() => clearInterval(pollInterval), 120000);
+  }, []);
+
   const handleGenerate = useCallback(async () => {
     if (!selfieData) return;
 
@@ -322,30 +370,30 @@ export function TryOnDialog({
     setError(null);
     setProgress('Uploading your photo...');
 
+    const requestPayload = {
+      productId,
+      selfieData,
+      productImageUrl: rawProductImage || productImage,
+      productName,
+      categorySlug: categorySlug || '',
+    };
+
     try {
+      // ── Strategy 1: Try the server API (works locally, may return canvas mode on Vercel) ──
       const controller = new AbortController();
-      // Set a generous timeout (2 minutes) since AI generation takes time
       const timeoutId = setTimeout(() => controller.abort(), 120000);
 
       const response = await fetch('/api/try-on', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId,
-          selfieData,
-          productImageUrl: rawProductImage || productImage, // Use original URL for API — resolves correctly on Vercel
-          productName,
-          categorySlug: categorySlug || '', // Pass actual category for proper AI generation
-        }),
+        body: JSON.stringify(requestPayload),
         signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
 
-      // Check if response is JSON before trying to parse
       const contentType = response.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
-        // Response is not JSON (probably HTML error page)
         const errorText = await response.text().catch(() => 'Unknown error');
         console.error('Non-JSON response:', response.status, errorText.substring(0, 200));
         throw new Error(
@@ -359,8 +407,75 @@ export function TryOnDialog({
 
       const data = await response.json();
 
-      // If server returned canvas mode, go straight to canvas fallback
+      // If server returned canvas mode, try direct client-to-proxy before falling back
       if (data.mode === 'canvas' || data.code === 'AI_CANVAS_MODE') {
+        console.log('[try-on] Server returned canvas mode, trying direct proxy from client...');
+
+        // ── Strategy 2: Try direct client-side proxy call to sandbox AI service ──
+        // Get proxy URL from config API (runtime, not build-time)
+        let proxyUrl = '';
+        try {
+          const configRes = await fetch('/api/config', { signal: AbortSignal.timeout(3000) });
+          if (configRes.ok) {
+            const configData = await configRes.json();
+            proxyUrl = configData.aiProxyUrl || '';
+          }
+        } catch {}
+        // Also check NEXT_PUBLIC_ env var as fallback
+        if (!proxyUrl) {
+          proxyUrl = process.env.NEXT_PUBLIC_AI_PROXY_URL || '';
+        }
+        if (proxyUrl) {
+          try {
+            setProgress('Connecting to AI service...');
+            let proxyFetchUrl: string;
+            if (proxyUrl.includes('.space-z.ai')) {
+              proxyFetchUrl = `${proxyUrl}/api/try-on?XTransformPort=3030`;
+            } else {
+              proxyFetchUrl = `${proxyUrl}/api/try-on`;
+            }
+
+            const proxyResponse = await fetch(proxyFetchUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(requestPayload),
+              signal: AbortSignal.timeout(90000),
+            });
+
+            if (proxyResponse.ok) {
+              const proxyData = await proxyResponse.json();
+              if (proxyData.jobId) {
+                // Poll the proxy for results
+                const pollBaseUrl = proxyUrl;
+                await new Promise<void>((resolve, reject) => {
+                  pollJob(
+                    proxyData.jobId,
+                    pollBaseUrl,
+                    (imageUrl) => {
+                      setResultImage(imageUrl);
+                      setStep('result');
+                      resolve();
+                    },
+                    (error) => {
+                      reject(new Error(error));
+                    },
+                  );
+                });
+                return;
+              }
+              if (proxyData.imageUrl) {
+                setResultImage(proxyData.imageUrl);
+                setStep('result');
+                return;
+              }
+            }
+            console.log('[try-on] Direct proxy call failed, falling back to canvas');
+          } catch (directProxyErr) {
+            console.log('[try-on] Direct proxy unavailable:', directProxyErr instanceof Error ? directProxyErr.message : String(directProxyErr));
+          }
+        }
+
+        // ── Strategy 3: Canvas fallback ──
         setProgress('Creating style preview overlay...');
         const canvasResult = await generateCanvasFallback();
         if (canvasResult) {
@@ -368,14 +483,12 @@ export function TryOnDialog({
           setStep('result');
           return;
         }
-        // Canvas fallback also failed
         setError('Could not generate style preview. Please try again later.');
         setStep('preview');
         return;
       }
 
       if (!response.ok) {
-        // If AI service is unavailable, try client-side canvas fallback
         if (response.status === 503 || data.code === 'AI_SERVICE_UNAVAILABLE') {
           setProgress('AI service unavailable. Creating style preview overlay...');
           const canvasResult = await generateCanvasFallback();
@@ -402,7 +515,6 @@ export function TryOnDialog({
 
             if (statusData.status === 'completed') {
               clearInterval(pollInterval);
-              // Check if this is a canvas fallback (empty imageUrl)
               if (!statusData.imageUrl || statusData.strategy === 'canvas-fallback') {
                 setProgress('Creating style preview overlay...');
                 const canvasResult = await generateCanvasFallback();
@@ -419,7 +531,6 @@ export function TryOnDialog({
               setStep('result');
             } else if (statusData.status === 'failed') {
               clearInterval(pollInterval);
-              // Try canvas fallback before showing error
               setProgress('AI generation failed. Trying style preview...');
               const canvasResult = await generateCanvasFallback();
               if (canvasResult) {
@@ -435,7 +546,6 @@ export function TryOnDialog({
           }
         }, 3000);
 
-        // Safety timeout: stop polling after 2 minutes
         setTimeout(() => clearInterval(pollInterval), 120000);
         return;
       }
@@ -447,15 +557,12 @@ export function TryOnDialog({
         return;
       }
 
-      // If no jobId and no imageUrl, this shouldn't happen but handle gracefully
       throw new Error('Unexpected response from server');
     } catch (err) {
-      // On any error, try the canvas fallback
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError('Request timed out. The AI service may be busy — please try again.');
         setStep('preview');
       } else {
-        // Try canvas fallback before showing error
         setProgress('Trying style preview fallback...');
         const canvasResult = await generateCanvasFallback();
         if (canvasResult) {
@@ -467,7 +574,7 @@ export function TryOnDialog({
         }
       }
     }
-  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, generateCanvasFallback]);
+  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, generateCanvasFallback, pollJob]);
 
   const handleReset = useCallback(() => {
     reset();
