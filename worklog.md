@@ -34,3 +34,42 @@ Stage Summary:
 - Product image upload: Works on Vercel via Vercel Blob or base64 fallback
 - Flutter app: Config now points to production URL by default
 - Service worker: Updated to v3 with proper upload route handling
+
+---
+Task ID: 1
+Agent: Component Agent
+Task: Create AppDownloadSection and AppDownloadBanner components
+
+Work Log:
+- Read worklog.md for context on prior work
+- Reviewed existing page.tsx to understand component usage (AppDownloadSection in home view, AppDownloadBanner at bottom of AppContent)
+- Found both components already existed but were PWA-install-focused (beforeinstallprompt handling, browser detection, etc.)
+- Rewrote AppDownloadSection as a marketing-focused section:
+  - Dark luxurious theme (stone-950 background, amber/gold accents)
+  - "3 BOXES LUXURY" branding with luxury-text class
+  - "Get the 3 BOXES LUXURY App" title
+  - 6 benefits: Faster Shopping, Exclusive Deals, AI Gift Assistant, VIP Experience, Secure Payments, Wishlist & Alerts
+  - Google Play and App Store download buttons with proper SVG icons, linking to # (placeholder)
+  - Phone mockup with app screen visualization
+  - "Download Now" CTA button with amber-600 styling
+  - Lucide icons (Smartphone, Sparkles, Gift, Zap, Shield, ChevronRight, Download, Star, Crown)
+  - framer-motion animations (fade in, slide in, whileInView, hover/tap on buttons)
+  - Fully responsive mobile-first design
+  - 'use client' directive
+- Rewrote AppDownloadBanner as a compact floating banner:
+  - Compact banner with "Download our app" text
+  - Close/dismiss button (X icon) with localStorage persistence (key: 3bl_app_banner_dismissed)
+  - Starts with isDismissed=true to prevent hydration flash, then checks localStorage on mount
+  - amber/gold accent colors matching site theme
+  - Smartphone icon + Download button linking to # (placeholder)
+  - 'use client' directive
+  - framer-motion entry animation (slide up from bottom with 2.5s delay)
+  - max-w-md width, positioned fixed bottom-right
+- Verified both components render correctly (HTTP 200, Google Play/App Store/benefits text visible in HTML)
+- Dev log clean with no compilation errors
+
+Stage Summary:
+- AppDownloadSection: Marketing-focused with store download buttons, 6 benefits, phone mockup, framer-motion animations
+- AppDownloadBanner: Compact dismissible banner with localStorage persistence, no hydration mismatch
+- Both components use 'use client', Lucide icons, shadcn/ui Button, amber/gold theme
+- Page renders successfully with both components in place

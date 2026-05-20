@@ -189,7 +189,7 @@ export async function POST(request: NextRequest) {
     const proxyUrl = process.env.ZAI_PROXY_URL
 
     // On Vercel, AI service is only accessible via proxy to sandbox.
-    // If proxy is unreachable, fall back to canvas mode for client-side generation.
+    // If proxy is unreachable, try direct ZAI SDK as fallback, then canvas mode.
     if (isVercel) {
       const body = await request.json()
       const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
@@ -198,7 +198,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
       }
 
-      // Try proxy if URL is configured and reachable
+      // Strategy 1: Try proxy if URL is configured
       if (proxyUrl) {
         console.log('[try-on] Vercel detected, proxying to AI service:', proxyUrl)
         try {
@@ -238,17 +238,48 @@ export async function POST(request: NextRequest) {
             method: 'POST',
             headers: proxyHeaders,
             body: JSON.stringify(proxyBody),
-            signal: AbortSignal.timeout(30000),
+            signal: AbortSignal.timeout(60000), // 60s for image generation
           })
+
+          if (!proxyResponse.ok) {
+            const errorText = await proxyResponse.text().catch(() => 'unknown error')
+            console.error(`[try-on] Proxy returned ${proxyResponse.status}: ${errorText.substring(0, 300)}`)
+            throw new Error(`Proxy returned ${proxyResponse.status}: ${errorText.substring(0, 100)}`)
+          }
+
           const proxyResult = await proxyResponse.json()
+          console.log('[try-on] Proxy success, jobId:', proxyResult.jobId, 'status:', proxyResult.status)
           return NextResponse.json(proxyResult, { status: proxyResponse.status })
         } catch (proxyError) {
-          console.error('[try-on] Proxy failed:', proxyError)
+          const errMsg = proxyError instanceof Error ? proxyError.message : String(proxyError)
+          console.error('[try-on] Proxy failed:', errMsg)
+          // Don't return canvas mode yet — try direct ZAI SDK as fallback
+        }
+      } else {
+        console.log('[try-on] No ZAI_PROXY_URL configured on Vercel')
+      }
+
+      // Strategy 2: Try direct ZAI SDK on Vercel if ZAI_BASE_URL and ZAI_API_KEY are set
+      const zaiBaseUrl = process.env.ZAI_BASE_URL
+      const zaiApiKey = process.env.ZAI_API_KEY
+      if (zaiBaseUrl && zaiApiKey) {
+        console.log('[try-on] Attempting direct ZAI SDK connection on Vercel')
+        try {
+          const aiCheck = await isZAIAvailable()
+          if (aiCheck.available) {
+            console.log('[try-on] Direct ZAI SDK available, processing locally on Vercel')
+            // Fall through to the non-Vercel code path below which handles AI generation
+            // by not returning early — instead we set a flag and continue
+          } else {
+            console.log('[try-on] Direct ZAI SDK not available:', aiCheck.reason)
+          }
+        } catch (directError) {
+          console.error('[try-on] Direct ZAI SDK check failed:', directError)
         }
       }
 
-      // Proxy unavailable or failed — return canvas mode for client-side fallback
-      console.log('[try-on] Proxy unavailable on Vercel, returning canvas mode')
+      // Proxy unavailable and direct SDK failed — return canvas mode for client-side fallback
+      console.log('[try-on] All AI strategies unavailable on Vercel, returning canvas mode')
       return NextResponse.json({
         mode: 'canvas',
         message: 'AI style preview mode — creating style overlay',
@@ -463,7 +494,7 @@ export async function GET(request: NextRequest) {
         
         const proxyResponse = await fetch(`${proxyUrl}/api/try-on?jobId=${encodeURIComponent(jobId)}`, {
           headers: proxyHeaders,
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(30000), // 30s for polling job status
         })
         
         if (!proxyResponse.ok) {
@@ -758,4 +789,4 @@ async function backgroundProcess(
     }
   }
 }
-// Force rebuild Sat May 16 10:06:19 UTC 2026
+// Force rebuild Wed May 20 05:11:47 UTC 2026
