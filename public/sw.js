@@ -1,5 +1,5 @@
 // 3 BOXES LUXURY - Service Worker for PWA offline support
-const CACHE_NAME = '3boxes-luxury-v2';
+const CACHE_NAME = '3boxes-luxury-v3';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -47,6 +47,9 @@ self.addEventListener('fetch', (event) => {
 
   // Skip API calls - always go to network
   if (url.pathname.startsWith('/api/')) return;
+
+  // Skip upload routes - always go to network (POST/PUT handled above, but also skip GET on upload paths)
+  if (url.pathname.startsWith('/api/upload') || url.pathname.startsWith('/uploads/')) return;
 
   // Skip chrome-extension and other non-http
   if (!url.protocol.startsWith('http')) return;

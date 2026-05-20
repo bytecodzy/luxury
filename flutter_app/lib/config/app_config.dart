@@ -2,18 +2,20 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 class AppConfig {
-  // Base URL - will be relative for web, uses same origin
-  static const String baseUrl = 'http://10.0.2.2:81';  // Android emulator
+  // Production URL (Vercel deployment)
+  static const String productionUrl = 'https://my-project-sepia-seven-42.vercel.app';
+  // Local development URL (Android emulator via 10.0.2.2)
+  static const String localUrl = 'http://10.0.2.2:81';
+
+  // Use production URL by default; override with --dart-define=API_URL=... for local dev
+  static const String baseUrl = String.fromEnvironment('API_URL', defaultValue: productionUrl);
 
   // Get the appropriate base URL for the current platform
   static String get effectiveBaseUrl {
-    // For Android emulator, use 10.0.2.2
-    // For iOS simulator, use localhost
-    // For physical devices, use actual server IP
+    // For Flutter Web, use same origin (empty string = relative URLs)
     if (kIsWeb) return '';
-    if (Platform.isAndroid) return 'http://10.0.2.2:81';
-    if (Platform.isIOS) return 'http://localhost:81';
-    return 'http://10.0.2.2:81';
+    // For all native platforms, use the configured baseUrl (production by default)
+    return baseUrl;
   }
 
   // API endpoints
@@ -48,7 +50,14 @@ class AppConfig {
 
   static String getImageUrl(String? path) {
     if (path == null || path.isEmpty) return '${effectiveBaseUrl}/images/logo.png';
+    // Data URLs (base64) can be used directly
+    if (path.startsWith('data:')) return path;
+    // Vercel Blob URLs are absolute and can be used directly
     if (path.startsWith('http://') || path.startsWith('https://')) {
+      // Shopify CDN and Vercel Blob URLs work directly without proxy
+      if (path.contains('cdn.shopify.com') || path.contains('blob.vercel-storage.com') || path.contains('vercel.app')) {
+        return path;
+      }
       return '${effectiveBaseUrl}/api/image-proxy?url=${Uri.encodeComponent(path)}';
     }
     return '$effectiveBaseUrl$path';

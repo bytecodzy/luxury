@@ -1,11 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Smartphone,
   Download,
-  X,
   Check,
   ChevronRight,
   Shield,
@@ -13,12 +12,36 @@ import {
   Globe,
   Star,
   Monitor,
+  Share2,
+  QrCode,
+  Info,
+  Chrome,
+  Compass,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+}
+
+type BrowserType = 'chrome' | 'safari' | 'firefox' | 'edge' | 'samsung' | 'other';
+
+function detectBrowser(): BrowserType {
+  const ua = navigator.userAgent;
+  if (/SamsungBrowser/i.test(ua)) return 'samsung';
+  if (/Edg\//i.test(ua)) return 'edge';
+  if (/Firefox/i.test(ua)) return 'firefox';
+  if (/Chrome/i.test(ua) && !/Edg/i.test(ua)) return 'chrome';
+  if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) return 'safari';
+  return 'other';
+}
+
+function isStandalone(): boolean {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true
+  );
 }
 
 export function AppDownloadSection() {
@@ -29,58 +52,146 @@ export function AppDownloadSection() {
   const [showInstructions, setShowInstructions] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isIPad, setIsIPad] = useState(false);
+  const [browser, setBrowser] = useState<BrowserType>('other');
+  const [promptAvailable, setPromptAvailable] = useState(false);
+  const [manifestLinked, setManifestLinked] = useState(false);
+  const [swRegistered, setSwRegistered] = useState(false);
+  const deferredPromptRef = useRef<BeforeInstallPromptEvent | null>(null);
 
   useEffect(() => {
     // Detect device
     const ua = navigator.userAgent;
-    setIsMobile(/Android|iPhone|iPad|iPod/i.test(ua));
-    setIsIOS(/iPhone|iPad|iPod/i.test(ua));
+    const mobile = /Android|iPhone|iPad|iPod/i.test(ua);
+    setIsMobile(mobile);
+    setIsIOS(/iPhone|iPod/i.test(ua));
+    setIsIPad(/iPad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+    setBrowser(detectBrowser());
 
     // Check if already installed
-    if (window.matchMedia('(display-mode: standalone)').matches) {
+    if (isStandalone()) {
       setIsInstalled(true);
-    }
-
-    // Listen for beforeinstallprompt
-    const handler = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
-    };
-
-    window.addEventListener('beforeinstallprompt', handler);
-
-    // Listen for appinstalled
-    window.addEventListener('appinstalled', () => {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-    });
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handler);
-    };
-  }, []);
-
-  const handleInstallClick = useCallback(async () => {
-    if (!deferredPrompt) {
-      setShowInstructions(true);
       return;
     }
 
-    setIsInstalling(true);
-    try {
-      await deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') {
+    // Check if manifest is linked
+    const manifestEl = document.querySelector('link[rel="manifest"]');
+    setManifestLinked(!!manifestEl);
+
+    // Check if service worker is registered
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        setSwRegistered(!!reg);
+      });
+    }
+
+    // Aggressive beforeinstallprompt listener — capture immediately
+    // Some browsers fire this early; we use a ref to avoid stale closures
+    const handler = (e: Event) => {
+      e.preventDefault();
+      const promptEvent = e as BeforeInstallPromptEvent;
+      deferredPromptRef.current = promptEvent;
+      setDeferredPrompt(promptEvent);
+      setPromptAvailable(true);
+    };
+
+    // Listen on both window and document for maximum capture reliability
+    window.addEventListener('beforeinstallprompt', handler);
+    document.addEventListener('beforeinstallprompt', handler);
+
+    // Also listen for appinstalled
+    const installedHandler = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+      deferredPromptRef.current = null;
+      setPromptAvailable(false);
+    };
+    window.addEventListener('appinstalled', installedHandler);
+
+    // Check display mode change (app installed and launched)
+    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const mediaHandler = (e: MediaQueryListEvent) => {
+      if (e.matches) {
         setIsInstalled(true);
       }
-    } catch (err) {
-      console.error('Install prompt error:', err);
+    };
+    mediaQuery.addEventListener('change', mediaHandler);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      document.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('appinstalled', installedHandler);
+      mediaQuery.removeEventListener('change', mediaHandler);
+    };
+  }, []);
+
+  // For iOS and browsers without beforeinstallprompt, auto-show instructions after a delay
+  useEffect(() => {
+    if (isInstalled) return;
+    // On iOS, automatically show instructions since beforeinstallprompt never fires
+    if (isIOS && !promptAvailable) {
+      const timer = setTimeout(() => {
+        setShowInstructions(true);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+    // On other mobile browsers without prompt after a while, show instructions
+    if (isMobile && !promptAvailable) {
+      const timer = setTimeout(() => {
+        setShowInstructions(true);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isIOS, isMobile, promptAvailable, isInstalled]);
+
+  const handleInstallClick = useCallback(async () => {
+    // Use ref to avoid stale closure
+    const prompt = deferredPromptRef.current || deferredPrompt;
+
+    if (prompt) {
+      setIsInstalling(true);
+      try {
+        await prompt.prompt();
+        const { outcome } = await prompt.userChoice;
+        if (outcome === 'accepted') {
+          setIsInstalled(true);
+        }
+      } catch (err) {
+        console.error('Install prompt error:', err);
+        setShowInstructions(true);
+      } finally {
+        setDeferredPrompt(null);
+        deferredPromptRef.current = null;
+        setPromptAvailable(false);
+        setIsInstalling(false);
+      }
+    } else {
+      // No native prompt available — show manual instructions
       setShowInstructions(true);
-    } finally {
-      setDeferredPrompt(null);
-      setIsInstalling(false);
     }
   }, [deferredPrompt]);
+
+  // Share handler for devices that support Web Share API
+  const handleShare = useCallback(async () => {
+    const url = window.location.origin;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: '3 BOXES LUXURY',
+          text: 'Install the 3 BOXES LUXURY app for the ultimate luxury shopping experience',
+          url,
+        });
+      } catch (err) {
+        // User cancelled or share failed — copy URL as fallback
+        if ((err as DOMException).name !== 'AbortError') {
+          await navigator.clipboard?.writeText(url);
+        }
+      }
+    } else {
+      // Fallback: copy URL to clipboard
+      await navigator.clipboard?.writeText(url);
+    }
+  }, []);
 
   if (isInstalled) return null;
 
@@ -106,6 +217,35 @@ export function AppDownloadSection() {
       desc: 'Smart gift recommendations',
     },
   ];
+
+  // Determine the browser-specific instruction
+  const getBrowserIcon = () => {
+    switch (browser) {
+      case 'safari':
+        return <Compass className="h-4 w-4 text-blue-400" />;
+      case 'chrome':
+        return <Chrome className="h-4 w-4 text-green-400" />;
+      case 'edge':
+        return <Chrome className="h-4 w-4 text-blue-300" />;
+      case 'samsung':
+        return <Globe className="h-4 w-4 text-purple-400" />;
+      case 'firefox':
+        return <Globe className="h-4 w-4 text-orange-400" />;
+      default:
+        return <Globe className="h-4 w-4 text-amber-400" />;
+    }
+  };
+
+  const getBrowserName = () => {
+    switch (browser) {
+      case 'safari': return 'Safari';
+      case 'chrome': return 'Chrome';
+      case 'edge': return 'Edge';
+      case 'samsung': return 'Samsung Internet';
+      case 'firefox': return 'Firefox';
+      default: return 'your browser';
+    }
+  };
 
   return (
     <section
@@ -142,6 +282,13 @@ export function AppDownloadSection() {
               Install our app on your iPhone or Android device for the ultimate luxury
               shopping experience. Browse, gift, and shop — anytime, anywhere.
             </p>
+            {/* PWA readiness indicator */}
+            {!promptAvailable && !isIOS && (
+              <div className="mt-4 inline-flex items-center gap-2 rounded-lg border border-amber-500/10 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-300/50">
+                {getBrowserIcon()}
+                <span>Detected: {getBrowserName()} • PWA Ready: {manifestLinked && swRegistered ? '✓' : '⟳'}</span>
+              </div>
+            )}
           </motion.div>
 
           {/* Main content */}
@@ -224,41 +371,67 @@ export function AppDownloadSection() {
                 <div className="absolute -inset-4 -z-10 rounded-[3rem] bg-amber-500/5 blur-xl" />
               </div>
 
-              {/* Install button */}
+              {/* Install button — always visible */}
               <div className="mt-8 flex flex-col items-center gap-3">
-                {deferredPrompt ? (
-                  <Button
-                    size="lg"
-                    onClick={handleInstallClick}
-                    disabled={isInstalling}
-                    className="gap-2 bg-amber-600 text-stone-950 hover:bg-amber-500 transition-all duration-300 hover:shadow-lg hover:shadow-amber-600/25 px-8 py-6 text-base font-bold"
+                <Button
+                  size="lg"
+                  onClick={handleInstallClick}
+                  disabled={isInstalling}
+                  className="gap-2 bg-amber-600 text-stone-950 hover:bg-amber-500 transition-all duration-300 hover:shadow-lg hover:shadow-amber-600/25 px-8 py-6 text-base font-bold"
+                >
+                  {isInstalling ? (
+                    <>
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-stone-950 border-t-transparent" />
+                      Installing...
+                    </>
+                  ) : promptAvailable ? (
+                    <>
+                      <Download className="h-5 w-5" />
+                      Install App Now
+                    </>
+                  ) : isIOS ? (
+                    <>
+                      <Download className="h-5 w-5" />
+                      Add to Home Screen
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-5 w-5" />
+                      {isMobile ? 'Install App' : 'Get the App'}
+                    </>
+                  )}
+                </Button>
+
+                {/* Prominent Chrome menu tip — shown when no native prompt */}
+                {!promptAvailable && !isIOS && isMobile && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                    className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300/70"
                   >
-                    {isInstalling ? (
-                      <>
-                        <div className="h-5 w-5 animate-spin rounded-full border-2 border-stone-950 border-t-transparent" />
-                        Installing...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="h-5 w-5" />
-                        Install Android App
-                      </>
-                    )}
-                  </Button>
-                ) : (
-                  <Button
-                    size="lg"
-                    onClick={handleInstallClick}
-                    className="gap-2 bg-amber-600 text-stone-950 hover:bg-amber-500 transition-all duration-300 hover:shadow-lg hover:shadow-amber-600/25 px-8 py-6 text-base font-bold"
-                  >
-                    <Download className="h-5 w-5" />
-                    {isIOS
-                      ? 'Add to Home Screen'
-                      : isMobile
-                        ? 'Install App'
-                        : 'Get the App'}
-                  </Button>
+                    <Info className="h-3.5 w-3.5 flex-shrink-0 text-amber-400" />
+                    <span>
+                      Tip: Tap <strong>⋮ menu</strong> → <strong>&quot;Install app&quot;</strong> or <strong>&quot;Add to Home Screen&quot;</strong> in {getBrowserName()}
+                    </span>
+                  </motion.div>
                 )}
+
+                {/* iOS Safari share tip — shown prominently */}
+                {isIOS && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                    className="flex items-center gap-2 rounded-lg border border-blue-400/20 bg-blue-500/10 px-3 py-2 text-xs text-blue-300/70"
+                  >
+                    <Share2 className="h-3.5 w-3.5 flex-shrink-0 text-blue-400" />
+                    <span>
+                      Tap <strong>Share</strong> <span className="inline-block">⬆️</span> → <strong>&quot;Add to Home Screen&quot;</strong> in Safari
+                    </span>
+                  </motion.div>
+                )}
+
                 <p className="text-xs text-amber-200/40">
                   Free • Works on iOS & Android • Instant install
                 </p>
@@ -295,7 +468,7 @@ export function AppDownloadSection() {
                 ))}
               </div>
 
-              {/* Install instructions */}
+              {/* Install instructions — always shown on iOS, toggleable on others */}
               <AnimatePresence>
                 {showInstructions && (
                   <motion.div
@@ -305,18 +478,19 @@ export function AppDownloadSection() {
                     className="overflow-hidden"
                   >
                     <div className="rounded-xl border border-amber-500/20 bg-stone-900/80 p-5">
-                      <h4 className="mb-3 text-sm font-bold text-amber-200">
-                        How to Install on Your Device:
+                      <h4 className="mb-3 flex items-center gap-2 text-sm font-bold text-amber-200">
+                        {getBrowserIcon()}
+                        How to Install on {getBrowserName()}:
                       </h4>
                       {isIOS ? (
-                        <ol className="space-y-2 text-xs text-amber-200/60">
+                        <ol className="space-y-3 text-xs text-amber-200/60">
                           <li className="flex gap-2">
                             <span className="flex-shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600/20 text-[10px] font-bold text-amber-400">
                               1
                             </span>
                             <span>
-                              Tap the <strong>Share button</strong> (box with up
-                              arrow) in Safari
+                              Tap the <strong className="text-amber-300/80">Share button</strong> (box with up
+                              arrow <Share2 className="inline h-3 w-3" />) at the bottom of Safari
                             </span>
                           </li>
                           <li className="flex gap-2">
@@ -325,7 +499,7 @@ export function AppDownloadSection() {
                             </span>
                             <span>
                               Scroll down and tap{' '}
-                              <strong>&quot;Add to Home Screen&quot;</strong>
+                              <strong className="text-amber-300/80">&quot;Add to Home Screen&quot;</strong>
                             </span>
                           </li>
                           <li className="flex gap-2">
@@ -333,21 +507,19 @@ export function AppDownloadSection() {
                               3
                             </span>
                             <span>
-                              Tap <strong>&quot;Add&quot;</strong> to install the
-                              app
+                              Tap <strong className="text-amber-300/80">&quot;Add&quot;</strong> to install the
+                              app on your home screen
                             </span>
                           </li>
                         </ol>
-                      ) : (
-                        <ol className="space-y-2 text-xs text-amber-200/60">
+                      ) : browser === 'samsung' ? (
+                        <ol className="space-y-3 text-xs text-amber-200/60">
                           <li className="flex gap-2">
                             <span className="flex-shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600/20 text-[10px] font-bold text-amber-400">
                               1
                             </span>
                             <span>
-                              Open this website in{' '}
-                              <strong>Chrome browser</strong> on your Android
-                              phone
+                              Tap the <strong className="text-amber-300/80">☰ menu</strong> (three horizontal lines) at the bottom
                             </span>
                           </li>
                           <li className="flex gap-2">
@@ -355,7 +527,36 @@ export function AppDownloadSection() {
                               2
                             </span>
                             <span>
-                              Tap the <strong>three-dot menu</strong> (⋮) in the
+                              Tap <strong className="text-amber-300/80">&quot;Add page to&quot; → &quot;Home screen&quot;</strong>
+                            </span>
+                          </li>
+                          <li className="flex gap-2">
+                            <span className="flex-shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600/20 text-[10px] font-bold text-amber-400">
+                              3
+                            </span>
+                            <span>
+                              Tap <strong className="text-amber-300/80">&quot;Add&quot;</strong> to confirm
+                            </span>
+                          </li>
+                        </ol>
+                      ) : (
+                        <ol className="space-y-3 text-xs text-amber-200/60">
+                          <li className="flex gap-2">
+                            <span className="flex-shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600/20 text-[10px] font-bold text-amber-400">
+                              1
+                            </span>
+                            <span>
+                              Open this website in{' '}
+                              <strong className="text-amber-300/80">{getBrowserName()} browser</strong> on your
+                              device
+                            </span>
+                          </li>
+                          <li className="flex gap-2">
+                            <span className="flex-shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600/20 text-[10px] font-bold text-amber-400">
+                              2
+                            </span>
+                            <span>
+                              Tap the <strong className="text-amber-300/80">three-dot menu</strong> (⋮) in the
                               top right
                             </span>
                           </li>
@@ -365,7 +566,7 @@ export function AppDownloadSection() {
                             </span>
                             <span>
                               Tap{' '}
-                              <strong>
+                              <strong className="text-amber-300/80">
                                 &quot;Install app&quot; or &quot;Add to Home
                                 Screen&quot;
                               </strong>
@@ -377,7 +578,7 @@ export function AppDownloadSection() {
                             </span>
                             <span>
                               Confirm by tapping{' '}
-                              <strong>&quot;Install&quot;</strong>
+                              <strong className="text-amber-300/80">&quot;Install&quot;</strong>
                             </span>
                           </li>
                         </ol>
@@ -425,17 +626,142 @@ export function AppDownloadSection() {
                 </div>
               )}
 
-              {/* Alternative: Open in browser */}
-              <div className="mt-4 flex flex-col gap-2">
-                <button
-                  onClick={() => window.open('/', '_blank')}
-                  className="flex items-center gap-2 text-sm text-amber-300/60 hover:text-amber-300 transition-colors"
-                >
-                  <Monitor className="h-4 w-4" />
-                  Or try the app in your browser
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              {/* Desktop: Share / QR code section */}
+              {!isMobile && (
+                <div className="mt-4 flex flex-col gap-3">
+                  <div className="rounded-xl border border-amber-500/15 bg-stone-900/50 p-4">
+                    <h4 className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-200/80">
+                      <QrCode className="h-4 w-4 text-amber-400" />
+                      Get it on your phone
+                    </h4>
+                    <p className="mb-3 text-xs text-amber-200/50 leading-relaxed">
+                      Scan the QR code or share the link to install on your mobile device.
+                    </p>
+                    <div className="flex items-center gap-3">
+                      {/* Simple SVG QR code placeholder */}
+                      <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-lg border border-amber-500/20 bg-white p-1.5">
+                        <svg viewBox="0 0 100 100" className="h-full w-full">
+                          {/* QR code pattern — simplified decorative representation */}
+                          <rect x="0" y="0" width="100" height="100" fill="white"/>
+                          {/* Position detection patterns */}
+                          <rect x="5" y="5" width="25" height="25" fill="black"/>
+                          <rect x="8" y="8" width="19" height="19" fill="white"/>
+                          <rect x="11" y="11" width="13" height="13" fill="black"/>
+                          <rect x="70" y="5" width="25" height="25" fill="black"/>
+                          <rect x="73" y="8" width="19" height="19" fill="white"/>
+                          <rect x="76" y="11" width="13" height="13" fill="black"/>
+                          <rect x="5" y="70" width="25" height="25" fill="black"/>
+                          <rect x="8" y="73" width="19" height="19" fill="white"/>
+                          <rect x="11" y="76" width="13" height="13" fill="black"/>
+                          {/* Data modules */}
+                          <rect x="35" y="5" width="5" height="5" fill="black"/>
+                          <rect x="45" y="5" width="5" height="5" fill="black"/>
+                          <rect x="55" y="5" width="5" height="5" fill="black"/>
+                          <rect x="35" y="15" width="5" height="5" fill="black"/>
+                          <rect x="50" y="15" width="5" height="5" fill="black"/>
+                          <rect x="60" y="15" width="5" height="5" fill="black"/>
+                          <rect x="35" y="25" width="5" height="5" fill="black"/>
+                          <rect x="45" y="25" width="5" height="5" fill="black"/>
+                          <rect x="5" y="35" width="5" height="5" fill="black"/>
+                          <rect x="15" y="35" width="5" height="5" fill="black"/>
+                          <rect x="30" y="35" width="5" height="5" fill="black"/>
+                          <rect x="40" y="35" width="5" height="5" fill="black"/>
+                          <rect x="50" y="35" width="5" height="5" fill="black"/>
+                          <rect x="65" y="35" width="5" height="5" fill="black"/>
+                          <rect x="80" y="35" width="5" height="5" fill="black"/>
+                          <rect x="90" y="35" width="5" height="5" fill="black"/>
+                          <rect x="5" y="45" width="5" height="5" fill="black"/>
+                          <rect x="20" y="45" width="5" height="5" fill="black"/>
+                          <rect x="35" y="45" width="5" height="5" fill="black"/>
+                          <rect x="55" y="45" width="5" height="5" fill="black"/>
+                          <rect x="70" y="45" width="5" height="5" fill="black"/>
+                          <rect x="85" y="45" width="5" height="5" fill="black"/>
+                          <rect x="10" y="55" width="5" height="5" fill="black"/>
+                          <rect x="25" y="55" width="5" height="5" fill="black"/>
+                          <rect x="40" y="55" width="5" height="5" fill="black"/>
+                          <rect x="60" y="55" width="5" height="5" fill="black"/>
+                          <rect x="75" y="55" width="5" height="5" fill="black"/>
+                          <rect x="90" y="55" width="5" height="5" fill="black"/>
+                          <rect x="35" y="65" width="5" height="5" fill="black"/>
+                          <rect x="50" y="65" width="5" height="5" fill="black"/>
+                          <rect x="65" y="65" width="5" height="5" fill="black"/>
+                          <rect x="80" y="65" width="5" height="5" fill="black"/>
+                          <rect x="35" y="75" width="5" height="5" fill="black"/>
+                          <rect x="45" y="75" width="5" height="5" fill="black"/>
+                          <rect x="60" y="75" width="5" height="5" fill="black"/>
+                          <rect x="75" y="75" width="5" height="5" fill="black"/>
+                          <rect x="90" y="75" width="5" height="5" fill="black"/>
+                          <rect x="35" y="85" width="5" height="5" fill="black"/>
+                          <rect x="55" y="85" width="5" height="5" fill="black"/>
+                          <rect x="70" y="85" width="5" height="5" fill="black"/>
+                          <rect x="85" y="85" width="5" height="5" fill="black"/>
+                          {/* Alignment pattern */}
+                          <rect x="40" y="40" width="15" height="15" fill="black"/>
+                          <rect x="43" y="43" width="9" height="9" fill="white"/>
+                          <rect x="45" y="45" width="5" height="5" fill="black"/>
+                        </svg>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleShare}
+                          className="gap-2 border-amber-500/30 text-amber-300/70 hover:bg-amber-500/10 hover:text-amber-300"
+                        >
+                          <Share2 className="h-4 w-4" />
+                          Share Link
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard?.writeText(window.location.origin);
+                          }}
+                          className="gap-2 border-amber-500/30 text-amber-300/70 hover:bg-amber-500/10 hover:text-amber-300"
+                        >
+                          Copy URL
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Mobile: Share button */}
+              {isMobile && (
+                <div className="mt-4 flex flex-col gap-2">
+                  <button
+                    onClick={handleShare}
+                    className="flex items-center gap-2 text-sm text-amber-300/60 hover:text-amber-300 transition-colors"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    Share this app with friends
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => window.open('/', '_blank')}
+                    className="flex items-center gap-2 text-sm text-amber-300/60 hover:text-amber-300 transition-colors"
+                  >
+                    <Monitor className="h-4 w-4" />
+                    Or try the app in your browser
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Desktop: open in browser */}
+              {!isMobile && (
+                <div className="mt-2 flex flex-col gap-2">
+                  <button
+                    onClick={() => window.open('/', '_blank')}
+                    className="flex items-center gap-2 text-sm text-amber-300/60 hover:text-amber-300 transition-colors"
+                  >
+                    <Monitor className="h-4 w-4" />
+                    Or try the app in your browser
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
             </motion.div>
           </div>
         </div>

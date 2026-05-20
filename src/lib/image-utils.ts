@@ -8,6 +8,10 @@
 const DIRECT_ACCESS_DOMAINS = [
   'cdn.shopify.com',
   'shopify.com',
+  'blob.vercel-storage.com',
+  'public.blob.vercel-storage.com',
+  'vercel.app',
+  'vercel-storage.com',
 ];
 
 function isDirectAccessUrl(url: string): boolean {
