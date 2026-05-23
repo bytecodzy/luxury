@@ -131,12 +131,17 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
  * Client-side canvas fallback: overlay the product image on the selfie.
  * Used when the AI backend service is unavailable (e.g., Vercel serverless).
  * Creates a visually compelling style preview with product overlay and branding.
+ *
+ * @param selfieData - Base64 data URL of the user's selfie
+ * @param productImageUrl - URL of the product image (used as fallback if no base64)
+ * @param productName - Name of the product for the overlay label
+ * @param productImageBase64 - Optional base64 data URL of the product image (preferred, avoids CORS)
  */
-function generateCanvasFallback(selfieData: string, productImageUrl: string, productName: string): Promise<string | null> {
+function generateCanvasFallback(selfieData: string, productImageUrl: string, productName: string, productImageBase64?: string): Promise<string | null> {
   return new Promise((resolve) => {
     try {
       const selfieImg = document.createElement('img');
-      selfieImg.crossOrigin = 'anonymous';
+      // Don't set crossOrigin on data URLs — it causes unnecessary CORS preflight
       selfieImg.onload = () => {
         const canvas = document.createElement('canvas');
         const width = Math.max(selfieImg.naturalWidth, 512);
@@ -252,7 +257,8 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
 
         // Try loading the product image with timeout
         const productImg = document.createElement('img');
-        productImg.crossOrigin = 'anonymous';
+        // Only set crossOrigin when loading cross-origin URLs (not for data URLs or same-origin proxy)
+        // This avoids CORS preflight failures on same-origin /api/image-proxy requests
 
         let resolved = false;
         const finish = (img?: HTMLImageElement) => {
@@ -273,23 +279,63 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
         };
 
         productImg.onload = () => finish(productImg);
-        productImg.onerror = () => finish(); // Continue without product image
+        productImg.onerror = () => {
+          console.warn('[try-on] Product image failed to load in canvas fallback, continuing without it');
+          finish(); // Continue without product image
+        };
 
         // Timeout: if product image doesn't load in 5s, continue without it
         setTimeout(() => finish(), 5000);
 
-        // Route external images through our proxy to avoid CORS issues
-        let imgSrc = productImageUrl;
-        if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
-          imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
-        } else if (imgSrc.startsWith('//')) {
-          imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
-        } else if (imgSrc.startsWith('/') && !imgSrc.startsWith('/api/')) {
-          imgSrc = `${window.location.origin}${imgSrc}`;
+        // Prefer base64 data URL if available (no CORS issues at all)
+        if (productImageBase64 && productImageBase64.startsWith('data:')) {
+          // Base64 data URLs work directly with no CORS issues
+          productImg.src = productImageBase64;
+        } else {
+          // Route external images through our proxy to avoid CORS issues
+          let imgSrc = productImageUrl;
+          if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
+            imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
+          } else if (imgSrc.startsWith('//')) {
+            imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
+          } else if (imgSrc.startsWith('/') && !imgSrc.startsWith('/api/')) {
+            imgSrc = `${window.location.origin}${imgSrc}`;
+          }
+          productImg.src = imgSrc;
         }
-        productImg.src = imgSrc;
       };
-      selfieImg.onerror = () => resolve(null);
+      selfieImg.onerror = () => {
+        console.warn('[try-on] Selfie image failed to load in canvas fallback');
+        // Instead of returning null, try to produce SOMETHING even without the selfie
+        // Create a minimal canvas with just the product info and a message
+        try {
+          const fallbackCanvas = document.createElement('canvas');
+          fallbackCanvas.width = 512;
+          fallbackCanvas.height = 680;
+          const fCtx = fallbackCanvas.getContext('2d');
+          if (fCtx) {
+            // Dark gradient background
+            const grad = fCtx.createLinearGradient(0, 0, 0, 680);
+            grad.addColorStop(0, '#1c1917');
+            grad.addColorStop(1, '#292524');
+            fCtx.fillStyle = grad;
+            fCtx.fillRect(0, 0, 512, 680);
+
+            // Message
+            fCtx.fillStyle = '#daa520';
+            fCtx.font = 'bold 20px Arial, sans-serif';
+            fCtx.textAlign = 'center';
+            fCtx.fillText('Style Preview', 256, 300);
+            fCtx.fillStyle = '#a8a29e';
+            fCtx.font = '14px Arial, sans-serif';
+            fCtx.fillText(productName, 256, 340);
+
+            resolve(fallbackCanvas.toDataURL('image/png'));
+            return;
+          }
+        } catch {}
+        resolve(null);
+      };
       selfieImg.src = selfieData;
     } catch {
       resolve(null);
@@ -420,8 +466,11 @@ function TryOnDialog({
 
       // Handle canvas mode — AI service unavailable on server, try direct client-to-proxy
       if (postData.mode === 'canvas' || postData.code === 'AI_CANVAS_MODE') {
+        // Extract productImageBase64 from server response — avoids CORS issues in canvas fallback
+        const serverProductImageBase64 = postData.productImageBase64 as string | undefined;
+
         // ── Strategy: Try direct client-side proxy call to sandbox AI service ──
-        // Get proxy URL from config API (runtime, not build-time)
+        // Only attempt proxy on Vercel if a proxy URL is actually available
         let proxyUrl = '';
         try {
           const configRes = await fetch('/api/config', { signal: AbortSignal.timeout(3000) });
@@ -521,9 +570,9 @@ function TryOnDialog({
           }
         }
 
-        // Canvas fallback
+        // Canvas fallback — prefer server-provided base64 to avoid CORS issues
         setProgressMessage('Creating style preview overlay...');
-        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
+        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName, serverProductImageBase64);
         if (canvasResult) {
           setResultImage(canvasResult);
           setWatermarkedResult(canvasResult);
@@ -542,7 +591,7 @@ function TryOnDialog({
       if (!postRes.ok) {
         if (postRes.status === 503 || postData.code === 'AI_SERVICE_UNAVAILABLE') {
           setProgressMessage('AI service unavailable. Creating style preview overlay...');
-          const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
+          const canvasResult = await generateCanvasFallback(selfieData, productImage, productName, postData.productImageBase64 as string | undefined);
           if (canvasResult) {
             setResultImage(canvasResult);
             setWatermarkedResult(canvasResult);
@@ -559,7 +608,7 @@ function TryOnDialog({
       if (!jobId) {
         // No jobId but response was ok — could be a canvas mode we didn't catch above
         setProgressMessage('Creating style preview overlay...');
-        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
+        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName, postData.productImageBase64 as string | undefined);
         if (canvasResult) {
           setResultImage(canvasResult);
           setWatermarkedResult(canvasResult);

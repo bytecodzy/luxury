@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { createZAI, isZAIAvailable, getZAIConfig } from '@/lib/zai'
 import { addWatermark } from '@/lib/watermark'
-import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
 
 type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864' | '1440x720' | '720x1440'
 
@@ -37,16 +35,26 @@ setInterval(() => {
 
 // ── Product image helpers ──────────────────────────────────────────
 
-function getProductImageBase64Local(imagePath: string): string | null {
+/**
+ * Fetch a local (public-dir) image via HTTP so it works on both
+ * local dev (Next.js serves /public) and Vercel (CDN serves assets).
+ */
+async function getProductImageBase64ViaHttp(imagePath: string): Promise<string | null> {
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
+    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
   try {
-    const fullPath = join(process.cwd(), 'public', imagePath)
-    if (!existsSync(fullPath)) return null
-    const buffer = readFileSync(fullPath)
-    const ext = imagePath.split('.').pop()?.toLowerCase() || 'jpg'
-    const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+    const response = await fetch(`${baseUrl}${imagePath}`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': '3BOXES-Internal/1.0' },
+    })
+    if (!response.ok) return null
+    const contentType = response.headers.get('content-type') || 'image/jpeg'
+    if (!contentType.startsWith('image/')) return null
+    const mimeType = contentType.split(';')[0].trim()
+    const buffer = Buffer.from(await response.arrayBuffer())
     return `data:${mimeType};base64,${buffer.toString('base64')}`
   } catch (err) {
-    console.error('[try-on] Failed to read local product image:', err)
+    console.error('[try-on] Failed to fetch product image via HTTP:', err)
     return null
   }
 }
@@ -101,27 +109,23 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
       return null
     }
   }
-  // Local path — try filesystem first, then HTTP on Vercel
-  const localResult = getProductImageBase64Local(imagePath)
-  if (localResult) return localResult
+  // Local path — fetch via HTTP (works on both local and Vercel)
+  const httpResult = await getProductImageBase64ViaHttp(imagePath)
+  if (httpResult) return httpResult
 
-  if (process.env.VERCEL || process.env.VERCEL_URL) {
+  // Last resort: try reading from filesystem directly (local dev only)
+  if (!process.env.VERCEL) {
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
-      if (!baseUrl) return null
-      const response = await fetch(`${baseUrl}${imagePath}`, {
-        signal: AbortSignal.timeout(10000),
-        headers: { 'User-Agent': '3BOXES-Internal/1.0' },
-      })
-      if (!response.ok) return null
-      const contentType = response.headers.get('content-type') || 'image/jpeg'
-      if (!contentType.startsWith('image/')) return null
-      const mimeType = contentType.split(';')[0].trim()
-      const buffer = Buffer.from(await response.arrayBuffer())
+      const { existsSync, readFileSync } = await import('fs')
+      const { join } = await import('path')
+      const fullPath = join(process.cwd(), 'public', imagePath)
+      if (!existsSync(fullPath)) return null
+      const buffer = readFileSync(fullPath)
+      const ext = imagePath.split('.').pop()?.toLowerCase() || 'jpg'
+      const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
       return `data:${mimeType};base64,${buffer.toString('base64')}`
     } catch (err) {
-      console.error('[try-on] Failed to fetch local image via CDN:', err)
-      return null
+      console.error('[try-on] Failed to read local product image from filesystem:', err)
     }
   }
 
@@ -223,12 +227,18 @@ function delay(ms: number): Promise<void> {
 // ── POST /api/try-on ───────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  // Parse body outside try so it's available in catch for canvas fallback
+  let body: any
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
+  }
+
   try {
     const isVercel = !!process.env.VERCEL
     const proxyUrl = process.env.ZAI_PROXY_URL
 
-    // Parse body once
-    const body = await request.json()
     const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
 
     if (!productId || !selfieData) {
@@ -279,26 +289,19 @@ export async function POST(request: NextRequest) {
             const proxyResult = await proxyResponse.json()
             console.log('[try-on] Proxy success, jobId:', proxyResult.jobId, 'status:', proxyResult.status)
 
-            // Store proxy jobId mapping for GET polling
-            if (proxyResult.jobId) {
-              const localJobId = `proxy_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
-              jobs.set(localJobId, {
-                status: 'processing',
-                createdAt: Date.now(),
-                categorySlug: clientCategorySlug || '',
-                progress: 'Processing via AI service...',
-                proxyJobId: proxyResult.jobId,
-              })
-              // Return our local jobId that maps to the proxy's jobId
-              return NextResponse.json({
-                jobId: localJobId,
-                status: 'processing',
-                productName: proxyResult.productName || clientProductName,
-                categorySlug: proxyResult.categorySlug || clientCategorySlug,
-              })
-            }
-
-            return NextResponse.json(proxyResult, { status: 200 })
+            // Return the proxy's jobId directly to the client.
+            // On Vercel, serverless function instances are stateless —
+            // a local jobs Map won't persist between requests.
+            // By returning the proxy's own jobId, the client can poll
+            // and the GET handler will forward the request to the proxy.
+            return NextResponse.json({
+              ...proxyResult,
+              // Ensure these fields are always present
+              jobId: proxyResult.jobId,
+              status: proxyResult.status || 'processing',
+              productName: proxyResult.productName || clientProductName,
+              categorySlug: proxyResult.categorySlug || clientCategorySlug,
+            })
           } else {
             const errorText = await proxyResponse.text().catch(() => 'unknown error')
             console.error(`[try-on] Proxy returned ${proxyResponse.status}: ${errorText.substring(0, 300)}`)
@@ -333,12 +336,26 @@ export async function POST(request: NextRequest) {
 
       // Strategy 3: Canvas fallback — AI service unavailable
       console.log('[try-on] All AI strategies unavailable on Vercel, returning canvas mode')
+
+      // Resolve product image to base64 so the client can use it directly in canvas fallback
+      // (avoids CORS issues when loading product images client-side)
+      let canvasProductImageBase64: string | null = null
+      try {
+        if (productImageUrl) {
+          canvasProductImageBase64 = await getProductImageBase64(productImageUrl)
+        }
+      } catch (imgErr) {
+        console.error('[try-on] Failed to resolve product image base64 for canvas mode:', imgErr)
+      }
+
       return NextResponse.json({
         mode: 'canvas',
-        message: 'AI style preview mode — creating style overlay',
+        message: 'AI style preview is temporarily unavailable. Showing style overlay with product image instead.',
         code: 'AI_CANVAS_MODE',
         productName: clientProductName,
         categorySlug: clientCategorySlug,
+        productImageBase64: canvasProductImageBase64,
+        productImageUrl: productImageUrl || null,
       }, { status: 200 })
     }
 
@@ -351,10 +368,21 @@ export async function POST(request: NextRequest) {
     }
     const message = error instanceof Error ? error.message : 'Unexpected error occurred'
     if (message.includes('AI_STYLE_SERVICE_UNAVAILABLE') || message.includes('.z-ai-config') || message.includes('not configured')) {
+      // Try to resolve product image base64 for canvas fallback
+      let errorProductImageBase64: string | null = null
+      try {
+        const imgUrl = body?.productImageUrl
+        if (imgUrl) {
+          errorProductImageBase64 = await getProductImageBase64(imgUrl)
+        }
+      } catch {}
+
       return NextResponse.json({
         mode: 'canvas',
-        message: 'AI style preview mode — creating style overlay',
+        message: 'AI style preview is not configured. Showing style overlay with product image instead.',
         code: 'AI_CANVAS_MODE',
+        productImageBase64: errorProductImageBase64,
+        productImageUrl: body?.productImageUrl || null,
       }, { status: 200 })
     }
     return NextResponse.json({ error: 'An unexpected error occurred while generating your style preview.' }, { status: 500 })
@@ -367,10 +395,17 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
   const aiCheck = await isZAIAvailable()
 
   if (!aiCheck.available) {
+    console.log('[try-on] AI unavailable:', aiCheck.reason)
+    // Try to resolve product image for the canvas fallback
+    const fallbackProductImage = body.productImageUrl
+      ? await getProductImageBase64(body.productImageUrl).catch(() => null)
+      : null
     return NextResponse.json({
       mode: 'canvas',
-      message: 'AI style preview mode — creating style overlay',
+      message: 'AI style preview is temporarily unavailable. Showing style overlay with product image instead.',
       code: 'AI_CANVAS_MODE',
+      productImageBase64: fallbackProductImage,
+      productImageUrl: body.productImageUrl || null,
     }, { status: 200 })
   }
 

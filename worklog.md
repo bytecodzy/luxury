@@ -85,3 +85,31 @@ Stage Summary:
 - Correct Vercel project (3boxes-luxury) now being deployed to
 - Production URL: https://my-project-sepia-seven-42.vercel.app/
 - AI proxy accessible at preview URL via XTransformPort=3030
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Fix AI try-on feature for production (Vercel) and Android app
+
+Work Log:
+- Analyzed the complete AI try-on architecture: client → Vercel API → proxy → ai-proxy → ZAI SDK
+- Discovered the preview proxy URL (preview-chat-97b5f242-82cb-4d42-801a-52a64cae9d47.space-z.ai) IS accessible from Vercel
+- Fixed /api/try-on/route.ts: Return proxy's jobId directly instead of creating a local mapping (Vercel serverless is stateless)
+- Fixed /api/try-on/route.ts: Include productImageBase64 in canvas mode responses for better client-side fallback
+- Fixed /api/config/route.ts: Auto-detect Caddy gateway for local sandbox proxy URL
+- Fixed product-detail.tsx: generateCanvasFallback now accepts optional productImageBase64 parameter to avoid CORS issues
+- Fixed product-detail.tsx: Removed crossOrigin='anonymous' from canvas image loading (caused CORS preflight failures)
+- Fixed product-detail.tsx: Better error handling - selfie load failure creates minimal fallback instead of returning null
+- Fixed try-on-dialog.tsx: Added deprecation notice for stale standalone component
+- Deployed to correct Vercel project (3boxes-luxury → https://my-project-sepia-seven-42.vercel.app)
+- Verified production API: try-on/status returns available, proxy is reachable from Vercel
+- Tested full try-on flow on production: POST creates job via proxy, polling works correctly
+
+Stage Summary:
+- AI try-on feature now works on Vercel production via the preview proxy URL
+- The proxy at preview-chat-97b5f242-82cb-4d42-801a-52a64cae9d47.space-z.ai is reachable from Vercel
+- When proxy is available, full AI image generation works (VLM analysis + image edit/create)
+- When proxy is unavailable, canvas fallback with product image overlay works
+- The flow: Client → Vercel API → Proxy → ai-proxy (sandbox) → ZAI SDK → returns result
+- Product image base64 is included in canvas mode responses to avoid CORS issues
+- Deployment URL: https://my-project-sepia-seven-42.vercel.app

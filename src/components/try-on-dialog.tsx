@@ -1,5 +1,18 @@
 'use client';
 
+/**
+ * @deprecated This standalone TryOnDialog is STALE and should NOT be used.
+ * The active TryOnDialog is embedded in product-detail.tsx which has:
+ *   - productImageBase64 support for CORS-free canvas fallback
+ *   - Better error handling and selfieImg loading
+ *   - onBackgroundJob / onResetBackground callbacks
+ *   - watermarkedResult, strategy, faceScore, productScore state
+ *   - AI style suggestions in the result step
+ *
+ * Do not import or use this component. It will be removed in a future cleanup.
+ * If you need TryOnDialog, use the one in product-detail.tsx instead.
+ */
+
 import { useState, useRef, useCallback } from 'react';
 import {
   Dialog,
