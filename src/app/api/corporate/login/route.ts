@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { db } from '@/lib/db';
-import { createSession, generateToken } from '@/lib/sessions';
+import { createSession } from '@/lib/sessions';
 import { getClientIp, getUserAgent, parseDeviceInfo } from '@/lib/auth-helper';
+
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
 
 export async function POST(request: NextRequest) {
   try {
@@ -109,24 +112,40 @@ export async function POST(request: NextRequest) {
     const userAgentStr = getUserAgent(request);
     const deviceInfo = parseDeviceInfo(userAgentStr);
 
-    // Create session with IP + user agent tracking
-    const token = generateToken();
-    await createSession(
-      token,
+    // Generate JWT token (works on Vercel serverless without DB lookup)
+    const jwtToken = jwt.sign(
       {
-        id: user.id,
+        type: 'session',
+        userId: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
-        avatar: user.avatar,
-        isActive: user.isActive,
-        approvalStatus: user.approvalStatus,
-        emailVerified: user.emailVerified,
-        phoneVerified: user.phoneVerified,
-        twoFactorEnabled: user.twoFactorEnabled,
       },
-      { ipAddress, userAgent: userAgentStr, deviceInfo }
+      JWT_SECRET,
+      { expiresIn: '7d' }
     );
+
+    // Create session with IP + user agent tracking
+    try {
+      await createSession(
+        jwtToken,
+        {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          avatar: user.avatar,
+          isActive: user.isActive,
+          approvalStatus: user.approvalStatus,
+          emailVerified: user.emailVerified,
+          phoneVerified: user.phoneVerified,
+          twoFactorEnabled: user.twoFactorEnabled,
+        },
+        { ipAddress, userAgent: userAgentStr, deviceInfo }
+      );
+    } catch (sessionError) {
+      console.warn('[Auth Corporate] DB session creation failed, JWT-only auth will be used:', sessionError);
+    }
 
     // Update user's last login info
     await db.user.update({
@@ -177,7 +196,7 @@ export async function POST(request: NextRequest) {
         lastLoginAt: user.lastLoginAt,
         createdAt: user.createdAt,
       },
-      token,
+      token: jwtToken,
       corporateAccount: user.corporateAccount
         ? {
             id: user.corporateAccount.id,

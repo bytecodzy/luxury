@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { db } from '@/lib/db';
-import { createSession, generateToken } from '@/lib/sessions';
+import { createSession } from '@/lib/sessions';
 
 const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
 
@@ -112,9 +112,23 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Generate a JWT token that works on Vercel serverless (no DB needed for verification)
+      // This ensures authentication survives cold starts and DB connection issues
+      const jwtToken = jwt.sign(
+        {
+          type: 'session',
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      // Also create a DB session for lookup-based auth (secondary mechanism)
       try {
-        const token = generateToken();
-        await createSession(token, {
+        await createSession(jwtToken, {
           id: user.id,
           email: user.email,
           name: user.name,
@@ -126,28 +140,27 @@ export async function POST(request: NextRequest) {
           phoneVerified: user.phoneVerified,
           twoFactorEnabled: user.twoFactorEnabled,
         });
-
-        return NextResponse.json({
-          user: {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            role: user.role,
-            avatar: user.avatar,
-            phone: user.phone,
-            isActive: user.isActive,
-            emailVerified: user.emailVerified,
-            phoneVerified: user.phoneVerified,
-            twoFactorEnabled: user.twoFactorEnabled,
-            approvalStatus: user.approvalStatus,
-            createdAt: user.createdAt,
-          },
-          token,
-        });
       } catch (sessionError) {
-        console.error('[Auth] Session creation failed, trying demo fallback:', sessionError);
-        // Fall through to demo fallback
+        console.warn('[Auth] DB session creation failed, JWT-only auth will be used:', sessionError);
       }
+
+      return NextResponse.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          avatar: user.avatar,
+          phone: user.phone,
+          isActive: user.isActive,
+          emailVerified: user.emailVerified,
+          phoneVerified: user.phoneVerified,
+          twoFactorEnabled: user.twoFactorEnabled,
+          approvalStatus: user.approvalStatus,
+          createdAt: user.createdAt,
+        },
+        token: jwtToken,
+      });
     }
 
     // Demo fallback: when DB is unavailable or session creation fails

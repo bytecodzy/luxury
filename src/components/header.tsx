@@ -10,10 +10,12 @@ import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import { LocaleSwitcher, LocaleSwitcherMobile } from '@/components/locale-switcher';
+import { usePWAInstall } from '@/hooks/usePWAInstall';
 
 export function Header() {
   const { searchQuery, setSearch, setView, cartItems, setCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder } = useStore();
   const { t } = useTranslation();
+  const { canInstall, promptInstall } = usePWAInstall();
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
@@ -107,16 +109,31 @@ export function Header() {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            {/* Get App Button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.open('/?XTransformPort=3002', '_blank')}
-              className="hidden lg:flex items-center gap-1.5 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/60"
-            >
-              <Smartphone className="h-4 w-4" />
-              <span className="text-xs font-medium">Get App</span>
-            </Button>
+            {/* Get App / Install Button */}
+            {canInstall ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => promptInstall()}
+                className="hidden lg:flex items-center gap-1.5 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/60"
+              >
+                <Download className="h-4 w-4" />
+                <span className="text-xs font-medium">Install App</span>
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const section = document.getElementById('app-download');
+                  section?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="hidden lg:flex items-center gap-1.5 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/60"
+              >
+                <Smartphone className="h-4 w-4" />
+                <span className="text-xs font-medium">Get App</span>
+              </Button>
+            )}
 
             {/* Locale Switcher (Desktop) */}
             <LocaleSwitcher />
@@ -340,14 +357,19 @@ export function Header() {
                   </button>
                   <button
                     onClick={() => {
-                      window.open('/?XTransformPort=3002', '_blank');
+                      if (canInstall) {
+                        promptInstall();
+                      } else {
+                        const section = document.getElementById('app-download');
+                        section?.scrollIntoView({ behavior: 'smooth' });
+                      }
                       setMobileMenuOpen(false);
                     }}
                     className="rounded-md px-4 py-3 text-left text-amber-100 font-medium transition-colors bg-amber-600/10 border border-amber-500/30 hover:bg-amber-600/20 flex items-center gap-2"
                   >
-                    <Smartphone className="h-5 w-5" />
-                    Get the App
-                    <Download className="h-3 w-3 text-amber-400/60" />
+                    {canInstall ? <Download className="h-5 w-5" /> : <Smartphone className="h-5 w-5" />}
+                    {canInstall ? 'Install App' : 'Get the App'}
+                    {!canInstall && <Download className="h-3 w-3 text-amber-400/60" />}
                   </button>
 
                   {/* Mobile Locale Switcher */}

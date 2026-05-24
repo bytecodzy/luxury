@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionAsync, createSession, generateToken } from '@/lib/sessions';
+import { getSessionAsync, createSession } from '@/lib/sessions';
 import { db } from '@/lib/db';
+import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
 
 /**
  * Verify a TOTP code against a secret.
@@ -115,20 +118,35 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Create session
-      const token = generateToken();
-      await createSession(token, {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        avatar: user.avatar,
-        isActive: user.isActive,
-        approvalStatus: user.approvalStatus,
-        emailVerified: user.emailVerified,
-        phoneVerified: user.phoneVerified,
-        twoFactorEnabled: user.twoFactorEnabled,
-      });
+      // Create session with JWT token (works on Vercel serverless without DB lookup)
+      const jwtToken = jwt.sign(
+        {
+          type: 'session',
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      try {
+        await createSession(jwtToken, {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          avatar: user.avatar,
+          isActive: user.isActive,
+          approvalStatus: user.approvalStatus,
+          emailVerified: user.emailVerified,
+          phoneVerified: user.phoneVerified,
+          twoFactorEnabled: user.twoFactorEnabled,
+        });
+      } catch (sessionError) {
+        console.warn('[Auth 2FA] DB session creation failed, JWT-only auth will be used:', sessionError);
+      }
 
       return NextResponse.json({
         user: {
@@ -145,7 +163,8 @@ export async function POST(request: NextRequest) {
           approvalStatus: user.approvalStatus,
           createdAt: user.createdAt,
         },
-        token,
+        token: jwtToken,
+        verified: true,
       });
     }
 

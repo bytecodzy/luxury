@@ -2,6 +2,8 @@ import { db } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
 
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
+
 // In-memory session cache for fast lookups
 const sessionCache = new Map<string, { userId: string; expiresAt: Date; id: string; email: string; name: string; role: string }>();
 
@@ -11,14 +13,17 @@ const sessionCache = new Map<string, { userId: string; expiresAt: Date; id: stri
 export { sessionCache as sessions };
 
 // Clean expired sessions from cache every 5 minutes
-setInterval(() => {
-  const now = new Date();
-  for (const [token, session] of sessionCache.entries()) {
-    if (session.expiresAt < now) {
-      sessionCache.delete(token);
+// Only run in development — in Vercel serverless, each invocation starts fresh
+if (process.env.NODE_ENV !== 'production') {
+  setInterval(() => {
+    const now = new Date();
+    for (const [token, session] of sessionCache.entries()) {
+      if (session.expiresAt < now) {
+        sessionCache.delete(token);
+      }
     }
-  }
-}, 5 * 60 * 1000);
+  }, 5 * 60 * 1000);
+}
 
 export interface SessionUser {
   id: string;
@@ -130,8 +135,6 @@ export async function getSessionAsync(
 
   // Try JWT verification (works on Vercel without DB)
   try {
-    const jwt = require('jsonwebtoken');
-    const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
     const decoded = jwt.verify(token, JWT_SECRET) as Record<string, unknown>;
 
     if (decoded && decoded.type === 'session' && decoded.userId) {
@@ -214,13 +217,31 @@ export async function destroySession(token: string): Promise<void> {
 }
 
 /**
- * Generate a new session token.
+ * Generate a new session token (UUID, for legacy compatibility).
+ * Prefer generateSessionJWT() for Vercel/serverless deployments.
  */
 export function generateToken(): string {
   return uuidv4();
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
+/**
+ * Generate a JWT session token that works on Vercel serverless
+ * without requiring DB lookups for verification.
+ * Contains user identity embedded in the token payload.
+ */
+export function generateSessionJWT(user: { id: string; email: string; name: string; role: string }): string {
+  return jwt.sign(
+    {
+      type: 'session',
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+}
 
 export interface TokenPair {
   accessToken: string;

@@ -413,8 +413,8 @@ function TryOnDialog({
   const [strategy, setStrategy] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
-  const [faceScore, setFaceScore] = useState<number | null>(null);
-  const [productScore, setProductScore] = useState<number | null>(null);
+  const [colorAccuracy, setColorAccuracy] = useState<number | null>(null);
+  const [faceAccuracy, setFaceAccuracy] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
@@ -427,8 +427,8 @@ function TryOnDialog({
     setStrategy(null);
     setSuggestions([]);
     setAddedIds(new Set());
-    setFaceScore(null);
-    setProductScore(null);
+    setColorAccuracy(null);
+    setFaceAccuracy(null);
     setProgressMessage('');
     onResetBackground();
   }, [onResetBackground]);
@@ -567,8 +567,8 @@ function TryOnDialog({
                     setResultImage(pollData.imageUrl);
                     setWatermarkedResult(pollData.imageUrl);
                     setStrategy(pollData.strategy || 'ai-proxy');
-                    if (pollData.faceScore) setFaceScore(pollData.faceScore);
-                    if (pollData.productScore) setProductScore(pollData.productScore);
+                    if (pollData.colorAccuracy) setColorAccuracy(pollData.colorAccuracy);
+                    if (pollData.faceAccuracy) setFaceAccuracy(pollData.faceAccuracy);
                     if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
                     setStep('result');
                     onBackgroundJob('result');
@@ -673,8 +673,8 @@ function TryOnDialog({
           setResultImage(pollData.imageUrl);
           setWatermarkedResult(pollData.imageUrl);
           setStrategy(pollData.strategy || 'ai-generation');
-          if (pollData.faceScore) setFaceScore(pollData.faceScore);
-          if (pollData.productScore) setProductScore(pollData.productScore);
+          if (pollData.colorAccuracy) setColorAccuracy(pollData.colorAccuracy);
+          if (pollData.faceAccuracy) setFaceAccuracy(pollData.faceAccuracy);
           if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
           setStep('result');
           onBackgroundJob('result');
@@ -978,14 +978,14 @@ function TryOnDialog({
                   <Crown className="h-3.5 w-3.5 text-amber-400/60" />
                   <div className="flex-1">
                     <p className="text-[10px] font-semibold text-amber-200/70">
-                      AI Strategy: {strategy === 'edit-both' ? 'Dual-Image Edit' : strategy === 'edit-selfie' ? 'Selfie-Edit' : strategy === 'edit-product' ? 'Product-Edit' : strategy === 'create-detailed' ? 'AI Generate' : strategy}
+                      AI Strategy: {strategy === 'edit-both' ? 'Dual-Image Edit' : strategy === 'edit-selfie' ? 'Selfie-Edit + Verify' : strategy === 'edit-selfie-refined' ? 'Selfie-Edit + Refined' : strategy === 'edit-product' ? 'Product-Edit + Verify' : strategy === 'edit-product-refined' ? 'Product-Edit + Refined' : strategy === 'create-text' ? 'AI Generate' : strategy === 'canvas-overlay' ? 'Style Overlay' : strategy}
                     </p>
                     <div className="flex items-center gap-3 mt-0.5">
-                      {faceScore !== null && (
-                        <span className="text-[9px] text-amber-200/40">Face Match: {faceScore}/10</span>
+                      {faceAccuracy !== null && (
+                        <span className="text-[9px] text-amber-200/40">Face Match: {faceAccuracy}/10</span>
                       )}
-                      {productScore !== null && (
-                        <span className="text-[9px] text-amber-200/40">Product Match: {productScore}/10</span>
+                      {colorAccuracy !== null && (
+                        <span className="text-[9px] text-amber-200/40">Color Match: {colorAccuracy}/10</span>
                       )}
                     </div>
                   </div>

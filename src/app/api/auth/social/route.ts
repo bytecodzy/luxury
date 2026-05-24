@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { createSession, generateToken } from '@/lib/sessions';
+import { createSession } from '@/lib/sessions';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
 
 export async function POST(request: NextRequest) {
   try {
@@ -74,20 +77,35 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Create session
-      const token = generateToken();
-      await createSession(token, {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        avatar: user.avatar,
-        isActive: user.isActive,
-        approvalStatus: user.approvalStatus,
-        emailVerified: user.emailVerified,
-        phoneVerified: user.phoneVerified,
-        twoFactorEnabled: user.twoFactorEnabled,
-      });
+      // Generate JWT token (works on Vercel serverless without DB lookup)
+      const jwtToken = jwt.sign(
+        {
+          type: 'session',
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      try {
+        await createSession(jwtToken, {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          avatar: user.avatar,
+          isActive: user.isActive,
+          approvalStatus: user.approvalStatus,
+          emailVerified: user.emailVerified,
+          phoneVerified: user.phoneVerified,
+          twoFactorEnabled: user.twoFactorEnabled,
+        });
+      } catch (sessionError) {
+        console.warn('[Auth Social] DB session creation failed, JWT-only auth will be used:', sessionError);
+      }
 
       return NextResponse.json({
         user: {
@@ -105,7 +123,7 @@ export async function POST(request: NextRequest) {
           socialProvider: user.socialProvider,
           createdAt: user.createdAt,
         },
-        token,
+        token: jwtToken,
       });
     }
 
@@ -151,20 +169,35 @@ export async function POST(request: NextRequest) {
       }).catch(() => {}); // Ignore duplicate errors
     }
 
-    // Create session (auto-approved since it's a user role)
-    const token = generateToken();
-    await createSession(token, {
-      id: newUser.id,
-      email: newUser.email,
-      name: newUser.name,
-      role: newUser.role,
-      avatar: newUser.avatar,
-      isActive: newUser.isActive,
-      approvalStatus: newUser.approvalStatus,
-      emailVerified: newUser.emailVerified,
-      phoneVerified: newUser.phoneVerified,
-      twoFactorEnabled: newUser.twoFactorEnabled,
-    });
+    // Create session with JWT token (works on Vercel serverless without DB lookup)
+    const jwtToken = jwt.sign(
+      {
+        type: 'session',
+        userId: newUser.id,
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    try {
+      await createSession(jwtToken, {
+        id: newUser.id,
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+        avatar: newUser.avatar,
+        isActive: newUser.isActive,
+        approvalStatus: newUser.approvalStatus,
+        emailVerified: newUser.emailVerified,
+        phoneVerified: newUser.phoneVerified,
+        twoFactorEnabled: newUser.twoFactorEnabled,
+      });
+    } catch (sessionError) {
+      console.warn('[Auth Social] DB session creation failed for new user, JWT-only auth will be used:', sessionError);
+    }
 
     return NextResponse.json({
       user: {
@@ -182,7 +215,7 @@ export async function POST(request: NextRequest) {
         socialProvider: newUser.socialProvider,
         createdAt: newUser.createdAt,
       },
-      token,
+      token: jwtToken,
       isNewUser: true,
     });
   } catch (error) {

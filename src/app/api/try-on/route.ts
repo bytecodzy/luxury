@@ -1,37 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { createZAI, isZAIAvailable, getZAIConfig } from '@/lib/zai'
-import { addWatermark } from '@/lib/watermark'
-
-type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864' | '1440x720' | '720x1440'
-
-interface TryOnJob {
-  status: 'processing' | 'completed' | 'failed'
-  imageUrl?: string
-  productName?: string
-  categorySlug?: string
-  error?: string
-  createdAt: number
-  attempt?: number
-  strategy?: string
-  faceScore?: number
-  productScore?: number
-  suggestions?: any[]
-  progress?: string
-  proxyJobId?: string // If created via proxy, store proxy's jobId for polling
-}
-
-const jobs = new Map<string, TryOnJob>()
-
-// Clean up old jobs every 5 minutes
-setInterval(() => {
-  const now = Date.now()
-  for (const [id, job] of jobs) {
-    if (now - job.createdAt > 10 * 60 * 1000) {
-      jobs.delete(id)
-    }
-  }
-}, 5 * 60 * 1000)
+import { isZAIAvailable, getZAIConfig } from '@/lib/zai'
+import { createJob, getJob, runPipeline } from '@/lib/try-on-pipeline'
 
 // ── Product image helpers ──────────────────────────────────────────
 
@@ -147,15 +117,6 @@ function getProxyHeaders(proxyUrl: string): Record<string, string> {
   return headers
 }
 
-/**
- * Build the proxy URL for a given path.
- *
- * The .space-z.ai gateway routes ALL requests to the sandbox's Next.js
- * server (port 3000), which has direct access to the ZAI SDK.
- * We do NOT use XTransformPort here because the external gateway
- * does not support it — adding it causes the gateway to return an
- * HTML error page instead of proxying the request.
- */
 function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<string, string>): string {
   const base = proxyUrl.replace(/\/+$/, '')
   if (queryParams && Object.keys(queryParams).length > 0) {
@@ -163,60 +124,6 @@ function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<stri
     return `${base}${path}?${params.toString()}`
   }
   return `${base}${path}`
-}
-
-// ── VLM Prompts ────────────────────────────────────────────────────
-
-const VLM_PERSON_PROMPT = `Describe this person for a virtual try-on in EXACT detail:
-- Face: shape, features, skin tone (exact shade like "warm olive" or "cool fair")
-- Hair: exact color, length, style
-- Body: build, height impression, visible clothing
-- Pose: how they are positioned in the frame
-Be extremely specific about all colors. 2-3 sentences.`
-
-const VLM_PRODUCT_PROMPT = `Describe this product in EXACT detail for a virtual try-on:
-- Type and category (e.g., "gold temple necklace", "maroon silk saree")
-- EXACT primary color (NOT just "red" — say "deep maroon red" or "burgundy wine red")
-- EXACT secondary/accent colors with the same specificity
-- Material and texture (e.g., "polished gold metal", "silk fabric with zari work")
-- Key design elements: patterns, stones, embellishments, engravings
-- Size and proportions relative to how it would appear on a person
-You MUST be extremely precise about every color — this is critical for accurate virtual try-on. 3-4 sentences.`
-
-const VLM_COMBINED_PROMPT = `I have TWO images for a virtual try-on:
-1) The FIRST image is a person's selfie
-2) The SECOND image is the product they want to try on
-
-Describe in precise detail:
-- The person's face features, skin tone, hair color/style, and body type
-- The product's EXACT colors (be hyper-specific — "deep maroon" not "red", "antique gold" not "gold"), materials, textures, and design details
-- How the product should look when worn on this specific person (position, scale, fit)
-
-CRITICAL: Be extremely precise about the product's colors and materials — the AI needs this to reproduce the exact product appearance. 3-4 sentences.`
-
-// ── Product placement helpers ──────────────────────────────────────
-
-function getProductPlacement(categorySlug: string, productName: string): string {
-  const n = productName.toLowerCase()
-  if (categorySlug === 'jewelry') {
-    if (n.includes('earring') || n.includes('jhumka') || n.includes('stud')) return 'wearing earrings on both earlobes'
-    if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple') || n.includes('haar') || n.includes('mala')) return 'wearing a necklace around the neck'
-    if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle') || n.includes('kada')) return 'wearing a bracelet on the wrist'
-    if (n.includes('ring')) return 'wearing a ring on the finger'
-    if (n.includes('set') || n.includes('bridal')) return 'wearing a matching jewelry set - necklace around the neck and earrings on both earlobes, with the pieces complementing each other perfectly'
-    return 'wearing the jewelry piece'
-  }
-  if (categorySlug === 'sarees') return 'draped in the saree in traditional Indian style with pallu elegantly over the left shoulder, matching blouse, properly pleated at the waist'
-  if (categorySlug === 'mens-shirts' || categorySlug === 'mens-shirts-t-shirts') return 'wearing the shirt on the torso'
-  if (categorySlug === 'watches') return 'wearing the watch on the left wrist'
-  if (categorySlug === 'fashion') return 'wearing the outfit'
-  return 'wearing the product'
-}
-
-function getImageSize(categorySlug: string): ImageSize {
-  if (['sarees', 'fashion', 'mens-shirts', 'mens-shirts-t-shirts'].includes(categorySlug)) return '768x1344'
-  if (categorySlug === 'home-living') return '1344x768'
-  return '864x1152'
 }
 
 // ── Category pairing for suggestions ───────────────────────────────
@@ -232,14 +139,6 @@ function getPairingCategory(categorySlug: string): string[] {
     'leather-goods': ['watches', 'fashion'],
   }
   return pairs[categorySlug] || ['jewelry']
-}
-
-// ── Rate-limit-aware delay ─────────────────────────────────────────
-
-const API_CALL_DELAY = 1500 // 1.5s between API calls to respect 2 QPS limit
-
-function delay(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms))
 }
 
 // ── POST /api/try-on ───────────────────────────────────────────────
@@ -300,21 +199,14 @@ export async function POST(request: NextRequest) {
             method: 'POST',
             headers: proxyHeaders,
             body: JSON.stringify(proxyBody),
-            signal: AbortSignal.timeout(90000), // 90s timeout for proxy (image gen takes time)
+            signal: AbortSignal.timeout(90000), // 90s timeout for proxy
           })
 
           if (proxyResponse.ok) {
             const proxyResult = await proxyResponse.json()
             console.log('[try-on] Proxy success, jobId:', proxyResult.jobId, 'status:', proxyResult.status)
-
-            // Return the proxy's jobId directly to the client.
-            // On Vercel, serverless function instances are stateless —
-            // a local jobs Map won't persist between requests.
-            // By returning the proxy's own jobId, the client can poll
-            // and the GET handler will forward the request to the proxy.
             return NextResponse.json({
               ...proxyResult,
-              // Ensure these fields are always present
               jobId: proxyResult.jobId,
               status: proxyResult.status || 'processing',
               productName: proxyResult.productName || clientProductName,
@@ -340,9 +232,6 @@ export async function POST(request: NextRequest) {
           const aiCheck = await isZAIAvailable()
           if (aiCheck.available) {
             console.log('[try-on] Vercel: ZAI SDK available! Processing AI generation directly')
-            // Don't return early — fall through to the main AI processing code below
-            // by jumping past the Vercel canvas fallback
-            // We'll handle this by continuing to the non-Vercel code path
             return await handleLocalAIGeneration(body, isVercel)
           } else {
             console.log('[try-on] Vercel: ZAI SDK not reachable:', aiCheck.reason)
@@ -355,8 +244,6 @@ export async function POST(request: NextRequest) {
       // Strategy 3: Canvas fallback — AI service unavailable
       console.log('[try-on] All AI strategies unavailable on Vercel, returning canvas mode')
 
-      // Resolve product image to base64 so the client can use it directly in canvas fallback
-      // (avoids CORS issues when loading product images client-side)
       let canvasProductImageBase64: string | null = null
       try {
         if (productImageUrl) {
@@ -386,7 +273,6 @@ export async function POST(request: NextRequest) {
     }
     const message = error instanceof Error ? error.message : 'Unexpected error occurred'
     if (message.includes('AI_STYLE_SERVICE_UNAVAILABLE') || message.includes('.z-ai-config') || message.includes('not configured')) {
-      // Try to resolve product image base64 for canvas fallback
       let errorProductImageBase64: string | null = null
       try {
         const imgUrl = body?.productImageUrl
@@ -414,7 +300,6 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
 
   if (!aiCheck.available) {
     console.log('[try-on] AI unavailable:', aiCheck.reason)
-    // Try to resolve product image for the canvas fallback
     const fallbackProductImage = body.productImageUrl
       ? await getProductImageBase64(body.productImageUrl).catch(() => null)
       : null
@@ -572,16 +457,21 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
 
   const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
 
-  jobs.set(jobId, {
-    status: 'processing',
-    createdAt: Date.now(),
+  // Create job using the pipeline module
+  createJob(jobId, {
     categorySlug: product.category.slug,
-    attempt: 1,
-    progress: 'Analyzing your photo and product...',
+    productName: product.name,
   })
 
-  backgroundProcess(jobId, product.name, product.category.slug, selfieData, productImageBase64, suggestionsPromise)
-    .catch((err) => console.error('[try-on] Background job failed:', err))
+  // Start the pipeline in the background
+  runPipeline({
+    jobId,
+    productName: product.name,
+    categorySlug: product.category.slug,
+    selfieData,
+    productImageBase64,
+    suggestionsPromise,
+  }).catch((err) => console.error('[try-on] Pipeline failed:', err))
 
   return NextResponse.json({
     jobId,
@@ -598,7 +488,7 @@ export async function GET(request: NextRequest) {
   const jobId = searchParams.get('jobId')
   if (!jobId) return NextResponse.json({ error: 'Job ID required' }, { status: 400 })
 
-  const job = jobs.get(jobId)
+  const job = getJob(jobId)
 
   if (!job) {
     // Job not found locally — might be on the proxy
@@ -606,7 +496,6 @@ export async function GET(request: NextRequest) {
     if (proxyUrl) {
       try {
         const proxyHeaders = getProxyHeaders(proxyUrl)
-        
         const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on', { jobId: jobId })
         const proxyResponse = await fetch(proxyFetchUrl, {
           headers: proxyHeaders,
@@ -628,44 +517,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Job not found' }, { status: 404 })
   }
 
-  // If this job has a proxyJobId, poll the proxy for status
-  if (job.proxyJobId) {
-    const proxyUrl = process.env.ZAI_PROXY_URL
-    if (proxyUrl) {
-      try {
-        const proxyHeaders = getProxyHeaders(proxyUrl)
-        const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on', { jobId: job.proxyJobId! })
-        const proxyResponse = await fetch(proxyFetchUrl, {
-          headers: proxyHeaders,
-          signal: AbortSignal.timeout(15000),
-        })
-
-        if (proxyResponse.ok) {
-          const proxyResult = await proxyResponse.json()
-          // Update local job status from proxy
-          if (proxyResult.status === 'completed') {
-            job.status = 'completed'
-            job.imageUrl = proxyResult.imageUrl
-            job.productName = proxyResult.productName
-            job.strategy = proxyResult.strategy
-            job.faceScore = proxyResult.faceScore
-            job.productScore = proxyResult.productScore
-            job.suggestions = proxyResult.suggestions
-            job.progress = 'Complete!'
-          } else if (proxyResult.status === 'failed') {
-            job.status = 'failed'
-            job.error = proxyResult.error
-          } else {
-            job.progress = proxyResult.progress || job.progress
-          }
-        }
-      } catch (proxyError) {
-        console.error('[try-on] GET proxy poll failed:', proxyError)
-        // Continue with local job status
-      }
-    }
-  }
-
   return NextResponse.json({
     jobId,
     status: job.status,
@@ -673,291 +524,12 @@ export async function GET(request: NextRequest) {
     productName: job.productName,
     categorySlug: job.categorySlug,
     error: job.error,
-    attempt: job.attempt,
     strategy: job.strategy,
-    faceScore: job.faceScore,
-    productScore: job.productScore,
+    colorAccuracy: job.colorAccuracy,
+    faceAccuracy: job.faceAccuracy,
+    pipelinePhase: job.pipelinePhase,
+    totalPasses: job.totalPasses,
     suggestions: job.suggestions,
     progress: job.progress,
   })
-}
-
-// ── VLM Analysis Helper ────────────────────────────────────────────
-
-async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs = 30000): Promise<string> {
-  try {
-    const result = await Promise.race([
-      zai.chat.completions.createVision({
-        model: 'glm-4v-plus',
-        messages: [{ role: 'user', content: [
-          { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: imageUrl } },
-        ]}],
-        thinking: { type: 'disabled' },
-      }),
-      new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
-    ])
-    return result ? (result.choices[0]?.message?.content || '') : ''
-  } catch (err) {
-    console.error('[try-on] VLM analysis failed:', (err as Error).message?.substring(0, 200))
-    return ''
-  }
-}
-
-/**
- * VLM analysis with BOTH selfie and product images in a single call.
- * This provides the AI with full context of both the person and the product,
- * enabling a much more accurate combined description for try-on.
- */
-async function vlmAnalyzeCombined(zai: any, selfieUrl: string, productUrl: string, timeoutMs = 45000): Promise<string> {
-  try {
-    const result = await Promise.race([
-      zai.chat.completions.createVision({
-        model: 'glm-4v-plus',
-        messages: [{ role: 'user', content: [
-          { type: 'text', text: VLM_COMBINED_PROMPT },
-          { type: 'image_url', image_url: { url: selfieUrl } },
-          { type: 'image_url', image_url: { url: productUrl } },
-        ]}],
-        thinking: { type: 'disabled' },
-      }),
-      new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
-    ])
-    return result ? (result.choices[0]?.message?.content || '') : ''
-  } catch (err) {
-    console.error('[try-on] VLM combined analysis failed:', (err as Error).message?.substring(0, 200))
-    return ''
-  }
-}
-
-// ── Safe image generation wrappers ─────────────────────────────────
-
-async function safeImageEdit(zai: any, params: { prompt: string; images: { url: string }[]; size: ImageSize }): Promise<string | null> {
-  try {
-    const response = await zai.images.generations.edit({
-      prompt: params.prompt,
-      images: params.images,
-      size: params.size,
-    } as any)
-
-    if (response?.data?.[0]?.base64) {
-      return `data:image/png;base64,${response.data[0].base64}`
-    }
-    if (response?.data?.[0]?.url && !response.data[0].base64) {
-      console.warn('[try-on] Edit API returned URL instead of base64, SDK download may have failed')
-      return null
-    }
-    if (!response?.data || !Array.isArray(response.data) || response.data.length === 0) {
-      console.warn('[try-on] Edit API returned unexpected response:', JSON.stringify(response)?.substring(0, 200))
-      return null
-    }
-    return null
-  } catch (err) {
-    const msg = (err as Error).message?.substring(0, 200) || 'Unknown error'
-    console.error('[try-on] Image edit failed:', msg)
-    return null
-  }
-}
-
-async function safeImageCreate(zai: any, params: { prompt: string; size: ImageSize }): Promise<string | null> {
-  try {
-    const response = await zai.images.generations.create({
-      prompt: params.prompt,
-      size: params.size,
-    })
-
-    if (response?.data?.[0]?.base64) {
-      return `data:image/png;base64,${response.data[0].base64}`
-    }
-    if (response?.data?.[0]?.url && !response.data[0].base64) {
-      console.warn('[try-on] Create API returned URL instead of base64, SDK download may have failed')
-      return null
-    }
-    if (!response?.data || !Array.isArray(response.data)) {
-      console.warn('[try-on] Create API returned unexpected response:', JSON.stringify(response)?.substring(0, 200))
-      return null
-    }
-    return null
-  } catch (err) {
-    const msg = (err as Error).message?.substring(0, 200) || 'Unknown error'
-    console.error('[try-on] Image create failed:', msg)
-    return null
-  }
-}
-
-// ── Main pipeline ──────────────────────────────────────────────────
-
-interface GenResult {
-  imageUrl: string
-  strategy: string
-  faceScore: number
-  productScore: number
-}
-
-async function backgroundProcess(
-  jobId: string, productName: string, categorySlug: string,
-  selfieData: string, productImageBase64: string,
-  suggestionsPromise: Promise<any>,
-) {
-  const job = jobs.get(jobId)
-  if (!job) return
-
-  try {
-    // Step 1: Fetch suggestions early
-    const suggestions = await suggestionsPromise
-    const formattedSuggestions = suggestions.map((s: any) => ({
-      id: s.id,
-      name: s.name,
-      price: s.price,
-      image: JSON.parse(s.images || '[]')[0] || '/images/placeholder.jpg',
-      category: s.category?.name || '',
-      categorySlug: s.category?.slug || '',
-    }))
-    if (job) job.suggestions = formattedSuggestions
-
-    // Step 2: VLM analysis — combined analysis with both images, plus individual analyses
-    if (job) job.progress = 'AI is analyzing your photo and product...'
-    console.log(`[try-on] Starting VLM analysis for job ${jobId}`)
-
-    const zai = await createZAI()
-
-    // Combined VLM analysis (both images together — best context)
-    const combinedDesc = await vlmAnalyzeCombined(zai, selfieData, productImageBase64)
-    console.log(`[try-on] Combined desc: ${combinedDesc.substring(0, 150)}...`)
-
-    await delay(API_CALL_DELAY)
-
-    // Individual analyses as fallbacks
-    const personDesc = await vlmAnalyze(zai, VLM_PERSON_PROMPT, selfieData)
-    console.log(`[try-on] Person desc: ${personDesc.substring(0, 100)}...`)
-
-    await delay(API_CALL_DELAY)
-
-    const productDesc = await vlmAnalyze(zai, VLM_PRODUCT_PROMPT, productImageBase64)
-    console.log(`[try-on] Product desc: ${productDesc.substring(0, 100)}...`)
-
-    // Step 3: Try generation strategies — attempt ALL and keep best
-    const results: GenResult[] = []
-    const placement = getProductPlacement(categorySlug, productName)
-    const size = getImageSize(categorySlug)
-
-    // Use the best available description for the product
-    const bestProductDesc = productDesc || combinedDesc || 'a luxury fashion item'
-    const bestPersonDesc = personDesc || combinedDesc || 'a person'
-
-    // Strategy 1: Edit selfie with VLM combined description (BEST — preserves face + accurate product)
-    if (job) { job.attempt = 1; job.progress = 'Creating your virtual try-on...' }
-    await delay(API_CALL_DELAY)
-    console.log(`[try-on] Strategy 1: edit-selfie-combined`)
-    const s1Result = await safeImageEdit(zai, {
-      prompt: `Professional fashion photograph of this EXACT person ${placement}. PRODUCT TO APPLY: "${productName}". ${combinedDesc || bestProductDesc}. CRITICAL INSTRUCTIONS: 1) Keep this person's EXACT face, skin tone, hair, and body — do NOT alter them at all. 2) Apply the product with its EXACT colors, materials, texture, and design — match every color precisely as described. 3) The product must look realistic, natural, and properly fitted on this person. Studio lighting, photorealistic, 8K quality.`,
-      images: [{ url: selfieData }],
-      size,
-    })
-    if (s1Result) {
-      console.log(`[try-on] Strategy 1 (edit-selfie-combined) succeeded`)
-      results.push({ imageUrl: s1Result, strategy: 'edit-selfie-combined', faceScore: 9, productScore: 7 })
-    }
-
-    // Strategy 2: Edit selfie with individual product description (GOOD — face preserved, product from VLM)
-    if (job) { job.attempt = 2; job.progress = 'Refining your try-on look...' }
-    await delay(API_CALL_DELAY)
-    console.log(`[try-on] Strategy 2: edit-selfie-product`)
-    const s2Result = await safeImageEdit(zai, {
-      prompt: `Professional fashion photograph. Edit this person's photo to show them ${placement}. The product is "${productName}": ${bestProductDesc}. CRITICAL: 1) Keep the EXACT same face, skin tone, hair, and body. 2) The product MUST match its EXACT described colors, materials, and design — no color shifting or substitution. 3) Product should look natural and realistically worn. Studio lighting, photorealistic, 8K quality.`,
-      images: [{ url: selfieData }],
-      size,
-    })
-    if (s2Result) {
-      console.log(`[try-on] Strategy 2 (edit-selfie-product) succeeded`)
-      results.push({ imageUrl: s2Result, strategy: 'edit-selfie-product', faceScore: 9, productScore: 6 })
-    }
-
-    // Strategy 3: Edit product image with person description (GOOD — product preserved from image)
-    if (job) { job.attempt = 3; job.progress = 'Creating product-focused preview...' }
-    await delay(API_CALL_DELAY)
-    console.log(`[try-on] Strategy 3: edit-product`)
-    const s3Result = await safeImageEdit(zai, {
-      prompt: `Professional fashion photograph showing this EXACT product "${productName}" being worn by a person who is ${placement}. Person: ${bestPersonDesc}. CRITICAL: 1) The product's colors, materials, and design MUST match EXACTLY as shown in the image — do NOT change any color or detail. 2) The person should look natural wearing it. Studio lighting, photorealistic, 8K quality.`,
-      images: [{ url: productImageBase64 }],
-      size,
-    })
-    if (s3Result) {
-      console.log(`[try-on] Strategy 3 (edit-product) succeeded`)
-      results.push({ imageUrl: s3Result, strategy: 'edit-product', faceScore: 5, productScore: 9 })
-    }
-
-    // Strategy 4: Text-to-image with combined description
-    if (results.length === 0) {
-      if (job) { job.attempt = 4; job.progress = 'Generating from descriptions...' }
-      await delay(API_CALL_DELAY)
-      console.log(`[try-on] Strategy 4: create-detailed`)
-
-      const bodyType = categorySlug === 'sarees' || categorySlug === 'fashion' || categorySlug === 'mens-shirts-t-shirts'
-        ? 'Full-body professional fashion photograph'
-        : categorySlug === 'jewelry' || categorySlug === 'watches'
-        ? 'Close-up professional beauty photograph from chest up'
-        : 'Professional fashion photograph'
-
-      const s4Result = await safeImageCreate(zai, {
-        prompt: `${bodyType} of a person ${placement}. The product is "${productName}": ${bestProductDesc}. Person: ${bestPersonDesc}. Combined context: ${combinedDesc || ''}. Show the product being worn with EXACT colors, materials, and details. Photorealistic, studio lighting, 8K, high detail.`,
-        size,
-      })
-      if (s4Result) {
-        console.log(`[try-on] Strategy 4 (create-detailed) succeeded`)
-        results.push({ imageUrl: s4Result, strategy: 'create-detailed', faceScore: 4, productScore: 5 })
-      }
-    }
-
-    if (results.length === 0) {
-      console.warn(`[try-on] All AI generation strategies failed for job ${jobId}, returning canvas mode`)
-      if (job) {
-        job.status = 'completed'
-        job.imageUrl = ''
-        job.strategy = 'canvas-fallback'
-        job.progress = 'AI generation unavailable — using style preview'
-      }
-      return
-    }
-
-    // Step 4: Pick best result — prioritize PRODUCT accuracy (user expects to see the exact product)
-    const best = results.reduce((a, b) => {
-      const sa = a.productScore * 0.6 + a.faceScore * 0.4
-      const sb = b.productScore * 0.6 + b.faceScore * 0.4
-      return sb > sa ? b : a
-    })
-
-    console.log(`[try-on] Best: ${best.strategy}, Face=${best.faceScore}/10, Product=${best.productScore}/10, Score=${best.productScore * 0.6 + best.faceScore * 0.4}`)
-
-    // Step 5: Apply 3BOXES GIFTS watermark
-    if (job) job.progress = 'Adding finishing touches...'
-    let finalImageUrl = best.imageUrl
-    try {
-      finalImageUrl = await addWatermark(best.imageUrl)
-      console.log(`[try-on] Watermark applied successfully`)
-    } catch (wmErr) {
-      console.error('[try-on] Watermark failed, using original:', wmErr)
-    }
-
-    if (job) {
-      job.status = 'completed'
-      job.imageUrl = finalImageUrl
-      job.productName = productName
-      job.strategy = best.strategy
-      job.faceScore = best.faceScore
-      job.productScore = best.productScore
-      job.progress = 'Complete!'
-    }
-  } catch (error) {
-    console.error(`[try-on] Job ${jobId} failed:`, error)
-    if (job) {
-      job.status = 'failed'
-      const msg = error instanceof Error ? error.message : 'Generation failed'
-      if (msg.includes('fetch failed') || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('AI_STYLE_SERVICE_UNAVAILABLE')) {
-        job.error = 'Virtual try-on is temporarily unavailable. Our AI style service could not be reached.'
-      } else {
-        job.error = msg
-      }
-    }
-  }
 }

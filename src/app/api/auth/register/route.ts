@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { db } from '@/lib/db';
-import { createSession, generateToken } from '@/lib/sessions';
+import { createSession } from '@/lib/sessions';
+
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
 
 // Default permissions by role
 const DEFAULT_PERMISSIONS: Record<string, string[]> = {
@@ -124,19 +127,35 @@ export async function POST(request: NextRequest) {
 
     // If auto-approved (admin/user), create session and return token
     if (approvalStatus === 'approved') {
-      const token = generateToken();
-      await createSession(token, {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        avatar: user.avatar,
-        isActive: user.isActive,
-        approvalStatus: user.approvalStatus,
-        emailVerified: user.emailVerified,
-        phoneVerified: user.phoneVerified,
-        twoFactorEnabled: user.twoFactorEnabled,
-      });
+      // Generate JWT token (works on Vercel serverless without DB lookup)
+      const jwtToken = jwt.sign(
+        {
+          type: 'session',
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      try {
+        await createSession(jwtToken, {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          avatar: user.avatar,
+          isActive: user.isActive,
+          approvalStatus: user.approvalStatus,
+          emailVerified: user.emailVerified,
+          phoneVerified: user.phoneVerified,
+          twoFactorEnabled: user.twoFactorEnabled,
+        });
+      } catch (sessionError) {
+        console.warn('[Auth Register] DB session creation failed, JWT-only auth will be used:', sessionError);
+      }
 
       return NextResponse.json({
         user: {
@@ -153,7 +172,7 @@ export async function POST(request: NextRequest) {
           approvalStatus: user.approvalStatus,
           createdAt: user.createdAt,
         },
-        token,
+        token: jwtToken,
       });
     }
 

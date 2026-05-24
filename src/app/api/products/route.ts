@@ -3,7 +3,6 @@ import { db } from '@/lib/db'
 import {
   fetchShopifyProducts,
   searchShopifyProducts,
-  fetchShopifyProductsByCategory,
   type ShopifyProductTransformed,
 } from '@/lib/shopify'
 
@@ -17,6 +16,63 @@ const PLATFORM_LOGO_MAP: Record<string, string> = {
   tanishq: '/logos/tanishq.png',
   bluestone: '/logos/bluestone.png',
   voylla: '/logos/voylla.png',
+}
+
+// ─── Category slug aliases ───
+// The local DB seed uses certain slugs (e.g. "mens-shirts") while the Shopify
+// product-type mapping produces different ones (e.g. "mens-shirts-t-shirts").
+// This map normalises category slugs so that a request using either variant
+// resolves to the same set of products.
+const CATEGORY_SLUG_ALIASES: Record<string, string[]> = {
+  'mens-shirts-t-shirts': ['mens-shirts'],           // DB seed slug → Shopify slug
+  'couple-friendly-gifts': ['couple-gifts'],        // DB seed slug → Shopify slug
+  'leather-goods': ['leather'],                      // alternate slug
+  'home-living': ['home'],                           // alternate slug
+  'romantic-gifts': ['romantic'],                    // alternate slug
+}
+
+/**
+ * Resolve a category slug to all its equivalent slugs (including itself).
+ * E.g. "mens-shirts" → ["mens-shirts-t-shirts", "mens-shirts"]
+ */
+function resolveCategorySlugs(slug: string): string[] {
+  const aliases = [slug]
+  for (const [canonical, alts] of Object.entries(CATEGORY_SLUG_ALIASES)) {
+    if (canonical === slug) {
+      aliases.push(...alts)
+    } else if (alts.includes(slug)) {
+      aliases.push(canonical)
+    }
+  }
+  return aliases
+}
+
+// ─── Product deduplication ───
+// Ensures the API never returns duplicate products regardless of source.
+// Deduplicates by id first, then by slug, then by name (case-insensitive).
+
+function deduplicateProducts<T extends { id: string; slug: string; name: string }>(products: T[]): T[] {
+  const seenIds = new Set<string>()
+  const seenSlugs = new Set<string>()
+  const seenNames = new Set<string>()
+
+  return products.filter((p) => {
+    // Dedupe by id
+    if (seenIds.has(p.id)) return false
+    seenIds.add(p.id)
+
+    // Dedupe by slug (handles same product from different sources)
+    const slugLower = p.slug.toLowerCase()
+    if (seenSlugs.has(slugLower)) return false
+    seenSlugs.add(slugLower)
+
+    // Dedupe by name (handles visual duplicates with different IDs/slugs)
+    const nameLower = p.name.toLowerCase().trim()
+    if (seenNames.has(nameLower)) return false
+    seenNames.add(nameLower)
+
+    return true
+  })
 }
 
 /**
@@ -43,9 +99,10 @@ function filterAndPaginateShopifyProducts(
 ) {
   let filtered = [...products]
 
-  // Category filter
+  // Category filter — resolve aliases so both DB and Shopify slugs match
   if (params.category) {
-    filtered = filtered.filter((p) => p.categorySlug === params.category)
+    const allowedSlugs = resolveCategorySlugs(params.category)
+    filtered = filtered.filter((p) => allowedSlugs.includes(p.categorySlug))
   }
 
   // Search filter
@@ -171,11 +228,17 @@ export async function GET(request: NextRequest) {
       let shopifyProducts: ShopifyProductTransformed[]
 
       if (category && !search) {
-        shopifyProducts = await fetchShopifyProductsByCategory(category)
+        // Resolve category slug aliases so both DB and Shopify slugs work
+        const categorySlugs = resolveCategorySlugs(category)
+        const allProducts = await fetchShopifyProducts()
+        shopifyProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
       } else if (search && !category) {
         shopifyProducts = await searchShopifyProducts(search)
       } else if (category && search) {
-        const categoryProducts = await fetchShopifyProductsByCategory(category)
+        // Resolve category slug aliases so both DB and Shopify slugs work
+        const categorySlugs = resolveCategorySlugs(category)
+        const allProducts = await fetchShopifyProducts()
+        const categoryProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
         const q = search.toLowerCase()
         shopifyProducts = categoryProducts.filter(
           (p) =>
@@ -194,7 +257,10 @@ export async function GET(request: NextRequest) {
         ? parseFloat(priceMax || maxPrice || '0')
         : null
 
-      const result = filterAndPaginateShopifyProducts(shopifyProducts, {
+      // Deduplicate before filtering/pagination to guarantee no duplicates
+      const dedupedProducts = deduplicateProducts(shopifyProducts)
+
+      const result = filterAndPaginateShopifyProducts(dedupedProducts, {
         category: category || null,
         search: search || null,
         minPrice: effectiveMinPriceNum,
@@ -231,7 +297,13 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = {}
 
     if (category) {
-      where.category = { slug: category }
+      // Resolve category slug aliases so Shopify slugs also match DB categories
+      const categorySlugs = resolveCategorySlugs(category)
+      if (categorySlugs.length === 1) {
+        where.category = { slug: category }
+      } else {
+        where.category = { slug: { in: categorySlugs } }
+      }
     }
 
     if (search) {
@@ -347,11 +419,18 @@ export async function GET(request: NextRequest) {
       syncStatus: p.syncStatus,
     }))
 
+    // Deduplicate DB products as a safety net (handles multiple seed/sync runs)
+    const dedupedProducts = deduplicateProducts(transformedProducts)
+
+    const adjustedTotal = dedupedProducts.length < transformedProducts.length
+      ? dedupedProducts.length
+      : total
+
     return NextResponse.json({
-      products: transformedProducts,
-      total,
+      products: dedupedProducts,
+      total: adjustedTotal,
       page,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(adjustedTotal / limit),
       source: 'database',
     })
   } catch (dbError) {
@@ -363,12 +442,17 @@ export async function GET(request: NextRequest) {
 
       // Use targeted fetch if we have a category or search filter
       if (category && !search) {
-        shopifyProducts = await fetchShopifyProductsByCategory(category)
+        // Resolve category slug aliases so both DB and Shopify slugs work
+        const categorySlugs = resolveCategorySlugs(category)
+        const allProducts = await fetchShopifyProducts()
+        shopifyProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
       } else if (search && !category) {
         shopifyProducts = await searchShopifyProducts(search)
       } else if (category && search) {
-        // Both filters: get by category, then search within
-        const categoryProducts = await fetchShopifyProductsByCategory(category)
+        // Both filters: get by category (with alias resolution), then search within
+        const categorySlugs = resolveCategorySlugs(category)
+        const allProducts = await fetchShopifyProducts()
+        const categoryProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
         const q = search.toLowerCase()
         shopifyProducts = categoryProducts.filter(
           (p) =>
@@ -388,7 +472,10 @@ export async function GET(request: NextRequest) {
         ? parseFloat(priceMax || maxPrice || '0')
         : null
 
-      const result = filterAndPaginateShopifyProducts(shopifyProducts, {
+      // Deduplicate before filtering/pagination
+      const dedupedShopifyProducts = deduplicateProducts(shopifyProducts)
+
+      const result = filterAndPaginateShopifyProducts(dedupedShopifyProducts, {
         category: category || null,
         search: search || null,
         minPrice: effectiveMinPriceNum,

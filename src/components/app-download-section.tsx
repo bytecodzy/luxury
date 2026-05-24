@@ -11,8 +11,10 @@ import {
   Download,
   Star,
   Crown,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { usePWAInstall } from '@/hooks/usePWAInstall';
 
 const benefits = [
   {
@@ -48,8 +50,16 @@ const benefits = [
 ];
 
 export function AppDownloadSection() {
+  const { canInstall, promptInstall, isInstalled } = usePWAInstall();
+
+  const handleInstallClick = async () => {
+    if (canInstall) {
+      await promptInstall();
+    }
+  };
+
   return (
-    <section className="relative overflow-hidden border-t border-amber-900/30 bg-gradient-to-b from-stone-950 via-stone-900/50 to-stone-950 py-16 sm:py-20 lg:py-24">
+    <section id="app-download" className="relative overflow-hidden border-t border-amber-900/30 bg-gradient-to-b from-stone-950 via-stone-900/50 to-stone-950 py-16 sm:py-20 lg:py-24">
       {/* Background decorations */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-amber-500/5 blur-3xl" />
@@ -164,25 +174,50 @@ export function AppDownloadSection() {
 
               {/* Download buttons */}
               <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row">
-                {/* Google Play button */}
-                <a href="#" aria-label="Get it on Google Play">
-                  <motion.div
+                {/* Google Play / PWA Install button */}
+                {canInstall ? (
+                  <motion.button
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.98 }}
-                    className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-stone-900 px-5 py-3 shadow-lg shadow-amber-900/10 transition-colors hover:border-amber-500/40 hover:bg-stone-800"
+                    onClick={handleInstallClick}
+                    className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-600/20 px-6 py-3.5 shadow-lg shadow-amber-900/20 transition-colors hover:border-amber-500/50 hover:bg-amber-600/30"
                   >
-                    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none">
-                      <path d="M3.61 1.814L13.793 12 3.61 22.186a.996.996 0 01-.61-.92V2.734c0-.382.218-.726.558-.92h.052z" fill="#4285F4" />
-                      <path d="M17.092 8.65l-3.3 3.35 3.3 3.35 3.743-2.09a1 1 0 000-1.74l-3.743-2.87z" fill="#FBBC04" />
-                      <path d="M3.61 1.814L13.793 12l3.3-3.35L4.396 1.098c-.25-.134-.522-.178-.786-.116V1.814z" fill="#EA4335" />
-                      <path d="M3.61 22.186L17.092 15.35 13.793 12 3.61 22.186z" fill="#34A853" />
-                    </svg>
+                    <Download className="h-6 w-6 text-amber-400" />
                     <div className="text-left">
-                      <div className="text-[10px] leading-tight text-amber-200/50">GET IT ON</div>
-                      <div className="text-sm font-semibold text-amber-100">Google Play</div>
+                      <div className="text-[10px] leading-tight text-amber-200/50">INSTALL APP</div>
+                      <div className="text-sm font-semibold text-amber-100">Add to Home Screen</div>
+                    </div>
+                  </motion.button>
+                ) : isInstalled ? (
+                  <motion.div
+                    className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-600/10 px-6 py-3.5"
+                  >
+                    <Check className="h-6 w-6 text-emerald-400" />
+                    <div className="text-left">
+                      <div className="text-[10px] leading-tight text-emerald-200/50">INSTALLED</div>
+                      <div className="text-sm font-semibold text-emerald-100">App Ready</div>
                     </div>
                   </motion.div>
-                </a>
+                ) : (
+                  <a href="#" aria-label="Get it on Google Play">
+                    <motion.div
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-stone-900 px-5 py-3 shadow-lg shadow-amber-900/10 transition-colors hover:border-amber-500/40 hover:bg-stone-800"
+                    >
+                      <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none">
+                        <path d="M3.61 1.814L13.793 12 3.61 22.186a.996.996 0 01-.61-.92V2.734c0-.382.218-.726.558-.92h.052z" fill="#4285F4" />
+                        <path d="M17.092 8.65l-3.3 3.35 3.3 3.35 3.743-2.09a1 1 0 000-1.74l-3.743-2.87z" fill="#FBBC04" />
+                        <path d="M3.61 1.814L13.793 12l3.3-3.35L4.396 1.098c-.25-.134-.522-.178-.786-.116V1.814z" fill="#EA4335" />
+                        <path d="M3.61 22.186L17.092 15.35 13.793 12 3.61 22.186z" fill="#34A853" />
+                      </svg>
+                      <div className="text-left">
+                        <div className="text-[10px] leading-tight text-amber-200/50">GET IT ON</div>
+                        <div className="text-sm font-semibold text-amber-100">Google Play</div>
+                      </div>
+                    </motion.div>
+                  </a>
+                )}
 
                 {/* App Store button */}
                 <a href="#" aria-label="Download on the App Store">
@@ -252,16 +287,36 @@ export function AppDownloadSection() {
                 transition={{ delay: 0.9 }}
                 className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center lg:justify-start"
               >
-                <Button
-                  size="lg"
-                  className="gap-2 bg-amber-600 px-8 py-6 text-base font-bold text-stone-950 transition-all duration-300 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
-                  asChild
-                >
-                  <a href="#">
+                {canInstall ? (
+                  <Button
+                    size="lg"
+                    onClick={handleInstallClick}
+                    className="gap-2 bg-amber-600 px-8 py-6 text-base font-bold text-stone-950 transition-all duration-300 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
+                  >
                     <Download className="h-5 w-5" />
-                    Download Now
-                  </a>
-                </Button>
+                    Install App Now
+                  </Button>
+                ) : isInstalled ? (
+                  <Button
+                    size="lg"
+                    className="gap-2 bg-emerald-600 px-8 py-6 text-base font-bold text-white"
+                    disabled
+                  >
+                    <Check className="h-5 w-5" />
+                    App Installed
+                  </Button>
+                ) : (
+                  <Button
+                    size="lg"
+                    className="gap-2 bg-amber-600 px-8 py-6 text-base font-bold text-stone-950 transition-all duration-300 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
+                    asChild
+                  >
+                    <a href="#">
+                      <Download className="h-5 w-5" />
+                      Download Now
+                    </a>
+                  </Button>
+                )}
                 <span className="flex items-center gap-1 text-xs text-amber-200/40">
                   <ChevronRight className="h-3 w-3" />
                   Available on all devices

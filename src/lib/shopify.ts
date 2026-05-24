@@ -400,6 +400,10 @@ function getFallbackImages(categorySlug: string, productId: number): string[] {
 /**
  * Fetch all products from Shopify Admin API and transform to match the Prisma API format.
  * Results are cached for 5 minutes.
+ *
+ * Handles Link-header pagination so stores with >250 products are fully fetched.
+ * Deduplicates by both Shopify numeric ID and product handle/slug to prevent
+ * visual duplicates when the same product appears with different IDs.
  */
 export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[]> {
   if (isCacheValid(productsCache)) {
@@ -407,25 +411,48 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
   }
 
   try {
-    // Fetch products with up to 250 per page
-    // Note: Shopify REST API uses Link header pagination, not page param.
-    // For stores with <= 250 products, a single request suffices.
-    const data = await shopifyFetch<{ products: ShopifyProduct[] }>(
-      '/products.json',
-      { limit: '250', status: 'active' }
-    )
+    // ── Paginated fetch using Shopify Link header ──
+    // The Admin REST API returns a `Link` header with a `rel="next"` URL when
+    // more pages exist.  We follow every page until no next link is present.
+    const allRawProducts: ShopifyProduct[] = []
+    let nextUrl: string | null =
+      `${SHOPIFY_API_BASE}/products.json?limit=250&status=active`
 
-    const products = data.products || []
+    while (nextUrl) {
+      const response = await fetch(nextUrl, {
+        method: 'GET',
+        headers: {
+          'X-Shopify-Access-Token': SHOPIFY_ADMIN_API_TOKEN,
+          'Content-Type': 'application/json',
+        },
+        next: { revalidate: 300 },
+      })
 
-    // Deduplicate by Shopify product ID (in case of data anomalies)
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(`Shopify API error (${response.status}): ${text}`)
+      }
+
+      const data: { products: ShopifyProduct[] } = await response.json()
+      const page = data.products || []
+      allRawProducts.push(...page)
+
+      // Parse Link header for next page
+      const linkHeader = response.headers.get('link') || ''
+      const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/)
+      nextUrl = nextMatch ? nextMatch[1] : null
+    }
+
+    // ── Deduplicate raw products by Shopify numeric ID ──
     const seenIds = new Set<number>()
-    const uniqueProducts = products.filter(p => {
+    const uniqueById = allRawProducts.filter(p => {
       if (seenIds.has(p.id)) return false
       seenIds.add(p.id)
       return true
     })
 
-    const transformed: ShopifyProductTransformed[] = uniqueProducts.map((p) => {
+    // ── Transform to app format ──
+    const transformed: ShopifyProductTransformed[] = uniqueById.map((p) => {
       const firstVariant = p.variants?.[0]
       const category = getCategoryForProductType(p.product_type)
       const tags = p.tags ? p.tags.split(',').map((t) => t.trim()).filter(Boolean) : []
@@ -463,8 +490,24 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
       }
     })
 
-    productsCache = { data: transformed, timestamp: Date.now() }
-    return transformed
+    // ── Deduplicate transformed products by slug/handle ──
+    // If the same product handle appears with different Shopify IDs (e.g. from
+    // a re-sync that created a duplicate listing), keep only the first one.
+    const seenSlugs = new Set<string>()
+    const deduped = transformed.filter(p => {
+      if (seenSlugs.has(p.slug)) return false
+      seenSlugs.add(p.slug)
+      return true
+    })
+
+    if (deduped.length < transformed.length) {
+      console.warn(
+        `[Shopify] Deduplicated ${transformed.length - deduped.length} products with duplicate slugs`
+      )
+    }
+
+    productsCache = { data: deduped, timestamp: Date.now() }
+    return deduped
   } catch (error) {
     console.error('[Shopify] Failed to fetch products:', error)
     throw error
