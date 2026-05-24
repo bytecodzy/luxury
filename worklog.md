@@ -113,3 +113,61 @@ Stage Summary:
 - The flow: Client → Vercel API → Proxy → ai-proxy (sandbox) → ZAI SDK → returns result
 - Product image base64 is included in canvas mode responses to avoid CORS issues
 - Deployment URL: https://my-project-sepia-seven-42.vercel.app
+---
+Task ID: 2
+Agent: full-stack-developer
+Task: Fix AI try-on feature - send productImageBase64 from client, improve prompts, fix strategy order
+
+Work Log:
+- Read all three source files to understand current code structure
+- Added `fetchImageAsBase64()` helper function to product-detail.tsx for client-side image-to-base64 conversion
+- Modified `handleGenerate` in product-detail.tsx to pre-fetch product image as base64 before POST request
+- Added `productImageBase64` field to both POST request bodies (main API call and direct proxy call)
+- Updated VLM_PERSON_PROMPT in route.ts to request exact skin tone shade, hair color details, and accessories
+- Updated VLM_PRODUCT_PROMPT in route.ts to request EXACT primary/secondary colors with specificity examples
+- Reordered strategies in route.ts backgroundProcess: edit-both (Strategy 1) → edit-selfie (Strategy 2) → edit-product (Strategy 3) → create (Strategy 4)
+- Updated strategy prompts in route.ts with CRITICAL INSTRUCTIONS format for better AI compliance
+- Updated strategy scores: edit-both (faceScore=8, productScore=9), edit-selfie (faceScore=9, productScore=6), edit-product (faceScore=5, productScore=8)
+- Added client-provided base64 usage in handleLocalAIGeneration to avoid redundant server-side resolution
+- Improved getProductPlacement in route.ts: sarees now includes "pallu elegantly over the left shoulder, matching blouse, properly pleated at the waist"
+- Improved getProductPlacement in route.ts: jewelry sets now include "necklace around the neck and earrings on both earlobes, with the pieces complementing each other perfectly"
+- Applied identical VLM prompt improvements to ai-proxy/index.ts
+- Reordered strategies in ai-proxy/index.ts: edit-both first, then edit-selfie, then edit-product
+- Updated all strategy prompts in ai-proxy/index.ts with improved CRITICAL INSTRUCTIONS format
+- Updated strategy scores in ai-proxy/index.ts to match route.ts
+- Improved getProductPlacement in ai-proxy/index.ts with same sarees and jewelry set enhancements
+- Ran lint check on modified files — no errors found
+
+Stage Summary:
+- Client now pre-fetches product image as base64 and sends it to the server, solving Vercel deployment issues where server cannot resolve product images
+- Strategy order changed to prioritize edit-both (best product matching since AI sees the actual product image) over edit-selfie
+- VLM prompts improved to emphasize exact color specificity (e.g., "deep maroon red" not just "red")
+- Generation prompts improved with numbered CRITICAL INSTRUCTIONS for better AI compliance on face preservation and product color matching
+- Product placement descriptions enhanced for sarees and jewelry sets for more realistic AI generation
+- All changes are compatible with both local development and Vercel deployment
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Fix AI try-on feature completely broken on both web and Android - XTransformPort proxy issue
+
+Work Log:
+- Diagnosed root cause: The XTransformPort=3030 query parameter was causing the .space-z.ai external gateway to return an HTML error page instead of proxying requests to the ai-proxy
+- The .space-z.ai gateway routes ALL requests to the sandbox's Next.js server (port 3000), which has direct access to the ZAI SDK via /etc/.z-ai-config
+- Fixed buildProxyUrl() in route.ts: Removed XTransformPort=3030 parameter — the external gateway doesn't support it
+- Fixed isProxyReachable() in zai.ts: Removed XTransformPort=3030 from proxy health check URL
+- Fixed product-detail.tsx: Removed XTransformPort=3030 from both client-side direct proxy POST URL and polling URL
+- Deployed to correct Vercel project (3boxes-luxury → https://my-project-sepia-seven-42.vercel.app)
+- Verified: /api/try-on/status returns {"available":true,"mode":"proxy"}
+- Tested full try-on flow on Vercel: POST creates job, polling returns completed result with generated image
+- AI generation works on Vercel: Strategy edit-product succeeds with 1.26MB image, FaceScore=5, ProductScore=8
+
+Stage Summary:
+- ROOT CAUSE: XTransformPort=3030 query parameter breaks the .space-z.ai external gateway
+- FIX: Removed all XTransformPort usage — requests now go through the gateway to sandbox's Next.js which handles them directly
+- AI try-on feature now works end-to-end on Vercel production
+- Flow: Client → Vercel API → .space-z.ai gateway → sandbox Next.js → ZAI SDK → AI image generation
+- Client now also sends productImageBase64 (pre-fetched) to avoid server-side resolution issues
+- Strategy order improved: edit-both first (best product matching), then edit-selfie, edit-product, create
+- VLM prompts improved for exact color specificity
+- Production URL: https://my-project-sepia-seven-42.vercel.app

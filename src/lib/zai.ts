@@ -97,14 +97,10 @@ export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
 
-    // Build URL with XTransformPort for Caddy gateway routing
-    let statusUrl = `${proxyUrl}/api/try-on/status`
-    try {
-      const proxyHost = new URL(proxyUrl).hostname
-      if (proxyHost.includes('.space-z.ai')) {
-        statusUrl = `${proxyUrl}/api/try-on/status?XTransformPort=3030`
-      }
-    } catch {}
+    // The .space-z.ai gateway routes all requests to the sandbox's
+    // Next.js server (port 3000) which has the ZAI SDK available.
+    // Do NOT add XTransformPort — the external gateway doesn't support it.
+    const statusUrl = `${proxyUrl}/api/try-on/status`
 
     const response = await fetch(statusUrl, {
       signal: controller.signal,

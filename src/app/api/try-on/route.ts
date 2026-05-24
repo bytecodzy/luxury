@@ -148,20 +148,15 @@ function getProxyHeaders(proxyUrl: string): Record<string, string> {
 }
 
 /**
- * Build the proxy URL for a given path, using XTransformPort query param
- * when the proxy is on the .space-z.ai gateway (Caddy).
+ * Build the proxy URL for a given path.
+ *
+ * The .space-z.ai gateway routes ALL requests to the sandbox's Next.js
+ * server (port 3000), which has direct access to the ZAI SDK.
+ * We do NOT use XTransformPort here because the external gateway
+ * does not support it — adding it causes the gateway to return an
+ * HTML error page instead of proxying the request.
  */
 function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<string, string>): string {
-  try {
-    const proxyHost = new URL(proxyUrl).hostname
-    if (proxyHost.includes('.space-z.ai')) {
-      // Use XTransformPort so Caddy routes to port 3030 (ai-proxy mini-service)
-      const base = proxyUrl.replace(/\/+$/, '')
-      const params = new URLSearchParams({ XTransformPort: '3030', ...queryParams })
-      return `${base}${path}?${params.toString()}`
-    }
-  } catch {}
-  // Fallback: direct URL
   const base = proxyUrl.replace(/\/+$/, '')
   if (queryParams && Object.keys(queryParams).length > 0) {
     const params = new URLSearchParams(queryParams)
@@ -172,9 +167,9 @@ function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<stri
 
 // ── VLM Prompts ────────────────────────────────────────────────────
 
-const VLM_PERSON_PROMPT = `Describe this person's appearance briefly for a virtual try-on: face shape, skin tone, hair color/style, body type. 2-3 sentences.`
+const VLM_PERSON_PROMPT = `Describe this person's appearance for a virtual try-on: face shape, skin tone (exact shade), hair color and style, body type, and any visible accessories. Be specific about colors. 2-3 sentences.`
 
-const VLM_PRODUCT_PROMPT = `Describe this product for a virtual try-on: type, exact color, material/texture, key design details, how it would be worn. 2-3 sentences.`
+const VLM_PRODUCT_PROMPT = `Describe this product in detail for a virtual try-on: exact type, EXACT primary and secondary colors (be very specific - e.g., "deep maroon red" not just "red"), material/texture, key design elements, patterns, embellishments, and how it would be worn on a person. 2-3 sentences.`
 
 // ── Product placement helpers ──────────────────────────────────────
 
@@ -185,10 +180,10 @@ function getProductPlacement(categorySlug: string, productName: string): string 
     if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple') || n.includes('haar') || n.includes('mala')) return 'wearing a necklace around the neck'
     if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle') || n.includes('kada')) return 'wearing a bracelet on the wrist'
     if (n.includes('ring')) return 'wearing a ring on the finger'
-    if (n.includes('set') || n.includes('bridal')) return 'wearing a matching jewelry set of necklace and earrings'
+    if (n.includes('set') || n.includes('bridal')) return 'wearing a matching jewelry set - necklace around the neck and earrings on both earlobes, with the pieces complementing each other perfectly'
     return 'wearing the jewelry piece'
   }
-  if (categorySlug === 'sarees') return 'draped in the saree in traditional Indian style with pallu over shoulder'
+  if (categorySlug === 'sarees') return 'draped in the saree in traditional Indian style with pallu elegantly over the left shoulder, matching blouse, properly pleated at the waist'
   if (categorySlug === 'mens-shirts' || categorySlug === 'mens-shirts-t-shirts') return 'wearing the shirt on the torso'
   if (categorySlug === 'watches') return 'wearing the watch on the left wrist'
   if (categorySlug === 'fashion') return 'wearing the outfit'
@@ -480,7 +475,14 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
 
   const productImages: string[] = JSON.parse(product.images || '[]')
   const productImageToUse = productImageUrl || (productImages.length > 0 ? productImages[0] : null)
-  const productImageBase64 = productImageToUse ? await getProductImageBase64(productImageToUse) : null
+
+  // Use client-provided base64 if available, otherwise resolve server-side
+  const clientProvidedBase64 = body.productImageBase64 as string | undefined
+  let resolvedBase64: string | null = null
+  if (!clientProvidedBase64 && productImageToUse) {
+    resolvedBase64 = await getProductImageBase64(productImageToUse)
+  }
+  const productImageBase64 = clientProvidedBase64 || resolvedBase64 || null
 
   if (!productImageBase64) {
     return NextResponse.json({ 
@@ -783,33 +785,33 @@ async function backgroundProcess(
     const placement = getProductPlacement(categorySlug, productName)
     const size = getImageSize(categorySlug)
 
-    // Strategy 1: Edit selfie with product description
-    if (job) { job.attempt = 1; job.progress = 'Generating your try-on look...' }
+    // Strategy 1: Edit with both images (BEST for product matching - includes actual product image)
+    if (job) { job.attempt = 1; job.progress = 'Combining your photo with product...' }
     await delay(API_CALL_DELAY)
-    console.log(`[try-on] Strategy 1: edit-selfie-with-product`)
+    console.log(`[try-on] Strategy 1: edit-both`)
     const s1Result = await safeImageEdit(zai, {
-      prompt: `Professional fashion photograph. Edit this person's photo to show them ${placement}. The product is "${productName}": ${productDesc || 'a luxury fashion item'}. CRITICAL: Keep the EXACT same face, skin tone, hair, and body type. Only add the product on the person. Studio lighting, photorealistic, 8K quality.`,
-      images: [{ url: selfieData }],
+      prompt: `Professional fashion photograph. The FIRST image is the person, the SECOND image is the product "${productName}". CRITICAL INSTRUCTIONS: 1) Use the FIRST image's face, skin tone, and body type - do NOT change them. 2) Apply the EXACT product from the SECOND image - match its colors, materials, texture, and design precisely. 3) Show the person ${placement} with the product looking natural and realistic. Studio lighting, photorealistic, 8K quality.`,
+      images: [{ url: selfieData }, { url: productImageBase64 }],
       size,
     })
     if (s1Result) {
-      console.log(`[try-on] Strategy 1 (edit-selfie) succeeded`)
-      results.push({ imageUrl: s1Result, strategy: 'edit-selfie', faceScore: 8, productScore: 7 })
+      console.log(`[try-on] Strategy 1 (edit-both) succeeded`)
+      results.push({ imageUrl: s1Result, strategy: 'edit-both', faceScore: 8, productScore: 9 })
     }
 
-    // Strategy 2: Edit with both images
+    // Strategy 2: Edit selfie with product description (GOOD for face preservation - includes actual selfie)
     if (results.length === 0) {
-      if (job) { job.attempt = 2; job.progress = 'Combining your photo with product...' }
+      if (job) { job.attempt = 2; job.progress = 'Generating your try-on look...' }
       await delay(API_CALL_DELAY)
-      console.log(`[try-on] Strategy 2: edit-both`)
+      console.log(`[try-on] Strategy 2: edit-selfie`)
       const s2Result = await safeImageEdit(zai, {
-        prompt: `Professional fashion photograph. The FIRST image is the person, the SECOND image is the product "${productName}". Combine them: show this person ${placement}. Keep the exact same face and skin tone from the first image. Apply the exact product from the second image. Studio lighting, photorealistic, 8K quality.`,
-        images: [{ url: selfieData }, { url: productImageBase64 }],
+        prompt: `Professional fashion photograph. Edit this person's photo to show them ${placement}. The product is "${productName}": ${productDesc || 'a luxury fashion item'}. CRITICAL INSTRUCTIONS: 1) Keep the EXACT same face, skin tone, hair, and body type from the original photo. 2) Apply the product with its EXACT colors, materials, and design details. 3) The product must look realistic and naturally worn. Studio lighting, photorealistic, 8K quality.`,
+        images: [{ url: selfieData }],
         size,
       })
       if (s2Result) {
-        console.log(`[try-on] Strategy 2 (edit-both) succeeded`)
-        results.push({ imageUrl: s2Result, strategy: 'edit-both', faceScore: 7, productScore: 8 })
+        console.log(`[try-on] Strategy 2 (edit-selfie) succeeded`)
+        results.push({ imageUrl: s2Result, strategy: 'edit-selfie', faceScore: 9, productScore: 6 })
       }
     }
 
@@ -819,7 +821,7 @@ async function backgroundProcess(
       await delay(API_CALL_DELAY)
       console.log(`[try-on] Strategy 3: edit-product`)
       const s3Result = await safeImageEdit(zai, {
-        prompt: `Show this product "${productName}" being worn by a person who is ${placement}. Person description: ${personDesc || 'a person'}. Product: ${productDesc || 'luxury item'}. The person is wearing this exact product with accurate colors and details. Studio lighting, photorealistic, 8K quality.`,
+        prompt: `Show this product "${productName}" being worn by a person. The person is ${placement}. Person description: ${personDesc || 'a person'}. Product: ${productDesc || 'luxury item'}. CRITICAL: The product's colors, materials, and design must match EXACTLY as shown in the image. Studio lighting, photorealistic, 8K quality.`,
         images: [{ url: productImageBase64 }],
         size,
       })

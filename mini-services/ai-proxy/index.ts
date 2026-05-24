@@ -112,10 +112,10 @@ function getProductPlacement(categorySlug: string, productName: string): string 
     if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple') || n.includes('haar') || n.includes('mala')) return 'wearing a necklace around the neck'
     if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle') || n.includes('kada')) return 'wearing a bracelet on the wrist'
     if (n.includes('ring')) return 'wearing a ring on the finger'
-    if (n.includes('set') || n.includes('bridal')) return 'wearing a matching jewelry set of necklace and earrings'
+    if (n.includes('set') || n.includes('bridal')) return 'wearing a matching jewelry set - necklace around the neck and earrings on both earlobes, with the pieces complementing each other perfectly'
     return 'wearing the jewelry piece'
   }
-  if (categorySlug === 'sarees') return 'draped in the saree in traditional Indian style with pallu over shoulder'
+  if (categorySlug === 'sarees') return 'draped in the saree in traditional Indian style with pallu elegantly over the left shoulder, matching blouse, properly pleated at the waist'
   if (categorySlug === 'mens-shirts-t-shirts') return 'wearing the shirt on the torso'
   if (categorySlug === 'watches') return 'wearing the watch on the left wrist'
   if (categorySlug === 'fashion') return 'wearing the outfit'
@@ -263,29 +263,29 @@ async function backgroundProcess(
     if (job) job.progress = 'AI is analyzing your photo and product...'
     console.log(`[ai-proxy] Starting VLM analysis for job ${jobId}`)
 
-    const personDesc = await vlmAnalyze(zai, "Describe this person's appearance briefly for a virtual try-on: face shape, skin tone, hair, body type. 2-3 sentences.", selfieData)
+    const personDesc = await vlmAnalyze(zai, `Describe this person's appearance for a virtual try-on: face shape, skin tone (exact shade), hair color and style, body type, and any visible accessories. Be specific about colors. 2-3 sentences.`, selfieData)
     console.log(`[ai-proxy] Person: ${personDesc.substring(0, 80)}...`)
 
     await delay(API_CALL_DELAY)
 
-    const productDesc = await vlmAnalyze(zai, 'Describe this product for a virtual try-on: type, exact color, material/texture, key details, how it would be worn. 2-3 sentences.', productImageBase64)
+    const productDesc = await vlmAnalyze(zai, `Describe this product in detail for a virtual try-on: exact type, EXACT primary and secondary colors (be very specific - e.g., "deep maroon red" not just "red"), material/texture, key design elements, patterns, embellishments, and how it would be worn on a person. 2-3 sentences.`, productImageBase64)
     console.log(`[ai-proxy] Product: ${productDesc.substring(0, 80)}...`)
 
-    // Strategy 1: Edit selfie with product description (BEST for face preservation)
-    if (job) { job.attempt = 1; job.progress = 'Generating your try-on look...' }
+    // Strategy 1: Edit with both images (BEST for product matching - includes actual product image)
+    if (job) { job.attempt = 1; job.progress = 'Combining your photo with product...' }
     await delay(API_CALL_DELAY)
-    console.log(`[ai-proxy] Strategy 1: edit-selfie`)
+    console.log(`[ai-proxy] Strategy 1: edit-both`)
     const s1 = await safeImageEdit(zai, {
-      prompt: `Professional fashion photograph. Edit this person's photo to show them ${placement}. The product is "${productName}": ${productDesc || 'a luxury fashion item'}. CRITICAL: Keep the EXACT same face, skin tone, hair, and body type. Only add the product on the person. Studio lighting, photorealistic, 8K quality.`,
-      images: [{ url: selfieData }],
+      prompt: `Professional fashion photograph. The FIRST image is the person, the SECOND image is the product "${productName}". CRITICAL INSTRUCTIONS: 1) Use the FIRST image's face, skin tone, and body type - do NOT change them. 2) Apply the EXACT product from the SECOND image - match its colors, materials, texture, and design precisely. 3) Show the person ${placement} with the product looking natural and realistic. Studio lighting, photorealistic, 8K quality.`,
+      images: [{ url: selfieData }, { url: productImageBase64 }],
       size,
     })
     if (s1) {
-      console.log(`[ai-proxy] Strategy 1 (edit-selfie) succeeded`)
+      console.log(`[ai-proxy] Strategy 1 (edit-both) succeeded`)
       job.status = 'completed'
-      job.strategy = 'edit-selfie'
+      job.strategy = 'edit-both'
       job.faceScore = 8
-      job.productScore = 7
+      job.productScore = 9
       job.progress = 'Adding finishing touches...'
 
       let finalUrl = s1
@@ -296,21 +296,21 @@ async function backgroundProcess(
       return
     }
 
-    // Strategy 2: Edit with both images
-    if (job) { job.attempt = 2; job.progress = 'Combining your photo with product...' }
+    // Strategy 2: Edit selfie with product description (GOOD for face preservation - includes actual selfie)
+    if (job) { job.attempt = 2; job.progress = 'Generating your try-on look...' }
     await delay(API_CALL_DELAY)
-    console.log(`[ai-proxy] Strategy 2: edit-both`)
+    console.log(`[ai-proxy] Strategy 2: edit-selfie`)
     const s2 = await safeImageEdit(zai, {
-      prompt: `Professional fashion photograph. FIRST image is the person, SECOND image is the product "${productName}". Combine: show this person ${placement}. Keep the same face from first image. Studio lighting, photorealistic, 8K quality.`,
-      images: [{ url: selfieData }, { url: productImageBase64 }],
+      prompt: `Professional fashion photograph. Edit this person's photo to show them ${placement}. The product is "${productName}": ${productDesc || 'a luxury fashion item'}. CRITICAL INSTRUCTIONS: 1) Keep the EXACT same face, skin tone, hair, and body type from the original photo. 2) Apply the product with its EXACT colors, materials, and design details. 3) The product must look realistic and naturally worn. Studio lighting, photorealistic, 8K quality.`,
+      images: [{ url: selfieData }],
       size,
     })
     if (s2) {
-      console.log(`[ai-proxy] Strategy 2 (edit-both) succeeded`)
+      console.log(`[ai-proxy] Strategy 2 (edit-selfie) succeeded`)
       job.status = 'completed'
-      job.strategy = 'edit-both'
-      job.faceScore = 7
-      job.productScore = 8
+      job.strategy = 'edit-selfie'
+      job.faceScore = 9
+      job.productScore = 6
       job.progress = 'Adding finishing touches...'
       let finalUrl = s2
       try { finalUrl = await addWatermark(s2) } catch {}
@@ -325,7 +325,7 @@ async function backgroundProcess(
     await delay(API_CALL_DELAY)
     console.log(`[ai-proxy] Strategy 3: edit-product`)
     const s3 = await safeImageEdit(zai, {
-      prompt: `Show this product "${productName}" being worn by a person who is ${placement}. Person: ${personDesc || 'a person'}. Product: ${productDesc || 'luxury item'}. Accurate colors and details. Studio lighting, photorealistic, 8K quality.`,
+      prompt: `Show this product "${productName}" being worn by a person. The person is ${placement}. Person description: ${personDesc || 'a person'}. Product: ${productDesc || 'luxury item'}. CRITICAL: The product's colors, materials, and design must match EXACTLY as shown in the image. Studio lighting, photorealistic, 8K quality.`,
       images: [{ url: productImageBase64 }],
       size,
     })

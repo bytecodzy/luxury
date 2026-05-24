@@ -343,6 +343,32 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
   });
 }
 
+// ── Fetch image as base64 (client-side) ────────────────────────
+async function fetchImageAsBase64(url: string): Promise<string | null> {
+  try {
+    // For data URLs, return as-is
+    if (url.startsWith('data:')) return url;
+    // For relative paths, use current origin
+    let fetchUrl = url;
+    if (url.startsWith('/') && !url.startsWith('/api/')) {
+      fetchUrl = `${window.location.origin}${url}`;
+    } else if (url.startsWith('//')) {
+      fetchUrl = `https:${url}`;
+    }
+    const response = await fetch(fetchUrl, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 // ── Try-On Dialog ──────────────────────────────────────────────
 type Step = 'upload' | 'preview' | 'generating' | 'result';
 
@@ -449,6 +475,16 @@ function TryOnDialog({
     onBackgroundJob('generating');
 
     try {
+      // Pre-fetch product image as base64 to avoid server-side resolution issues on Vercel
+      let productImageBase64: string | undefined;
+      try {
+        setProgressMessage('Preparing product image...');
+        const imgToFetch = rawProductImage || productImage;
+        if (imgToFetch) {
+          productImageBase64 = await fetchImageAsBase64(imgToFetch) || undefined;
+        }
+      } catch {}
+
       // Step 1: POST to create a job
       const postRes = await fetch('/api/try-on', {
         method: 'POST',
@@ -456,7 +492,8 @@ function TryOnDialog({
         body: JSON.stringify({
           productId,
           selfieData,
-          productImageUrl: rawProductImage || productImage, // Use original URL for API — resolves correctly on Vercel
+          productImageUrl: rawProductImage || productImage,
+          productImageBase64, // Pre-fetched base64
           productName,
           categorySlug,
         }),
@@ -486,12 +523,9 @@ function TryOnDialog({
         if (proxyUrl) {
           try {
             setProgressMessage('Connecting to AI service...');
-            let proxyFetchUrl: string;
-            if (proxyUrl.includes('.space-z.ai')) {
-              proxyFetchUrl = `${proxyUrl}/api/try-on?XTransformPort=3030`;
-            } else {
-              proxyFetchUrl = `${proxyUrl}/api/try-on`;
-            }
+            // The .space-z.ai gateway routes to sandbox's Next.js (port 3000)
+            // which handles /api/try-on directly — no XTransformPort needed.
+            const proxyFetchUrl = `${proxyUrl}/api/try-on`;
 
             const proxyRes = await fetch(proxyFetchUrl, {
               method: 'POST',
@@ -500,6 +534,7 @@ function TryOnDialog({
                 productId,
                 selfieData,
                 productImageUrl: rawProductImage || productImage,
+                productImageBase64, // Pre-fetched base64
                 productName,
                 categorySlug,
               }),
@@ -519,12 +554,9 @@ function TryOnDialog({
                   proxyPollCount++;
                   if (proxyPollCount > maxProxyPolls) throw new Error('Generation timed out');
 
-                  let statusUrl: string;
-                  if (proxyUrl.includes('.space-z.ai')) {
-                    statusUrl = `${proxyUrl}/api/try-on?XTransformPort=3030&jobId=${encodeURIComponent(proxyJobId)}`;
-                  } else {
-                    statusUrl = `${proxyUrl}/api/try-on?jobId=${encodeURIComponent(proxyJobId)}`;
-                  }
+                  // The .space-z.ai gateway routes to sandbox's Next.js (port 3000)
+                  // which handles /api/try-on directly — no XTransformPort needed.
+                  const statusUrl = `${proxyUrl}/api/try-on?jobId=${encodeURIComponent(proxyJobId)}`;
 
                   const pollRes = await fetch(statusUrl);
                   const pollData = await pollRes.json();
