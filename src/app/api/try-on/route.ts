@@ -167,9 +167,32 @@ function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<stri
 
 // ── VLM Prompts ────────────────────────────────────────────────────
 
-const VLM_PERSON_PROMPT = `Describe this person's appearance for a virtual try-on: face shape, skin tone (exact shade), hair color and style, body type, and any visible accessories. Be specific about colors. 2-3 sentences.`
+const VLM_PERSON_PROMPT = `Describe this person for a virtual try-on in EXACT detail:
+- Face: shape, features, skin tone (exact shade like "warm olive" or "cool fair")
+- Hair: exact color, length, style
+- Body: build, height impression, visible clothing
+- Pose: how they are positioned in the frame
+Be extremely specific about all colors. 2-3 sentences.`
 
-const VLM_PRODUCT_PROMPT = `Describe this product in detail for a virtual try-on: exact type, EXACT primary and secondary colors (be very specific - e.g., "deep maroon red" not just "red"), material/texture, key design elements, patterns, embellishments, and how it would be worn on a person. 2-3 sentences.`
+const VLM_PRODUCT_PROMPT = `Describe this product in EXACT detail for a virtual try-on:
+- Type and category (e.g., "gold temple necklace", "maroon silk saree")
+- EXACT primary color (NOT just "red" — say "deep maroon red" or "burgundy wine red")
+- EXACT secondary/accent colors with the same specificity
+- Material and texture (e.g., "polished gold metal", "silk fabric with zari work")
+- Key design elements: patterns, stones, embellishments, engravings
+- Size and proportions relative to how it would appear on a person
+You MUST be extremely precise about every color — this is critical for accurate virtual try-on. 3-4 sentences.`
+
+const VLM_COMBINED_PROMPT = `I have TWO images for a virtual try-on:
+1) The FIRST image is a person's selfie
+2) The SECOND image is the product they want to try on
+
+Describe in precise detail:
+- The person's face features, skin tone, hair color/style, and body type
+- The product's EXACT colors (be hyper-specific — "deep maroon" not "red", "antique gold" not "gold"), materials, textures, and design details
+- How the product should look when worn on this specific person (position, scale, fit)
+
+CRITICAL: Be extremely precise about the product's colors and materials — the AI needs this to reproduce the exact product appearance. 3-4 sentences.`
 
 // ── Product placement helpers ──────────────────────────────────────
 
@@ -681,6 +704,32 @@ async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs 
   }
 }
 
+/**
+ * VLM analysis with BOTH selfie and product images in a single call.
+ * This provides the AI with full context of both the person and the product,
+ * enabling a much more accurate combined description for try-on.
+ */
+async function vlmAnalyzeCombined(zai: any, selfieUrl: string, productUrl: string, timeoutMs = 45000): Promise<string> {
+  try {
+    const result = await Promise.race([
+      zai.chat.completions.createVision({
+        model: 'glm-4v-plus',
+        messages: [{ role: 'user', content: [
+          { type: 'text', text: VLM_COMBINED_PROMPT },
+          { type: 'image_url', image_url: { url: selfieUrl } },
+          { type: 'image_url', image_url: { url: productUrl } },
+        ]}],
+        thinking: { type: 'disabled' },
+      }),
+      new Promise<null>(r => setTimeout(() => r(null), timeoutMs)),
+    ])
+    return result ? (result.choices[0]?.message?.content || '') : ''
+  } catch (err) {
+    console.error('[try-on] VLM combined analysis failed:', (err as Error).message?.substring(0, 200))
+    return ''
+  }
+}
+
 // ── Safe image generation wrappers ─────────────────────────────────
 
 async function safeImageEdit(zai: any, params: { prompt: string; images: { url: string }[]; size: ImageSize }): Promise<string | null> {
@@ -766,72 +815,79 @@ async function backgroundProcess(
     }))
     if (job) job.suggestions = formattedSuggestions
 
-    // Step 2: VLM analysis with rate-limit-aware approach
+    // Step 2: VLM analysis — combined analysis with both images, plus individual analyses
     if (job) job.progress = 'AI is analyzing your photo and product...'
     console.log(`[try-on] Starting VLM analysis for job ${jobId}`)
 
     const zai = await createZAI()
-    
+
+    // Combined VLM analysis (both images together — best context)
+    const combinedDesc = await vlmAnalyzeCombined(zai, selfieData, productImageBase64)
+    console.log(`[try-on] Combined desc: ${combinedDesc.substring(0, 150)}...`)
+
+    await delay(API_CALL_DELAY)
+
+    // Individual analyses as fallbacks
     const personDesc = await vlmAnalyze(zai, VLM_PERSON_PROMPT, selfieData)
     console.log(`[try-on] Person desc: ${personDesc.substring(0, 100)}...`)
-    
+
     await delay(API_CALL_DELAY)
-    
+
     const productDesc = await vlmAnalyze(zai, VLM_PRODUCT_PROMPT, productImageBase64)
     console.log(`[try-on] Product desc: ${productDesc.substring(0, 100)}...`)
 
-    // Step 3: Try generation strategies
+    // Step 3: Try generation strategies — attempt ALL and keep best
     const results: GenResult[] = []
     const placement = getProductPlacement(categorySlug, productName)
     const size = getImageSize(categorySlug)
 
-    // Strategy 1: Edit with both images (BEST for product matching - includes actual product image)
-    if (job) { job.attempt = 1; job.progress = 'Combining your photo with product...' }
+    // Use the best available description for the product
+    const bestProductDesc = productDesc || combinedDesc || 'a luxury fashion item'
+    const bestPersonDesc = personDesc || combinedDesc || 'a person'
+
+    // Strategy 1: Edit selfie with VLM combined description (BEST — preserves face + accurate product)
+    if (job) { job.attempt = 1; job.progress = 'Creating your virtual try-on...' }
     await delay(API_CALL_DELAY)
-    console.log(`[try-on] Strategy 1: edit-both`)
+    console.log(`[try-on] Strategy 1: edit-selfie-combined`)
     const s1Result = await safeImageEdit(zai, {
-      prompt: `Professional fashion photograph. The FIRST image is the person, the SECOND image is the product "${productName}". CRITICAL INSTRUCTIONS: 1) Use the FIRST image's face, skin tone, and body type - do NOT change them. 2) Apply the EXACT product from the SECOND image - match its colors, materials, texture, and design precisely. 3) Show the person ${placement} with the product looking natural and realistic. Studio lighting, photorealistic, 8K quality.`,
-      images: [{ url: selfieData }, { url: productImageBase64 }],
+      prompt: `Professional fashion photograph of this EXACT person ${placement}. PRODUCT TO APPLY: "${productName}". ${combinedDesc || bestProductDesc}. CRITICAL INSTRUCTIONS: 1) Keep this person's EXACT face, skin tone, hair, and body — do NOT alter them at all. 2) Apply the product with its EXACT colors, materials, texture, and design — match every color precisely as described. 3) The product must look realistic, natural, and properly fitted on this person. Studio lighting, photorealistic, 8K quality.`,
+      images: [{ url: selfieData }],
       size,
     })
     if (s1Result) {
-      console.log(`[try-on] Strategy 1 (edit-both) succeeded`)
-      results.push({ imageUrl: s1Result, strategy: 'edit-both', faceScore: 8, productScore: 9 })
+      console.log(`[try-on] Strategy 1 (edit-selfie-combined) succeeded`)
+      results.push({ imageUrl: s1Result, strategy: 'edit-selfie-combined', faceScore: 9, productScore: 7 })
     }
 
-    // Strategy 2: Edit selfie with product description (GOOD for face preservation - includes actual selfie)
-    if (results.length === 0) {
-      if (job) { job.attempt = 2; job.progress = 'Generating your try-on look...' }
-      await delay(API_CALL_DELAY)
-      console.log(`[try-on] Strategy 2: edit-selfie`)
-      const s2Result = await safeImageEdit(zai, {
-        prompt: `Professional fashion photograph. Edit this person's photo to show them ${placement}. The product is "${productName}": ${productDesc || 'a luxury fashion item'}. CRITICAL INSTRUCTIONS: 1) Keep the EXACT same face, skin tone, hair, and body type from the original photo. 2) Apply the product with its EXACT colors, materials, and design details. 3) The product must look realistic and naturally worn. Studio lighting, photorealistic, 8K quality.`,
-        images: [{ url: selfieData }],
-        size,
-      })
-      if (s2Result) {
-        console.log(`[try-on] Strategy 2 (edit-selfie) succeeded`)
-        results.push({ imageUrl: s2Result, strategy: 'edit-selfie', faceScore: 9, productScore: 6 })
-      }
+    // Strategy 2: Edit selfie with individual product description (GOOD — face preserved, product from VLM)
+    if (job) { job.attempt = 2; job.progress = 'Refining your try-on look...' }
+    await delay(API_CALL_DELAY)
+    console.log(`[try-on] Strategy 2: edit-selfie-product`)
+    const s2Result = await safeImageEdit(zai, {
+      prompt: `Professional fashion photograph. Edit this person's photo to show them ${placement}. The product is "${productName}": ${bestProductDesc}. CRITICAL: 1) Keep the EXACT same face, skin tone, hair, and body. 2) The product MUST match its EXACT described colors, materials, and design — no color shifting or substitution. 3) Product should look natural and realistically worn. Studio lighting, photorealistic, 8K quality.`,
+      images: [{ url: selfieData }],
+      size,
+    })
+    if (s2Result) {
+      console.log(`[try-on] Strategy 2 (edit-selfie-product) succeeded`)
+      results.push({ imageUrl: s2Result, strategy: 'edit-selfie-product', faceScore: 9, productScore: 6 })
     }
 
-    // Strategy 3: Edit product image with person description
-    if (results.length === 0) {
-      if (job) { job.attempt = 3; job.progress = 'Creating product-focused preview...' }
-      await delay(API_CALL_DELAY)
-      console.log(`[try-on] Strategy 3: edit-product`)
-      const s3Result = await safeImageEdit(zai, {
-        prompt: `Show this product "${productName}" being worn by a person. The person is ${placement}. Person description: ${personDesc || 'a person'}. Product: ${productDesc || 'luxury item'}. CRITICAL: The product's colors, materials, and design must match EXACTLY as shown in the image. Studio lighting, photorealistic, 8K quality.`,
-        images: [{ url: productImageBase64 }],
-        size,
-      })
-      if (s3Result) {
-        console.log(`[try-on] Strategy 3 (edit-product) succeeded`)
-        results.push({ imageUrl: s3Result, strategy: 'edit-product', faceScore: 5, productScore: 8 })
-      }
+    // Strategy 3: Edit product image with person description (GOOD — product preserved from image)
+    if (job) { job.attempt = 3; job.progress = 'Creating product-focused preview...' }
+    await delay(API_CALL_DELAY)
+    console.log(`[try-on] Strategy 3: edit-product`)
+    const s3Result = await safeImageEdit(zai, {
+      prompt: `Professional fashion photograph showing this EXACT product "${productName}" being worn by a person who is ${placement}. Person: ${bestPersonDesc}. CRITICAL: 1) The product's colors, materials, and design MUST match EXACTLY as shown in the image — do NOT change any color or detail. 2) The person should look natural wearing it. Studio lighting, photorealistic, 8K quality.`,
+      images: [{ url: productImageBase64 }],
+      size,
+    })
+    if (s3Result) {
+      console.log(`[try-on] Strategy 3 (edit-product) succeeded`)
+      results.push({ imageUrl: s3Result, strategy: 'edit-product', faceScore: 5, productScore: 9 })
     }
 
-    // Strategy 4: Text-to-image fallback
+    // Strategy 4: Text-to-image with combined description
     if (results.length === 0) {
       if (job) { job.attempt = 4; job.progress = 'Generating from descriptions...' }
       await delay(API_CALL_DELAY)
@@ -844,12 +900,12 @@ async function backgroundProcess(
         : 'Professional fashion photograph'
 
       const s4Result = await safeImageCreate(zai, {
-        prompt: `${bodyType} of a person ${placement}. The product is "${productName}": ${productDesc || 'a luxury fashion item'}. Person: ${personDesc || 'a person'}. Show the product being worn with accurate colors, materials, and details. Photorealistic, studio lighting, 8K, high detail.`,
+        prompt: `${bodyType} of a person ${placement}. The product is "${productName}": ${bestProductDesc}. Person: ${bestPersonDesc}. Combined context: ${combinedDesc || ''}. Show the product being worn with EXACT colors, materials, and details. Photorealistic, studio lighting, 8K, high detail.`,
         size,
       })
       if (s4Result) {
         console.log(`[try-on] Strategy 4 (create-detailed) succeeded`)
-        results.push({ imageUrl: s4Result, strategy: 'create-detailed', faceScore: 4, productScore: 6 })
+        results.push({ imageUrl: s4Result, strategy: 'create-detailed', faceScore: 4, productScore: 5 })
       }
     }
 
@@ -864,14 +920,14 @@ async function backgroundProcess(
       return
     }
 
-    // Step 4: Pick best result
+    // Step 4: Pick best result — prioritize PRODUCT accuracy (user expects to see the exact product)
     const best = results.reduce((a, b) => {
-      const sa = a.faceScore * 0.6 + a.productScore * 0.4
-      const sb = b.faceScore * 0.6 + b.productScore * 0.4
+      const sa = a.productScore * 0.6 + a.faceScore * 0.4
+      const sb = b.productScore * 0.6 + b.faceScore * 0.4
       return sb > sa ? b : a
     })
 
-    console.log(`[try-on] Best: ${best.strategy}, Face=${best.faceScore}/10, Product=${best.productScore}/10`)
+    console.log(`[try-on] Best: ${best.strategy}, Face=${best.faceScore}/10, Product=${best.productScore}/10, Score=${best.productScore * 0.6 + best.faceScore * 0.4}`)
 
     // Step 5: Apply 3BOXES GIFTS watermark
     if (job) job.progress = 'Adding finishing touches...'
