@@ -515,3 +515,26 @@ Stage Summary:
 - Visual variety: 60% dark backgrounds, 40% light; multiple layout structures
 - Key slides: $40B+ market hero stat, 3-card product features, asymmetric solution layout, gold-accented $500K ask
 - File: /home/z/my-project/investor-assets/3boxes-luxury-pitch-deck.pptx (572 KB, 12 slides)
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Make investor assets downloadable from the web app
+
+Work Log:
+- Added 'downloads' view type to Zustand store (View type union)
+- Created InvestorDownloads component with 3 download cards: Brochure (PDF, 1.7MB, 6 pages), Pitch Deck (PPTX, 572KB, 12 slides), Technical Documentation (PDF, 43KB)
+- Component includes: animated header with stats bar, file cards with gradient accents, download buttons with proper Content-Disposition headers, additional info section with demo/GitHub links
+- Added 'downloads' case to page.tsx view router
+- Added "Investor Kit" button to header actions (desktop: hidden lg:flex, Building2 icon) and mobile menu
+- Added "Investor Kit" link to footer Company section
+- Copied all 3 files to /public/downloads/ for static serving
+- Verified all 3 download URLs return HTTP 200
+- Lint check passed on modified files
+
+Stage Summary:
+- Investor assets now downloadable from the app via "Investor Kit" navigation
+- 3 entry points: header button, mobile menu, footer link
+- Files available at /downloads/3boxes-luxury-investor-brochure.pdf, /downloads/3boxes-luxury-pitch-deck.pptx, /downloads/3_Boxes_Luxury_Technical_Document.pdf
+- Files modified: store.ts, page.tsx, header.tsx, footer.tsx
+- New file: src/components/investor-downloads.tsx

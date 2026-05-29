@@ -5,7 +5,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Smartphone, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown } from 'lucide-react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Smartphone, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2 } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
@@ -245,6 +245,17 @@ export function Header() {
               <Sparkles className="h-3 w-3 text-amber-400/60" />
             </Button>
 
+            {/* Investor Kit */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setView('downloads')}
+              className="hidden lg:flex items-center gap-1.5 text-amber-300/70 hover:bg-amber-900/20 hover:text-amber-300 border border-amber-600/20 hover:border-amber-500/40"
+            >
+              <Building2 className="h-4 w-4" />
+              <span className="text-xs font-medium">Investor Kit</span>
+            </Button>
+
             {/* Login / Profile */}
             {authUser ? (
               <div className="flex items-center gap-2">
@@ -438,6 +449,17 @@ export function Header() {
                     <Gift className="h-4 w-4" />
                     {t('nav.giftBuilder')}
                     <Sparkles className="h-3 w-3 text-amber-400/60" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setView('downloads');
+                      setMobileMenuOpen(false);
+                    }}
+                    className="rounded-md px-4 py-2 text-left text-amber-300/80 transition-colors hover:bg-amber-900/20 hover:text-amber-300 flex items-center gap-2"
+                  >
+                    <Building2 className="h-4 w-4" />
+                    Investor Kit
+                    <Download className="h-3 w-3 text-amber-400/60" />
                   </button>
                   <button
                     onClick={() => {
