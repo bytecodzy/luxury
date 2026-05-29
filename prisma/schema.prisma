@@ -8,13 +8,17 @@ datasource db {
 }
 
 model Category {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
-  slug        String   @unique
+  slug        String    @unique
   description String?
   image       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  parentId    String?
+  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   products    Product[]
 }
 
@@ -64,6 +68,7 @@ model Product {
   reviews        Review[]
   variants       ProductVariant[]
   productImages  ProductImage[]
+  portfolioItems CustomerPortfolio[]
 }
 
 model ProductVariant {
@@ -633,6 +638,26 @@ model Review {
   verified  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ─── Customer Portfolio (AI-Generated Style Previews) ───
+
+model CustomerPortfolio {
+  id               String    @id @default(cuid())
+  productId        String
+  product          Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId           String?
+  userName         String
+  aiGeneratedImage String    // URL or base64 of the AI-generated style preview image
+  originalSelfie   String?   // stored only with explicit consent (optional)
+  rating           Int       @default(5)  // 1-5 star rating
+  reviewTitle      String?
+  reviewComment    String?
+  consentGiven     Boolean   @default(false) // whether customer consented to public display
+  isApproved       Boolean   @default(false) // admin approval for public display
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
 
 // ─── Multi-Currency & i18n Models ───

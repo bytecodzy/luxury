@@ -28,23 +28,52 @@ export async function GET() {
 
   // ─── DB-first path (default, with Shopify fallback) ───
   try {
+    // Fetch only top-level categories (parentId is null), ordered by `order` field
     const categories = await db.category.findMany({
-      orderBy: { name: 'asc' },
+      where: { parentId: null },
+      orderBy: { order: 'asc' },
       include: {
         _count: {
           select: { products: true },
         },
+        children: {
+          orderBy: { order: 'asc' },
+          include: {
+            _count: {
+              select: { products: true },
+            },
+          },
+        },
       },
     })
 
-    const transformed = categories.map((cat) => ({
-      id: cat.id,
-      name: cat.name,
-      slug: cat.slug,
-      description: cat.description,
-      image: cat.image,
-      productCount: cat._count.products,
-    }))
+    const transformed = categories.map((cat) => {
+      // For parent categories, show total product count including subcategories
+      const totalProductCount =
+        cat._count.products +
+        cat.children.reduce((sum, child) => sum + child._count.products, 0)
+
+      return {
+        id: cat.id,
+        name: cat.name,
+        slug: cat.slug,
+        description: cat.description,
+        image: cat.image,
+        productCount: totalProductCount,
+        parentId: cat.parentId,
+        order: cat.order,
+        children: cat.children.map((child) => ({
+          id: child.id,
+          name: child.name,
+          slug: child.slug,
+          description: child.description,
+          image: child.image,
+          productCount: child._count.products,
+          parentId: child.parentId,
+          order: child.order,
+        })),
+      }
+    })
 
     return NextResponse.json({
       categories: transformed,

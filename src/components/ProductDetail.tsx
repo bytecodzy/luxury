@@ -175,6 +175,12 @@ function TryOnDialog({
   const [productScore, setProductScore] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Consent flow state
+  const [showConsent, setShowConsent] = useState(false);
+  const [consentForm, setConsentForm] = useState({ name: '', rating: 5, title: '', comment: '', consentGiven: false });
+  const [consentSubmitting, setConsentSubmitting] = useState(false);
+  const [consentSubmitted, setConsentSubmitted] = useState(false);
+
   const reset = useCallback(() => {
     setStep('upload');
     setSelfiePreview(null);
@@ -188,6 +194,10 @@ function TryOnDialog({
     setFaceScore(null);
     setProductScore(null);
     setProgressMessage('');
+    setShowConsent(false);
+    setConsentForm({ name: '', rating: 5, title: '', comment: '', consentGiven: false });
+    setConsentSubmitting(false);
+    setConsentSubmitted(false);
     onResetBackground();
   }, [onResetBackground]);
 
@@ -279,6 +289,7 @@ function TryOnDialog({
           if (pollData.productScore) setProductScore(pollData.productScore);
           if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
           setStep('result');
+          setShowConsent(true);
           onBackgroundJob('result');
           return;
         }
@@ -674,6 +685,146 @@ function TryOnDialog({
                   Save
                 </a>
               </div>
+
+              {/* Share Your Style — Consent Section */}
+              {showConsent && !consentSubmitted && (
+                <div className="rounded-lg border border-amber-500/20 bg-gradient-to-r from-amber-950/30 to-stone-900/40 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-amber-400" />
+                    <h4 className="text-sm font-bold text-amber-300">Share Your Style</h4>
+                  </div>
+                  <p className="text-xs text-amber-200/50">
+                    Would you like to share your AI style preview as a successful customer photo for {productName}? Your photo will be displayed on the product page to help other customers.
+                  </p>
+
+                  <div className="space-y-3">
+                    <div>
+                      <Label className="text-xs text-amber-200/60">Your Name <span className="text-red-400">*</span></Label>
+                      <Input
+                        value={consentForm.name}
+                        onChange={(e) => setConsentForm(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="Enter your name"
+                        className="mt-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20 text-xs h-8"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs text-amber-200/60">Rating</Label>
+                      <div className="flex items-center gap-1 mt-1">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setConsentForm(prev => ({ ...prev, rating: i + 1 }))}
+                            className="transition-transform hover:scale-110"
+                          >
+                            <Star
+                              className={`h-5 w-5 ${
+                                i < consentForm.rating ? 'fill-amber-500 text-amber-500' : 'text-amber-700/40'
+                              }`}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label className="text-xs text-amber-200/60">Review Title (optional)</Label>
+                      <Input
+                        value={consentForm.title}
+                        onChange={(e) => setConsentForm(prev => ({ ...prev, title: e.target.value }))}
+                        placeholder="Summarize your experience"
+                        className="mt-1 border-amber-900/40 bg-stone-800/50 text-amber-50 placeholder:text-amber-200/20 text-xs h-8"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs text-amber-200/60">Your Review (optional)</Label>
+                      <textarea
+                        value={consentForm.comment}
+                        onChange={(e) => setConsentForm(prev => ({ ...prev, comment: e.target.value }))}
+                        placeholder="Share your thoughts about this product..."
+                        rows={3}
+                        className="mt-1 w-full rounded-md border border-amber-900/40 bg-stone-800/50 px-3 py-2 text-xs text-amber-50 placeholder:text-amber-200/20 focus:outline-none focus:ring-1 focus:ring-amber-500/50"
+                      />
+                    </div>
+
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={consentForm.consentGiven}
+                        onChange={(e) => setConsentForm(prev => ({ ...prev, consentGiven: e.target.checked }))}
+                        className="mt-0.5 h-4 w-4 rounded border-amber-700/50 bg-stone-800 text-amber-600 focus:ring-amber-500/50"
+                      />
+                      <span className="text-[10px] text-amber-200/50 leading-relaxed">
+                        I consent to displaying my AI-generated style preview on the product page. I understand my photo will be visible to other customers.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        if (!consentForm.name || !consentForm.consentGiven) return;
+                        setConsentSubmitting(true);
+                        try {
+                          const res = await fetch('/api/portfolio', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              productId,
+                              userName: consentForm.name,
+                              aiGeneratedImage: watermarkedResult,
+                              rating: consentForm.rating,
+                              reviewTitle: consentForm.title || undefined,
+                              reviewComment: consentForm.comment || undefined,
+                              consentGiven: true,
+                            }),
+                          });
+                          if (res.ok) {
+                            setConsentSubmitted(true);
+                          }
+                        } catch {
+                          // ignore
+                        } finally {
+                          setConsentSubmitting(false);
+                        }
+                      }}
+                      disabled={!consentForm.name || !consentForm.consentGiven || consentSubmitting}
+                      className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs h-8"
+                    >
+                      {consentSubmitting ? (
+                        <>
+                          <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                          Sharing...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="mr-1.5 h-3 w-3" />
+                          Share My Style
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setShowConsent(false)}
+                      className="text-amber-200/40 hover:text-amber-200/60 text-xs h-8"
+                    >
+                      No, Thanks
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Consent submitted success message */}
+              {consentSubmitted && (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-600/30 bg-emerald-950/30 p-3">
+                  <CheckCircle className="h-4 w-4 flex-shrink-0 text-emerald-400" />
+                  <p className="text-xs text-emerald-300">Thank you for sharing your style! Your photo will appear on the product page soon.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -737,6 +888,24 @@ export function ProductDetail() {
   });
 
   const reviews: Review[] = reviewsData?.reviews ?? [];
+
+  // Portfolio query
+  const { data: portfolioData } = useQuery({
+    queryKey: ['portfolio', selectedProductId],
+    queryFn: () => fetch('/api/portfolio?productId=' + selectedProductId).then(r => r.json()),
+    enabled: !!selectedProductId,
+  });
+
+  const portfolioItems: Array<{
+    id: string;
+    userName: string;
+    aiGeneratedImage: string;
+    rating: number;
+    reviewTitle: string | null;
+    reviewComment: string | null;
+    createdAt: string;
+    consentGiven: boolean;
+  }> = portfolioData?.portfolios ?? [];
 
   const handleToggleWishlist = async () => {
     if (!authToken || !selectedProductId) return;
@@ -1238,6 +1407,90 @@ export function ProductDetail() {
           </div>
         )}
       </div>
+
+      {/* Happy Customers — Portfolio Section */}
+      {portfolioItems.length > 0 && (
+        <div className="mt-12">
+          <div className="flex items-center gap-3 mb-6">
+            <Heart className="h-5 w-5 text-amber-400" />
+            <h3 className="text-lg font-semibold text-amber-100">
+              Happy Customers
+            </h3>
+            <Badge variant="outline" className="border-amber-900/30 text-amber-200/40 text-xs">
+              {portfolioItems.length} style {portfolioItems.length === 1 ? 'preview' : 'previews'}
+            </Badge>
+          </div>
+
+          <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-thin">
+            {portfolioItems.map((item) => (
+              <div
+                key={item.id}
+                className="group flex-shrink-0 w-56 rounded-xl border border-amber-900/20 bg-stone-900/60 p-3 transition-all hover:border-amber-600/30 hover:bg-stone-900/80"
+              >
+                {/* Image */}
+                <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/15 bg-stone-800 mb-3">
+                  <img
+                    src={item.aiGeneratedImage}
+                    alt={`${item.userName}'s style preview`}
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
+                  {/* AI Style Preview badge */}
+                  <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-center gap-1 rounded-md bg-stone-900/80 border border-amber-500/30 px-1.5 py-0.5">
+                    <Sparkles className="h-2.5 w-2.5 text-amber-400" />
+                    <span className="text-[8px] font-bold text-amber-400">AI Style Preview</span>
+                  </div>
+                  {/* Verified badge */}
+                  <div className="absolute right-1.5 top-1.5 rounded-full bg-emerald-600/90 px-1.5 py-0.5">
+                    <span className="text-[7px] font-bold text-white flex items-center gap-0.5">
+                      <CheckCircle className="h-2 w-2" />
+                      Verified
+                    </span>
+                  </div>
+                </div>
+
+                {/* User info */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-amber-100 truncate">{item.userName}</span>
+                    <div className="flex items-center gap-0.5">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star
+                          key={i}
+                          className={`h-2.5 w-2.5 ${
+                            i < item.rating ? 'fill-amber-500 text-amber-500' : 'text-amber-700/40'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  {item.reviewTitle && (
+                    <p className="text-[10px] font-medium text-amber-200/70 truncate">{item.reviewTitle}</p>
+                  )}
+
+                  {item.reviewComment && (
+                    <p className="text-[10px] text-amber-200/40 line-clamp-2 leading-relaxed">
+                      {item.reviewComment.length > 80
+                        ? item.reviewComment.slice(0, 80) + '...'
+                        : item.reviewComment}
+                    </p>
+                  )}
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[9px] text-amber-200/25">
+                      {new Date(item.createdAt).toLocaleDateString()}
+                    </span>
+                    <Badge className="bg-amber-600/20 text-amber-400 text-[8px] border-amber-600/30 border px-1.5 py-0">
+                      <CheckCircle className="h-2 w-2 mr-0.5" />
+                      Verified Style Preview
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Review Dialog */}
       <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>

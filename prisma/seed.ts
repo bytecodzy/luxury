@@ -1,76 +1,238 @@
 import { db } from "@/lib/db";
 
-const categories = [
+// ─── Version 1.2 Category Structure ───
+// Parent categories first, then subcategories with parentSlug references
+
+const parentCategories = [
   {
-    name: "Watches",
-    slug: "watches",
-    description: "Luxury timepieces from world-renowned makers",
-    image: "/images/categories/watches.jpg",
+    name: "Couple",
+    slug: "couple",
+    description: "Curated gifts and experiences for couples",
+    image: "/images/categories/couple.jpg",
+    order: 1,
   },
   {
-    name: "Jewelry",
-    slug: "jewelry",
-    description: "Exquisite jewelry crafted with precious stones and metals",
-    image: "/images/categories/jewelry.jpg",
+    name: "Men",
+    slug: "men",
+    description: "Luxury gifts and essentials for him",
+    image: "/images/categories/men.jpg",
+    order: 2,
   },
   {
-    name: "Leather Goods",
-    slug: "leather-goods",
-    description: "Premium leather bags, wallets, and accessories",
-    image: "/images/categories/leather.jpg",
+    name: "Women",
+    slug: "women",
+    description: "Elegant gifts and essentials for her",
+    image: "/images/categories/women.jpg",
+    order: 3,
+  },
+  {
+    name: "Kids",
+    slug: "kids",
+    description: "Premium toys, games, and fashion for children",
+    image: "/images/categories/kids.jpg",
+    order: 4,
+  },
+  {
+    name: "Home",
+    slug: "home",
+    description: "Luxurious home décor and lifestyle accessories",
+    image: "/images/categories/home.jpg",
+    order: 5,
+  },
+  {
+    name: "Office",
+    slug: "office",
+    description: "Corporate gifts, desk accessories, and stationery",
+    image: "/images/categories/office.jpg",
+    order: 6,
+  },
+  {
+    name: "New Arrivals",
+    slug: "new-arrivals",
+    description: "The latest additions to our luxury collection",
+    image: "/images/categories/new-arrivals.jpg",
+    order: 7,
+  },
+];
+
+const subcategories = [
+  // Couple
+  {
+    name: "Couple Friendly",
+    slug: "couple-friendly",
+    description: "Thoughtful gift experiences for couples to share together",
+    image: "/images/categories/couple-friendly.jpg",
+    order: 1,
+    parentSlug: "couple",
+  },
+
+  // Men
+  {
+    name: "Accessories",
+    slug: "men-accessories",
+    description: "Premium accessories for the modern gentleman",
+    image: "/images/categories/men-accessories.jpg",
+    order: 1,
+    parentSlug: "men",
+  },
+  {
+    name: "Shirts",
+    slug: "men-shirts",
+    description: "Premium dress shirts and formal shirts",
+    image: "/images/categories/mens-shirts.jpg",
+    order: 2,
+    parentSlug: "men",
+  },
+  {
+    name: "T-Shirts & Polos",
+    slug: "men-tshirts",
+    description: "Casual luxury t-shirts, polos, and henleys",
+    image: "/images/categories/mens-tshirts.jpg",
+    order: 3,
+    parentSlug: "men",
   },
   {
     name: "Fragrances",
-    slug: "fragrances",
-    description: "Signature scents from the world's finest perfumers",
-    image: "/images/categories/fragrances.jpg",
+    slug: "men-fragrances",
+    description: "Signature masculine scents from world-renowned perfumers",
+    image: "/images/categories/men-fragrances.jpg",
+    order: 4,
+    parentSlug: "men",
   },
   {
-    name: "Fashion",
-    slug: "fashion",
-    description: "Designer clothing and haute couture collections",
-    image: "/images/categories/fashion.jpg",
+    name: "Watches",
+    slug: "men-watches",
+    description: "Luxury timepieces from world-renowned makers",
+    image: "/images/categories/watches.jpg",
+    order: 5,
+    parentSlug: "men",
   },
   {
-    name: "Home & Living",
-    slug: "home-living",
-    description: "Luxurious home décor and lifestyle accessories",
-    image: "/images/categories/home.jpg",
+    name: "Leather Goods",
+    slug: "men-leather",
+    description: "Premium leather bags, wallets, and accessories",
+    image: "/images/categories/leather.jpg",
+    order: 6,
+    parentSlug: "men",
+  },
+
+  // Women
+  {
+    name: "Jewelry",
+    slug: "women-jewelry",
+    description: "Exquisite jewelry crafted with precious stones and metals",
+    image: "/images/categories/jewelry.jpg",
+    order: 1,
+    parentSlug: "women",
   },
   {
     name: "Sarees",
-    slug: "sarees",
+    slug: "women-sarees",
     description: "Handwoven silk and designer sarees for every occasion",
     image: "/images/categories/sarees.jpg",
+    order: 2,
+    parentSlug: "women",
   },
   {
-    name: "Toys",
-    slug: "toys",
+    name: "Fashion",
+    slug: "women-fashion",
+    description: "Designer clothing and haute couture collections",
+    image: "/images/categories/fashion.jpg",
+    order: 3,
+    parentSlug: "women",
+  },
+  {
+    name: "Fragrances",
+    slug: "women-fragrances",
+    description: "Captivating feminine scents from master perfumers",
+    image: "/images/categories/women-fragrances.jpg",
+    order: 4,
+    parentSlug: "women",
+  },
+  {
+    name: "Accessories",
+    slug: "women-accessories",
+    description: "Elegant accessories to complete every look",
+    image: "/images/categories/women-accessories.jpg",
+    order: 5,
+    parentSlug: "women",
+  },
+
+  // Kids
+  {
+    name: "Toys & Games",
+    slug: "kids-toys",
     description: "Premium collectible toys and luxury gifts for all ages",
     image: "/images/categories/toys.jpg",
+    order: 1,
+    parentSlug: "kids",
   },
   {
-    name: "Romantic Gifts",
-    slug: "romantic-gifts",
-    description: "Thoughtful gift experiences to express your love",
-    image: "/images/categories/romantic.jpg",
+    name: "Kids Fashion",
+    slug: "kids-fashion",
+    description: "Designer clothing and accessories for children",
+    image: "/images/categories/kids-fashion.jpg",
+    order: 2,
+    parentSlug: "kids",
+  },
+
+  // Home
+  {
+    name: "Home Décor",
+    slug: "home-decor",
+    description: "Artisan décor pieces to elevate your living space",
+    image: "/images/categories/home-decor.jpg",
+    order: 1,
+    parentSlug: "home",
   },
   {
-    name: "Couple Friendly Gifts",
-    slug: "couple-gifts",
-    description: "Gift experiences for couples to share together",
-    image: "/images/categories/couple.jpg",
+    name: "Candles & Fragrances",
+    slug: "home-candles",
+    description: "Hand-poured candles and home fragrance collections",
+    image: "/images/categories/home-candles.jpg",
+    order: 2,
+    parentSlug: "home",
   },
   {
-    name: "Men's Shirts & T-Shirts",
-    slug: "mens-shirts",
-    description: "Premium shirts and t-shirts for the modern gentleman",
-    image: "/images/categories/mens-shirts.jpg",
+    name: "Living",
+    slug: "home-living",
+    description: "Luxurious textiles and lifestyle accessories for the home",
+    image: "/images/categories/home-living.jpg",
+    order: 3,
+    parentSlug: "home",
+  },
+
+  // Office
+  {
+    name: "Corporate Gifts",
+    slug: "office-corporate-gifts",
+    description: "Curated corporate gift hampers and bulk gifting solutions",
+    image: "/images/categories/office-corporate-gifts.jpg",
+    order: 1,
+    parentSlug: "office",
+  },
+  {
+    name: "Desk Accessories",
+    slug: "office-desk",
+    description: "Elegant desk organizers and workspace accessories",
+    image: "/images/categories/office-desk.jpg",
+    order: 2,
+    parentSlug: "office",
+  },
+  {
+    name: "Stationery",
+    slug: "office-stationery",
+    description: "Premium journals, pens, and writing instruments",
+    image: "/images/categories/office-stationery.jpg",
+    order: 3,
+    parentSlug: "office",
   },
 ];
 
 const products = [
-  // Watches
+  // ═══════════════════════════════════════════════════
+  // MEN - Watches (men-watches)
+  // ═══════════════════════════════════════════════════
   {
     name: "Royal Chronograph Gold",
     slug: "royal-chronograph-gold",
@@ -78,12 +240,12 @@ const products = [
     price: 12500,
     compareAtPrice: 15000,
     images: JSON.stringify(["/images/products/watch-1.jpg", "/images/products/watch-1-alt.jpg"]),
-    categorySlug: "watches",
+    categorySlug: "men-watches",
     stock: 5,
     rating: 4.9,
     reviewCount: 47,
     featured: true,
-    tags: JSON.stringify(["gold", "chronograph", "swiss", "luxury"]),
+    tags: JSON.stringify(["gold", "chronograph", "swiss", "luxury", "new-arrival"]),
   },
   {
     name: "Midnight Tourbillon",
@@ -92,7 +254,7 @@ const products = [
     price: 45000,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/watch-2.jpg", "/images/products/watch-2-alt.jpg"]),
-    categorySlug: "watches",
+    categorySlug: "men-watches",
     stock: 2,
     rating: 5.0,
     reviewCount: 12,
@@ -106,7 +268,7 @@ const products = [
     price: 4200,
     compareAtPrice: 5000,
     images: JSON.stringify(["/images/products/watch-3.jpg"]),
-    categorySlug: "watches",
+    categorySlug: "men-watches",
     stock: 15,
     rating: 4.7,
     reviewCount: 89,
@@ -120,15 +282,17 @@ const products = [
     price: 18500,
     compareAtPrice: 22000,
     images: JSON.stringify(["/images/products/watch-4.jpg"]),
-    categorySlug: "watches",
+    categorySlug: "men-watches",
     stock: 8,
     rating: 4.8,
     reviewCount: 34,
     featured: true,
-    tags: JSON.stringify(["diamond", "diver", "ceramic"]),
+    tags: JSON.stringify(["diamond", "diver", "ceramic", "new-arrival"]),
   },
 
-  // Jewelry
+  // ═══════════════════════════════════════════════════
+  // WOMEN - Jewelry (women-jewelry)
+  // ═══════════════════════════════════════════════════
   {
     name: "Eternal Diamond Necklace",
     slug: "eternal-diamond-necklace",
@@ -136,7 +300,7 @@ const products = [
     price: 28000,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/jewelry-1.jpg", "/images/products/jewelry-1-alt.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 3,
     rating: 5.0,
     reviewCount: 22,
@@ -150,12 +314,12 @@ const products = [
     price: 35000,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/jewelry-2.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 2,
     rating: 4.9,
     reviewCount: 15,
     featured: true,
-    tags: JSON.stringify(["ruby", "ring", "rose-gold"]),
+    tags: JSON.stringify(["ruby", "ring", "rose-gold", "new-arrival"]),
   },
   {
     name: "Sapphire Cascade Earrings",
@@ -164,7 +328,7 @@ const products = [
     price: 8900,
     compareAtPrice: 10500,
     images: JSON.stringify(["/images/products/jewelry-3.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 6,
     rating: 4.8,
     reviewCount: 31,
@@ -178,7 +342,7 @@ const products = [
     price: 15800,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/jewelry-4.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 4,
     rating: 4.9,
     reviewCount: 19,
@@ -192,7 +356,7 @@ const products = [
     price: 12500,
     compareAtPrice: 14000,
     images: JSON.stringify(["/images/products/jewelry-5.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 5,
     rating: 4.8,
     reviewCount: 24,
@@ -206,7 +370,7 @@ const products = [
     price: 18500,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/jewelry-6.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 6,
     rating: 5.0,
     reviewCount: 41,
@@ -220,7 +384,7 @@ const products = [
     price: 22000,
     compareAtPrice: 25000,
     images: JSON.stringify(["/images/products/jewelry-7.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 2,
     rating: 5.0,
     reviewCount: 16,
@@ -234,7 +398,7 @@ const products = [
     price: 9800,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/jewelry-8.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 4,
     rating: 4.9,
     reviewCount: 28,
@@ -248,7 +412,7 @@ const products = [
     price: 4500,
     compareAtPrice: 5200,
     images: JSON.stringify(["/images/products/jewelry-9.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 8,
     rating: 4.8,
     reviewCount: 52,
@@ -262,7 +426,7 @@ const products = [
     price: 1200,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/jewelry-10.jpg"]),
-    categorySlug: "jewelry",
+    categorySlug: "women-jewelry",
     stock: 10,
     rating: 4.6,
     reviewCount: 37,
@@ -270,7 +434,9 @@ const products = [
     tags: JSON.stringify(["silver", "cuff", "turquoise", "filigree", "boho", "oxidized"]),
   },
 
-  // Leather Goods
+  // ═══════════════════════════════════════════════════
+  // MEN - Leather Goods (men-leather)
+  // ═══════════════════════════════════════════════════
   {
     name: "Heritage Leather Briefcase",
     slug: "heritage-leather-briefcase",
@@ -278,7 +444,7 @@ const products = [
     price: 1850,
     compareAtPrice: 2200,
     images: JSON.stringify(["/images/products/leather-1.jpg", "/images/products/leather-1-alt.jpg"]),
-    categorySlug: "leather-goods",
+    categorySlug: "men-leather",
     stock: 12,
     rating: 4.8,
     reviewCount: 67,
@@ -292,12 +458,12 @@ const products = [
     price: 5200,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/leather-2.jpg"]),
-    categorySlug: "leather-goods",
+    categorySlug: "men-leather",
     stock: 4,
     rating: 4.9,
     reviewCount: 28,
     featured: true,
-    tags: JSON.stringify(["trunk", "monogram", "travel"]),
+    tags: JSON.stringify(["trunk", "monogram", "travel", "new-arrival"]),
   },
   {
     name: "Bifold Wallet in Epi Leather",
@@ -306,7 +472,7 @@ const products = [
     price: 650,
     compareAtPrice: 780,
     images: JSON.stringify(["/images/products/leather-3.jpg"]),
-    categorySlug: "leather-goods",
+    categorySlug: "men-leather",
     stock: 25,
     rating: 4.6,
     reviewCount: 112,
@@ -314,7 +480,9 @@ const products = [
     tags: JSON.stringify(["wallet", "epi-leather", "slim"]),
   },
 
-  // Fragrances
+  // ═══════════════════════════════════════════════════
+  // MEN - Fragrances (men-fragrances)
+  // ═══════════════════════════════════════════════════
   {
     name: "Noir Absolu Parfum",
     slug: "noir-absolu-parfum",
@@ -322,26 +490,12 @@ const products = [
     price: 420,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/fragrance-1.jpg", "/images/products/fragrance-1-alt.jpg"]),
-    categorySlug: "fragrances",
+    categorySlug: "men-fragrances",
     stock: 30,
     rating: 4.8,
     reviewCount: 156,
     featured: true,
-    tags: JSON.stringify(["oud", "amber", "unisex"]),
-  },
-  {
-    name: "Jardin Secret Eau de Parfum",
-    slug: "jardin-secret-edp",
-    description: "A secret garden captured in a bottle — jasmine sambac, tuberose, and fresh fig leaf create an enchanting feminine fragrance.",
-    price: 350,
-    compareAtPrice: 420,
-    images: JSON.stringify(["/images/products/fragrance-2.jpg"]),
-    categorySlug: "fragrances",
-    stock: 40,
-    rating: 4.7,
-    reviewCount: 203,
-    featured: false,
-    tags: JSON.stringify(["floral", "jasmine", "feminine"]),
+    tags: JSON.stringify(["oud", "amber", "masculine"]),
   },
   {
     name: "Vetiver Imperial Cologne",
@@ -350,7 +504,7 @@ const products = [
     price: 280,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/fragrance-3.jpg"]),
-    categorySlug: "fragrances",
+    categorySlug: "men-fragrances",
     stock: 50,
     rating: 4.6,
     reviewCount: 178,
@@ -358,7 +512,27 @@ const products = [
     tags: JSON.stringify(["vetiver", "bergamot", "masculine"]),
   },
 
-  // Fashion
+  // ═══════════════════════════════════════════════════
+  // WOMEN - Fragrances (women-fragrances)
+  // ═══════════════════════════════════════════════════
+  {
+    name: "Jardin Secret Eau de Parfum",
+    slug: "jardin-secret-edp",
+    description: "A secret garden captured in a bottle — jasmine sambac, tuberose, and fresh fig leaf create an enchanting feminine fragrance.",
+    price: 350,
+    compareAtPrice: 420,
+    images: JSON.stringify(["/images/products/fragrance-2.jpg"]),
+    categorySlug: "women-fragrances",
+    stock: 40,
+    rating: 4.7,
+    reviewCount: 203,
+    featured: false,
+    tags: JSON.stringify(["floral", "jasmine", "feminine"]),
+  },
+
+  // ═══════════════════════════════════════════════════
+  // WOMEN - Fashion (women-fashion)
+  // ═══════════════════════════════════════════════════
   {
     name: "Cashmere Overcoat",
     slug: "cashmere-overcoat",
@@ -366,7 +540,7 @@ const products = [
     price: 3200,
     compareAtPrice: 3800,
     images: JSON.stringify(["/images/products/fashion-1.jpg", "/images/products/fashion-1-alt.jpg"]),
-    categorySlug: "fashion",
+    categorySlug: "women-fashion",
     stock: 8,
     rating: 4.9,
     reviewCount: 43,
@@ -380,12 +554,12 @@ const products = [
     price: 5800,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/fashion-2.jpg"]),
-    categorySlug: "fashion",
+    categorySlug: "women-fashion",
     stock: 4,
     rating: 5.0,
     reviewCount: 19,
     featured: true,
-    tags: JSON.stringify(["silk", "gown", "crystal"]),
+    tags: JSON.stringify(["silk", "gown", "crystal", "new-arrival"]),
   },
   {
     name: "Tailored Linen Blazer",
@@ -394,7 +568,7 @@ const products = [
     price: 1450,
     compareAtPrice: 1700,
     images: JSON.stringify(["/images/products/fashion-3.jpg"]),
-    categorySlug: "fashion",
+    categorySlug: "women-fashion",
     stock: 10,
     rating: 4.7,
     reviewCount: 55,
@@ -402,7 +576,9 @@ const products = [
     tags: JSON.stringify(["linen", "blazer", "tailored"]),
   },
 
-  // Home & Living
+  // ═══════════════════════════════════════════════════
+  // HOME - Décor (home-decor)
+  // ═══════════════════════════════════════════════════
   {
     name: "Murano Crystal Vase",
     slug: "murano-crystal-vase",
@@ -410,13 +586,17 @@ const products = [
     price: 2800,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/home-1.jpg", "/images/products/home-1-alt.jpg"]),
-    categorySlug: "home-living",
+    categorySlug: "home-decor",
     stock: 7,
     rating: 4.8,
     reviewCount: 24,
     featured: true,
     tags: JSON.stringify(["murano", "crystal", "vase", "gold-leaf"]),
   },
+
+  // ═══════════════════════════════════════════════════
+  // HOME - Living (home-living)
+  // ═══════════════════════════════════════════════════
   {
     name: "Silk Throw Pillow Set",
     slug: "silk-throw-pillow-set",
@@ -431,6 +611,10 @@ const products = [
     featured: false,
     tags: JSON.stringify(["silk", "pillow", "embroidered"]),
   },
+
+  // ═══════════════════════════════════════════════════
+  // HOME - Candles & Fragrances (home-candles)
+  // ═══════════════════════════════════════════════════
   {
     name: "Artisan Scented Candle Collection",
     slug: "artisan-scented-candles",
@@ -438,15 +622,45 @@ const products = [
     price: 380,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/home-3.jpg"]),
-    categorySlug: "home-living",
+    categorySlug: "home-candles",
     stock: 20,
     rating: 4.5,
     reviewCount: 87,
     featured: false,
     tags: JSON.stringify(["candles", "scented", "artisan"]),
   },
+  {
+    name: "Luxury Reed Diffuser Set",
+    slug: "luxury-reed-diffuser-set",
+    description: "An elegant reed diffuser set in hand-blown glass with natural rattan reeds. Available in three sophisticated scent blends: Oud & Rose, White Tea & Ginger, and Amber & Sandalwood. Each bottle lasts up to 90 days.",
+    price: 320,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/home-diffuser-1.jpg"]),
+    categorySlug: "home-candles",
+    stock: 25,
+    rating: 4.7,
+    reviewCount: 54,
+    featured: true,
+    tags: JSON.stringify(["diffuser", "home-fragrance", "reed", "new-arrival"]),
+  },
+  {
+    name: "Handpoured Soy Candle Trio",
+    slug: "handpoured-soy-candle-trio",
+    description: "A trio of handpoured soy wax candles in matte ceramic vessels. Scents: Midnight Jasmine, Cedarwood & Sage, and Vanilla Orchid. Clean burn, cotton wicks. 60 hours burn time each.",
+    price: 250,
+    compareAtPrice: 310,
+    images: JSON.stringify(["/images/products/home-candle-trio.jpg"]),
+    categorySlug: "home-candles",
+    stock: 30,
+    rating: 4.6,
+    reviewCount: 72,
+    featured: false,
+    tags: JSON.stringify(["soy-candle", "handpoured", "ceramic", "eco-friendly"]),
+  },
 
-  // Sarees
+  // ═══════════════════════════════════════════════════
+  // WOMEN - Sarees (women-sarees)
+  // ═══════════════════════════════════════════════════
   {
     name: "Banarasi Silk Saree",
     slug: "banarasi-silk-saree",
@@ -454,7 +668,7 @@ const products = [
     price: 1850,
     compareAtPrice: 2200,
     images: JSON.stringify(["/images/products/saree-1.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 8,
     rating: 4.9,
     reviewCount: 56,
@@ -468,7 +682,7 @@ const products = [
     price: 2400,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/saree-2.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 5,
     rating: 5.0,
     reviewCount: 34,
@@ -482,7 +696,7 @@ const products = [
     price: 780,
     compareAtPrice: 950,
     images: JSON.stringify(["/images/products/saree-3.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 15,
     rating: 4.7,
     reviewCount: 89,
@@ -496,12 +710,12 @@ const products = [
     price: 3200,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/saree-4.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 4,
     rating: 5.0,
     reviewCount: 18,
     featured: true,
-    tags: JSON.stringify(["patola", "double-ikat", "handwoven", "heritage", "collector"]),
+    tags: JSON.stringify(["patola", "double-ikat", "handwoven", "heritage", "collector", "new-arrival"]),
   },
   {
     name: "Organza Floral Dream Saree",
@@ -510,7 +724,7 @@ const products = [
     price: 1650,
     compareAtPrice: 1900,
     images: JSON.stringify(["/images/products/saree-5.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 7,
     rating: 4.8,
     reviewCount: 42,
@@ -524,7 +738,7 @@ const products = [
     price: 1100,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/saree-6.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 10,
     rating: 4.6,
     reviewCount: 35,
@@ -538,7 +752,7 @@ const products = [
     price: 4800,
     compareAtPrice: 5500,
     images: JSON.stringify(["/images/products/saree-7.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 3,
     rating: 5.0,
     reviewCount: 27,
@@ -552,7 +766,7 @@ const products = [
     price: 680,
     compareAtPrice: 820,
     images: JSON.stringify(["/images/products/saree-8.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 12,
     rating: 4.5,
     reviewCount: 63,
@@ -566,7 +780,7 @@ const products = [
     price: 3600,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/saree-9.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 5,
     rating: 4.9,
     reviewCount: 22,
@@ -580,7 +794,7 @@ const products = [
     price: 2100,
     compareAtPrice: 2500,
     images: JSON.stringify(["/images/products/saree-10.jpg"]),
-    categorySlug: "sarees",
+    categorySlug: "women-sarees",
     stock: 6,
     rating: 4.8,
     reviewCount: 38,
@@ -588,7 +802,9 @@ const products = [
     tags: JSON.stringify(["georgette", "crystal", "swarovski", "cocktail", "party-wear", "glam"]),
   },
 
-  // Toys
+  // ═══════════════════════════════════════════════════
+  // KIDS - Toys & Games (kids-toys)
+  // ═══════════════════════════════════════════════════
   {
     name: "Luxury Crystal Chess Set",
     slug: "luxury-crystal-chess-set",
@@ -596,7 +812,7 @@ const products = [
     price: 1200,
     compareAtPrice: 1500,
     images: JSON.stringify(["/images/products/toy-1.jpg"]),
-    categorySlug: "toys",
+    categorySlug: "kids-toys",
     stock: 6,
     rating: 4.8,
     reviewCount: 28,
@@ -610,12 +826,12 @@ const products = [
     price: 3500,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/toy-2.jpg"]),
-    categorySlug: "toys",
+    categorySlug: "kids-toys",
     stock: 3,
     rating: 5.0,
     reviewCount: 15,
     featured: true,
-    tags: JSON.stringify(["ferrari", "die-cast", "limited-edition", "collectible"]),
+    tags: JSON.stringify(["ferrari", "die-cast", "limited-edition", "collectible", "new-arrival"]),
   },
   {
     name: "Premium Wooden Train Set",
@@ -624,7 +840,7 @@ const products = [
     price: 450,
     compareAtPrice: 580,
     images: JSON.stringify(["/images/products/toy-3.jpg"]),
-    categorySlug: "toys",
+    categorySlug: "kids-toys",
     stock: 12,
     rating: 4.7,
     reviewCount: 67,
@@ -632,7 +848,9 @@ const products = [
     tags: JSON.stringify(["wooden", "train", "handcrafted", "sustainable"]),
   },
 
-  // Romantic Gifts
+  // ═══════════════════════════════════════════════════
+  // COUPLE - Couple Friendly (couple-friendly)
+  // ═══════════════════════════════════════════════════
   {
     name: "Enchanted Rose Box",
     slug: "enchanted-rose-box",
@@ -640,7 +858,7 @@ const products = [
     price: 320,
     compareAtPrice: 400,
     images: JSON.stringify(["/images/products/romantic-1.jpg"]),
-    categorySlug: "romantic-gifts",
+    categorySlug: "couple-friendly",
     stock: 20,
     rating: 4.8,
     reviewCount: 142,
@@ -654,7 +872,7 @@ const products = [
     price: 180,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/romantic-2.jpg"]),
-    categorySlug: "romantic-gifts",
+    categorySlug: "couple-friendly",
     stock: 30,
     rating: 4.9,
     reviewCount: 89,
@@ -668,15 +886,13 @@ const products = [
     price: 550,
     compareAtPrice: 680,
     images: JSON.stringify(["/images/products/romantic-3.jpg"]),
-    categorySlug: "romantic-gifts",
+    categorySlug: "couple-friendly",
     stock: 10,
     rating: 4.7,
     reviewCount: 56,
     featured: false,
     tags: JSON.stringify(["hamper", "date-night", "chocolate", "candles"]),
   },
-
-  // Couple Friendly Gifts
   {
     name: "His & Hers Watch Set",
     slug: "his-hers-watch-set",
@@ -684,12 +900,12 @@ const products = [
     price: 6800,
     compareAtPrice: 7500,
     images: JSON.stringify(["/images/products/couple-1.jpg"]),
-    categorySlug: "couple-gifts",
+    categorySlug: "couple-friendly",
     stock: 4,
     rating: 4.9,
     reviewCount: 22,
     featured: true,
-    tags: JSON.stringify(["watch", "matching", "couple", "swiss"]),
+    tags: JSON.stringify(["watch", "matching", "couple", "swiss", "new-arrival"]),
   },
   {
     name: "Couple's Spa Experience Box",
@@ -698,7 +914,7 @@ const products = [
     price: 420,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/couple-2.jpg"]),
-    categorySlug: "couple-gifts",
+    categorySlug: "couple-friendly",
     stock: 15,
     rating: 4.8,
     reviewCount: 74,
@@ -712,7 +928,7 @@ const products = [
     price: 350,
     compareAtPrice: 450,
     images: JSON.stringify(["/images/products/couple-3.jpg"]),
-    categorySlug: "couple-gifts",
+    categorySlug: "couple-friendly",
     stock: 25,
     rating: 4.6,
     reviewCount: 48,
@@ -720,7 +936,9 @@ const products = [
     tags: JSON.stringify(["portrait", "custom", "canvas", "framed"]),
   },
 
-  // Men's Shirts & T-Shirts
+  // ═══════════════════════════════════════════════════
+  // MEN - Shirts (men-shirts)
+  // ═══════════════════════════════════════════════════
   {
     name: "Royal White Dress Shirt",
     slug: "royal-white-dress-shirt",
@@ -728,7 +946,7 @@ const products = [
     price: 480,
     compareAtPrice: 580,
     images: JSON.stringify(["/images/products/mens-shirt-1.jpg"]),
-    categorySlug: "mens-shirts",
+    categorySlug: "men-shirts",
     stock: 20,
     rating: 4.9,
     reviewCount: 67,
@@ -742,26 +960,12 @@ const products = [
     price: 320,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/mens-shirt-2.jpg"]),
-    categorySlug: "mens-shirts",
+    categorySlug: "men-shirts",
     stock: 25,
     rating: 4.8,
     reviewCount: 89,
     featured: true,
     tags: JSON.stringify(["oxford", "navy", "button-down", "business-casual"]),
-  },
-  {
-    name: "Obsidian Crew Neck Tee",
-    slug: "obsidian-crew-neck-tee",
-    description: "A luxurious black t-shirt in heavyweight Supima cotton with a rich, substantial feel. The crew neck retains its shape wash after wash, while the slim fit drapes perfectly. The essential foundation of every refined casual wardrobe.",
-    price: 145,
-    compareAtPrice: 180,
-    images: JSON.stringify(["/images/products/mens-shirt-3.jpg"]),
-    categorySlug: "mens-shirts",
-    stock: 35,
-    rating: 4.7,
-    reviewCount: 156,
-    featured: true,
-    tags: JSON.stringify(["t-shirt", "black", "crew-neck", "supima-cotton", "essential"]),
   },
   {
     name: "Mediterranean Linen Shirt",
@@ -770,26 +974,12 @@ const products = [
     price: 380,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/mens-shirt-4.jpg"]),
-    categorySlug: "mens-shirts",
+    categorySlug: "men-shirts",
     stock: 15,
     rating: 4.8,
     reviewCount: 42,
     featured: true,
     tags: JSON.stringify(["linen", "light-blue", "summer", "mandarin-collar", "relaxed"]),
-  },
-  {
-    name: "Ivory V-Neck Essential Tee",
-    slug: "ivory-vneck-essential-tee",
-    description: "A premium white V-neck t-shirt in ultra-soft Supima cotton jersey. The clean minimal design features a perfectly proportioned V-neck, reinforced seams, and a slim fit that layers beautifully under blazers or stands alone with style.",
-    price: 125,
-    compareAtPrice: 160,
-    images: JSON.stringify(["/images/products/mens-shirt-5.jpg"]),
-    categorySlug: "mens-shirts",
-    stock: 40,
-    rating: 4.6,
-    reviewCount: 203,
-    featured: false,
-    tags: JSON.stringify(["t-shirt", "white", "v-neck", "supima-cotton", "layering"]),
   },
   {
     name: "Heritage Micro-Check Dress Shirt",
@@ -798,12 +988,58 @@ const products = [
     price: 420,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/mens-shirt-6.jpg"]),
-    categorySlug: "mens-shirts",
+    categorySlug: "men-shirts",
     stock: 18,
     rating: 4.8,
     reviewCount: 55,
     featured: true,
     tags: JSON.stringify(["dress-shirt", "check", "cutaway-collar", "two-ply-cotton"]),
+  },
+  {
+    name: "Noir Silk Evening Shirt",
+    slug: "noir-silk-evening-shirt",
+    description: "A dramatic black silk evening shirt with hidden button placket and wing collar. The luxurious silk fabric has a subtle sheen that catches the light, while the clean front creates an uninterrupted line of elegance. For the man who commands the room.",
+    price: 890,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/mens-shirt-9.jpg"]),
+    categorySlug: "men-shirts",
+    stock: 8,
+    rating: 5.0,
+    reviewCount: 23,
+    featured: true,
+    tags: JSON.stringify(["silk", "black", "evening", "wing-collar", "formal", "hidden-placket", "new-arrival"]),
+  },
+
+  // ═══════════════════════════════════════════════════
+  // MEN - T-Shirts & Polos (men-tshirts)
+  // ═══════════════════════════════════════════════════
+  {
+    name: "Obsidian Crew Neck Tee",
+    slug: "obsidian-crew-neck-tee",
+    description: "A luxurious black t-shirt in heavyweight Supima cotton with a rich, substantial feel. The crew neck retains its shape wash after wash, while the slim fit drapes perfectly. The essential foundation of every refined casual wardrobe.",
+    price: 145,
+    compareAtPrice: 180,
+    images: JSON.stringify(["/images/products/mens-shirt-3.jpg"]),
+    categorySlug: "men-tshirts",
+    stock: 35,
+    rating: 4.7,
+    reviewCount: 156,
+    featured: true,
+    tags: JSON.stringify(["t-shirt", "black", "crew-neck", "supima-cotton", "essential"]),
+  },
+  {
+    name: "Ivory V-Neck Essential Tee",
+    slug: "ivory-vneck-essential-tee",
+    description: "A premium white V-neck t-shirt in ultra-soft Supima cotton jersey. The clean minimal design features a perfectly proportioned V-neck, reinforced seams, and a slim fit that layers beautifully under blazers or stands alone with style.",
+    price: 125,
+    compareAtPrice: 160,
+    images: JSON.stringify(["/images/products/mens-shirt-5.jpg"]),
+    categorySlug: "men-tshirts",
+    stock: 40,
+    rating: 4.6,
+    reviewCount: 203,
+    featured: false,
+    tags: JSON.stringify(["t-shirt", "white", "v-neck", "supima-cotton", "layering"]),
   },
   {
     name: "Riviera Striped Polo",
@@ -812,7 +1048,7 @@ const products = [
     price: 275,
     compareAtPrice: 340,
     images: JSON.stringify(["/images/products/mens-shirt-7.jpg"]),
-    categorySlug: "mens-shirts",
+    categorySlug: "men-tshirts",
     stock: 22,
     rating: 4.7,
     reviewCount: 71,
@@ -826,26 +1062,12 @@ const products = [
     price: 165,
     compareAtPrice: null,
     images: JSON.stringify(["/images/products/mens-shirt-8.jpg"]),
-    categorySlug: "mens-shirts",
+    categorySlug: "men-tshirts",
     stock: 30,
     rating: 4.9,
     reviewCount: 94,
     featured: true,
     tags: JSON.stringify(["t-shirt", "grey", "modal", "soft", "relaxed-fit", "luxury-casual"]),
-  },
-  {
-    name: "Noir Silk Evening Shirt",
-    slug: "noir-silk-evening-shirt",
-    description: "A dramatic black silk evening shirt with hidden button placket and wing collar. The luxurious silk fabric has a subtle sheen that catches the light, while the clean front creates an uninterrupted line of elegance. For the man who commands the room.",
-    price: 890,
-    compareAtPrice: null,
-    images: JSON.stringify(["/images/products/mens-shirt-9.jpg"]),
-    categorySlug: "mens-shirts",
-    stock: 8,
-    rating: 5.0,
-    reviewCount: 23,
-    featured: true,
-    tags: JSON.stringify(["silk", "black", "evening", "wing-collar", "formal", "hidden-placket"]),
   },
   {
     name: "Sage Henley Long Sleeve",
@@ -854,30 +1076,331 @@ const products = [
     price: 195,
     compareAtPrice: 240,
     images: JSON.stringify(["/images/products/mens-shirt-10.jpg"]),
-    categorySlug: "mens-shirts",
+    categorySlug: "men-tshirts",
     stock: 20,
     rating: 4.7,
     reviewCount: 63,
     featured: false,
     tags: JSON.stringify(["henley", "olive", "slub-cotton", "long-sleeve", "vintage"]),
   },
+
+  // ═══════════════════════════════════════════════════
+  // KIDS - Kids Fashion (kids-fashion) — NEW
+  // ═══════════════════════════════════════════════════
+  {
+    name: "Designer Kids Sherwani Set",
+    slug: "designer-kids-sherwani-set",
+    description: "An adorable mini sherwani set for boys in royal navy with gold embroidery. Includes kurta, churidar, and matching dupatta. Crafted from breathable cotton silk blend. Perfect for weddings and festive celebrations.",
+    price: 850,
+    compareAtPrice: 1050,
+    images: JSON.stringify(["/images/products/kids-fashion-1.jpg"]),
+    categorySlug: "kids-fashion",
+    stock: 10,
+    rating: 4.8,
+    reviewCount: 32,
+    featured: true,
+    tags: JSON.stringify(["sherwani", "kids", "festive", "wedding", "new-arrival"]),
+  },
+  {
+    name: "Princess Tulle Party Dress",
+    slug: "princess-tulle-party-dress",
+    description: "A magical layered tulle party dress in blush pink with delicate sequin bodice and satin sash. Fully lined with a comfortable cotton inner. Available for ages 3-10. Every little girl's fairy tale dream.",
+    price: 620,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/kids-fashion-2.jpg"]),
+    categorySlug: "kids-fashion",
+    stock: 15,
+    rating: 4.9,
+    reviewCount: 48,
+    featured: true,
+    tags: JSON.stringify(["dress", "tulle", "party", "princess", "new-arrival"]),
+  },
+  {
+    name: "Mini Denim Jacket",
+    slug: "mini-denim-jacket",
+    description: "A stylish kids' denim jacket in soft-washed indigo with custom embroidered patches and brass snap buttons. Pre-shrunk premium denim with a comfortable relaxed fit. Machine washable. Ages 4-12.",
+    price: 480,
+    compareAtPrice: 580,
+    images: JSON.stringify(["/images/products/kids-fashion-3.jpg"]),
+    categorySlug: "kids-fashion",
+    stock: 18,
+    rating: 4.6,
+    reviewCount: 27,
+    featured: false,
+    tags: JSON.stringify(["denim", "jacket", "casual", "kids", "embroidered"]),
+  },
+
+  // ═══════════════════════════════════════════════════
+  // OFFICE - Corporate Gifts (office-corporate-gifts) — NEW
+  // ═══════════════════════════════════════════════════
+  {
+    name: "Executive Gift Hamper",
+    slug: "executive-gift-hamper",
+    description: "A premium corporate gift hamper featuring artisan chocolates, a leather-bound planner, premium tea collection, and a personalized thank-you card. Elegantly packaged in a matte black box with gold foil branding. Perfect for VIP clients and leadership.",
+    price: 1800,
+    compareAtPrice: 2200,
+    images: JSON.stringify(["/images/products/corp-gift-1.jpg"]),
+    categorySlug: "office-corporate-gifts",
+    stock: 25,
+    rating: 4.8,
+    reviewCount: 56,
+    featured: true,
+    tags: JSON.stringify(["hamper", "corporate", "executive", "gifting", "new-arrival"]),
+  },
+  {
+    name: "Premium Pen & Watch Gift Set",
+    slug: "premium-pen-watch-gift-set",
+    description: "An exclusive gift set pairing a Swiss automatic watch with a handcrafted fountain pen in a shared walnut presentation box. The watch features a minimalist silver dial and Italian leather strap. The pen has a rhodium-plated 18K gold nib. Engravable.",
+    price: 4800,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/corp-gift-2.jpg"]),
+    categorySlug: "office-corporate-gifts",
+    stock: 8,
+    rating: 4.9,
+    reviewCount: 18,
+    featured: true,
+    tags: JSON.stringify(["watch", "pen", "gift-set", "corporate", "engravable", "new-arrival"]),
+  },
+  {
+    name: "Luxury Welcome Kit",
+    slug: "luxury-welcome-kit",
+    description: "A curated onboarding welcome kit for new employees and executives. Includes a branded leather portfolio, premium coffee sampler, wireless charging pad, and a welcome note. Customizable with company branding and logo.",
+    price: 950,
+    compareAtPrice: 1200,
+    images: JSON.stringify(["/images/products/corp-gift-3.jpg"]),
+    categorySlug: "office-corporate-gifts",
+    stock: 30,
+    rating: 4.7,
+    reviewCount: 42,
+    featured: false,
+    tags: JSON.stringify(["welcome-kit", "onboarding", "corporate", "customizable"]),
+  },
+
+  // ═══════════════════════════════════════════════════
+  // OFFICE - Desk Accessories (office-desk) — NEW
+  // ═══════════════════════════════════════════════════
+  {
+    name: "Crystal Desk Organizer",
+    slug: "crystal-desk-organizer",
+    description: "A stunning lead crystal desk organizer with multiple compartments for pens, cards, and paper clips. The hand-cut facets create a brilliant play of light. A sophisticated addition to any executive desk.",
+    price: 680,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/desk-1.jpg"]),
+    categorySlug: "office-desk",
+    stock: 12,
+    rating: 4.7,
+    reviewCount: 34,
+    featured: true,
+    tags: JSON.stringify(["crystal", "desk", "organizer", "executive", "new-arrival"]),
+  },
+  {
+    name: "Leather Desk Pad",
+    slug: "leather-desk-pad",
+    description: "A generous full-grain Italian leather desk pad with felt backing and stitched edges. Available in cognac, black, and burgundy. Protects your desk while adding a touch of old-world sophistication to your workspace. 90cm x 45cm.",
+    price: 420,
+    compareAtPrice: 520,
+    images: JSON.stringify(["/images/products/desk-2.jpg"]),
+    categorySlug: "office-desk",
+    stock: 20,
+    rating: 4.8,
+    reviewCount: 67,
+    featured: true,
+    tags: JSON.stringify(["leather", "desk-pad", "italian", "workspace", "new-arrival"]),
+  },
+  {
+    name: "Magnetic Hourglass Timer",
+    slug: "magnetic-hourglass-timer",
+    description: "A mesmerizing magnetic hourglass with iron-filing sand that creates stunning sculptural formations as it flows. Brushed copper frame with glass body. 5-minute timer. A conversation piece for any desk.",
+    price: 350,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/desk-3.jpg"]),
+    categorySlug: "office-desk",
+    stock: 15,
+    rating: 4.6,
+    reviewCount: 28,
+    featured: false,
+    tags: JSON.stringify(["hourglass", "magnetic", "copper", "timer", "sculptural"]),
+  },
+
+  // ═══════════════════════════════════════════════════
+  // WOMEN - Accessories (women-accessories) — NEW
+  // ═══════════════════════════════════════════════════
+  {
+    name: "Silk Scarf Collection",
+    slug: "silk-scarf-collection",
+    description: "A set of 3 hand-rolled 100% mulberry silk scarves in complementary prints — geometric, floral, and abstract. Each scarf measures 90cm x 90cm. Lightweight, luxurious, and endlessly versatile. Gift boxed.",
+    price: 580,
+    compareAtPrice: 720,
+    images: JSON.stringify(["/images/products/women-acc-1.jpg"]),
+    categorySlug: "women-accessories",
+    stock: 14,
+    rating: 4.8,
+    reviewCount: 39,
+    featured: true,
+    tags: JSON.stringify(["silk", "scarf", "hand-rolled", "gift-set", "new-arrival"]),
+  },
+  {
+    name: "Designer Sunglasses",
+    slug: "designer-sunglasses",
+    description: "Oversized cat-eye sunglasses in hand-polished acetate with gradient smoke lenses and gold temple accents. 100% UV protection with premium Carl Zeiss lenses. Includes hard case and microfiber cloth. Italian craftsmanship.",
+    price: 890,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/women-acc-2.jpg"]),
+    categorySlug: "women-accessories",
+    stock: 10,
+    rating: 4.7,
+    reviewCount: 51,
+    featured: true,
+    tags: JSON.stringify(["sunglasses", "cat-eye", "designer", "UV-protection", "new-arrival"]),
+  },
+  {
+    name: "Pearl Handbag Clutch",
+    slug: "pearl-handbag-clutch",
+    description: "An exquisite evening clutch covered in hand-sewn freshwater pearls with a gold-tone frame clasp. Silk-satin interior with card slot and removable gold chain strap. The perfect companion for galas, weddings, and red-carpet events.",
+    price: 1450,
+    compareAtPrice: 1700,
+    images: JSON.stringify(["/images/products/women-acc-3.jpg"]),
+    categorySlug: "women-accessories",
+    stock: 6,
+    rating: 4.9,
+    reviewCount: 22,
+    featured: true,
+    tags: JSON.stringify(["pearl", "clutch", "evening", "handbag", "wedding"]),
+  },
+
+  // ═══════════════════════════════════════════════════
+  // MEN - Accessories (men-accessories) — NEW
+  // ═══════════════════════════════════════════════════
+  {
+    name: "Luxury Cufflink Set",
+    slug: "luxury-cufflink-set",
+    description: "A set of three pairs of cufflinks in a walnut presentation box: mother-of-pearl, onyx, and lapis lazuli. Each pair crafted in sterling silver with a polished finish. The essential finishing touch for the discerning gentleman.",
+    price: 750,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/men-acc-1.jpg"]),
+    categorySlug: "men-accessories",
+    stock: 12,
+    rating: 4.8,
+    reviewCount: 35,
+    featured: true,
+    tags: JSON.stringify(["cufflinks", "sterling-silver", "mother-of-pearl", "onyx", "new-arrival"]),
+  },
+  {
+    name: "Italian Leather Belt",
+    slug: "italian-leather-belt",
+    description: "A handcrafted full-grain Italian leather belt with a brushed palladium buckle. The saddle-stitched construction ensures a lifetime of wear. Available in dark brown and black. 35mm width — the perfect balance of classic and contemporary.",
+    price: 480,
+    compareAtPrice: 580,
+    images: JSON.stringify(["/images/products/men-acc-2.jpg"]),
+    categorySlug: "men-accessories",
+    stock: 18,
+    rating: 4.7,
+    reviewCount: 82,
+    featured: true,
+    tags: JSON.stringify(["belt", "italian-leather", "palladium", "saddle-stitched", "new-arrival"]),
+  },
+  {
+    name: "Silk Pocket Square Collection",
+    slug: "silk-pocket-square-collection",
+    description: "A collection of 5 hand-rolled silk pocket squares in a leather keepsake box. Patterns include paisley, polka dot, houndstooth, geometric, and solid. Each square is 33cm x 33cm in 100% Como silk. Elevate every blazer.",
+    price: 390,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/men-acc-3.jpg"]),
+    categorySlug: "men-accessories",
+    stock: 20,
+    rating: 4.6,
+    reviewCount: 44,
+    featured: false,
+    tags: JSON.stringify(["pocket-square", "silk", "como", "gift-set"]),
+  },
+
+  // ═══════════════════════════════════════════════════
+  // OFFICE - Stationery (office-stationery) — NEW
+  // ═══════════════════════════════════════════════════
+  {
+    name: "Premium Leather Journal",
+    slug: "premium-leather-journal",
+    description: "A hand-stitched full-grain leather journal with 200 pages of fountain-pen-friendly cream paper. Features a wrap-around leather tie, gilt edges, and a ribbon bookmark. The paper is acid-free 120gsm from an Italian mill. A joy to write in.",
+    price: 320,
+    compareAtPrice: 400,
+    images: JSON.stringify(["/images/products/stationery-1.jpg"]),
+    categorySlug: "office-stationery",
+    stock: 22,
+    rating: 4.8,
+    reviewCount: 73,
+    featured: true,
+    tags: JSON.stringify(["journal", "leather", "hand-stitched", "italian-paper", "new-arrival"]),
+  },
+  {
+    name: "Gold Fountain Pen Set",
+    slug: "gold-fountain-pen-set",
+    description: "A prestigious fountain pen and ballpoint pen set in solid brass with 24K gold plating. The fountain pen features a rhodium-plated 18K gold nib in Fine, Medium, or Broad. Presented in a velvet-lined lacquer box. Engravable.",
+    price: 1200,
+    compareAtPrice: null,
+    images: JSON.stringify(["/images/products/stationery-2.jpg"]),
+    categorySlug: "office-stationery",
+    stock: 8,
+    rating: 4.9,
+    reviewCount: 29,
+    featured: true,
+    tags: JSON.stringify(["fountain-pen", "gold", "24K", "engravable", "new-arrival"]),
+  },
+  {
+    name: "Wax Seal Kit",
+    slug: "wax-seal-kit",
+    description: "A traditional wax seal kit with a solid brass seal handle, interchangeable monogram die, and 10 sealing wax sticks in 5 colors. Create an impression of distinction on letters, invitations, and certificates. Gift boxed.",
+    price: 280,
+    compareAtPrice: 340,
+    images: JSON.stringify(["/images/products/stationery-3.jpg"]),
+    categorySlug: "office-stationery",
+    stock: 16,
+    rating: 4.5,
+    reviewCount: 38,
+    featured: false,
+    tags: JSON.stringify(["wax-seal", "brass", "monogram", "traditional"]),
+  },
 ];
 
 async function seed() {
-  console.log("🌱 Seeding database...");
+  console.log("🌱 Seeding database (Version 1.2)...");
 
-  // Create categories
-  for (const cat of categories) {
+  // ─── Step 1: Create parent categories ───
+  for (const cat of parentCategories) {
     await db.category.upsert({
       where: { slug: cat.slug },
-      update: cat,
-      create: cat,
+      update: { name: cat.name, description: cat.description, image: cat.image, order: cat.order, parentId: null },
+      create: { name: cat.name, slug: cat.slug, description: cat.description, image: cat.image, order: cat.order, parentId: null },
     });
   }
-  console.log(`✅ Created ${categories.length} categories`);
+  console.log(`✅ Created ${parentCategories.length} parent categories`);
 
-  // Create products
-  let productCounter = 10001;
+  // ─── Step 2: Create subcategories with parentId references ───
+  for (const subcat of subcategories) {
+    const parent = await db.category.findUnique({ where: { slug: subcat.parentSlug } });
+    if (!parent) {
+      console.error(`❌ Parent category not found: ${subcat.parentSlug}`);
+      continue;
+    }
+
+    const { parentSlug, ...catData } = subcat;
+    await db.category.upsert({
+      where: { slug: catData.slug },
+      update: { name: catData.name, description: catData.description, image: catData.image, order: catData.order, parentId: parent.id },
+      create: { name: catData.name, slug: catData.slug, description: catData.description, image: catData.image, order: catData.order, parentId: parent.id },
+    });
+  }
+  console.log(`✅ Created ${subcategories.length} subcategories`);
+
+  // ─── Step 3: Create products ───
+  // Find the max productNumber to avoid collisions with existing products
+  const existingProducts = await db.product.findMany({
+    select: { productNumber: true },
+    orderBy: { productNumber: 'desc' },
+  });
+  let productCounter = existingProducts.length > 0
+    ? parseInt(existingProducts[0].productNumber.replace('PRD-', '')) + 1
+    : 10001;
+
   for (const prod of products) {
     const category = await db.category.findUnique({
       where: { slug: prod.categorySlug },
@@ -889,18 +1412,28 @@ async function seed() {
     }
 
     const { categorySlug, ...productData } = prod;
-    const productNumber = `PRD-${productCounter}`;
-    productCounter++;
 
-    await db.product.upsert({
-      where: { slug: prod.slug },
-      update: { ...productData, categoryId: category.id, productNumber },
-      create: { ...productData, categoryId: category.id, productNumber },
-    });
+    // Check if product already exists by slug
+    const existing = await db.product.findUnique({ where: { slug: prod.slug } });
+
+    if (existing) {
+      // Update existing product — keep its productNumber
+      await db.product.update({
+        where: { slug: prod.slug },
+        data: { ...productData, categoryId: category.id },
+      });
+    } else {
+      // Create new product with a fresh productNumber
+      const productNumber = `PRD-${productCounter}`;
+      productCounter++;
+      await db.product.create({
+        data: { ...productData, slug: prod.slug, categoryId: category.id, productNumber },
+      });
+    }
   }
-  console.log(`✅ Created ${products.length} products`);
+  console.log(`✅ Created/updated ${products.length} products`);
 
-  // Create default demo users
+  // ─── Step 4: Create default demo users ───
   const bcrypt = await import('bcryptjs');
   const demoUsers = [
     {
@@ -969,7 +1502,7 @@ async function seed() {
     }
   }
 
-  // Create corporate account for demo corporate user
+  // ─── Step 5: Create corporate account for demo corporate user ───
   const corpUser = await db.user.findUnique({ where: { email: 'corporate@3boxesluxury.com' } });
   if (corpUser) {
     const existingCorp = await db.corporateAccount.findUnique({ where: { userId: corpUser.id } });
@@ -1012,7 +1545,7 @@ async function seed() {
       });
 
       // Create demo campaigns
-      const products = await db.product.findMany({ take: 2 });
+      const allProducts = await db.product.findMany({ take: 2 });
       const campaign = await db.corporateCampaign.create({
         data: {
           corporateId: corp.id,
@@ -1025,7 +1558,7 @@ async function seed() {
           deliveryType: 'bulk',
           deliveryDate: new Date('2026-10-20'),
           message: 'May the festival of lights bring you happiness and prosperity!',
-          productId: products[0]?.id || null,
+          productId: allProducts[0]?.id || null,
         },
       });
 
@@ -1052,7 +1585,7 @@ async function seed() {
           deliveryType: 'individual',
           deliveryDate: new Date('2027-01-01'),
           message: 'Happy New Year! Thank you for an amazing year ahead.',
-          productId: products[1]?.id || null,
+          productId: allProducts[1]?.id || null,
         },
       });
 

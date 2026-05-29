@@ -5,15 +5,99 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Smartphone, Download } from 'lucide-react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Smartphone, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import { LocaleSwitcher, LocaleSwitcherMobile } from '@/components/locale-switcher';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
+import type { LucideIcon } from 'lucide-react';
+
+interface CategoryChild {
+  name: string;
+  slug: string;
+}
+
+interface CategoryNavItem {
+  name: string;
+  slug: string;
+  icon: LucideIcon;
+  children: CategoryChild[];
+}
+
+const CATEGORY_NAV: CategoryNavItem[] = [
+  {
+    name: 'Couple',
+    slug: 'couple',
+    icon: Heart,
+    children: [
+      { name: 'Couple Friendly', slug: 'couple-friendly' },
+    ],
+  },
+  {
+    name: 'Men',
+    slug: 'men',
+    icon: User,
+    children: [
+      { name: 'Accessories', slug: 'men-accessories' },
+      { name: 'Shirts', slug: 'men-shirts' },
+      { name: 'T-Shirts & Polos', slug: 'men-tshirts' },
+      { name: 'Fragrances', slug: 'men-fragrances' },
+      { name: 'Watches', slug: 'men-watches' },
+      { name: 'Leather Goods', slug: 'men-leather' },
+    ],
+  },
+  {
+    name: 'Women',
+    slug: 'women',
+    icon: UserCircle,
+    children: [
+      { name: 'Jewelry', slug: 'women-jewelry' },
+      { name: 'Sarees', slug: 'women-sarees' },
+      { name: 'Fashion', slug: 'women-fashion' },
+      { name: 'Fragrances', slug: 'women-fragrances' },
+      { name: 'Accessories', slug: 'women-accessories' },
+    ],
+  },
+  {
+    name: 'Kids',
+    slug: 'kids',
+    icon: Baby,
+    children: [
+      { name: 'Toys & Games', slug: 'kids-toys' },
+      { name: 'Kids Fashion', slug: 'kids-fashion' },
+    ],
+  },
+  {
+    name: 'Home',
+    slug: 'home',
+    icon: Home,
+    children: [
+      { name: 'Home Décor', slug: 'home-decor' },
+      { name: 'Candles & Fragrances', slug: 'home-candles' },
+      { name: 'Living', slug: 'home-living' },
+    ],
+  },
+  {
+    name: 'Office',
+    slug: 'office',
+    icon: Briefcase,
+    children: [
+      { name: 'Corporate Gifts', slug: 'office-corporate-gifts' },
+      { name: 'Desk Accessories', slug: 'office-desk' },
+      { name: 'Stationery', slug: 'office-stationery' },
+    ],
+  },
+  {
+    name: 'New Arrivals',
+    slug: 'new-arrivals',
+    icon: Sparkles,
+    children: [],
+  },
+];
 
 export function Header() {
-  const { searchQuery, setSearch, setView, cartItems, setCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder } = useStore();
+  const { searchQuery, setSearch, setView, cartItems, setCategory, selectedCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder } = useStore();
   const { t } = useTranslation();
   const { canInstall, promptInstall } = usePWAInstall();
   const [localSearch, setLocalSearch] = useState(searchQuery);
@@ -378,6 +462,109 @@ export function Header() {
               </SheetContent>
             </Sheet>
           </div>
+        </div>
+      </div>
+
+      {/* Category Navigation Bar */}
+      <div className="border-t border-amber-900/20 bg-stone-950/90">
+        <div className="container mx-auto px-4">
+          {/* Desktop: horizontal row with hover dropdowns */}
+          <nav className="hidden md:flex items-center gap-0.5" aria-label="Category navigation">
+            {CATEGORY_NAV.map((cat) => {
+              const Icon = cat.icon;
+              const hasChildren = cat.children.length > 0;
+              const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
+
+              if (!hasChildren) {
+                // No subcategories — click directly sets filter
+                return (
+                  <button
+                    key={cat.slug}
+                    onClick={() => setCategory(cat.slug)}
+                    className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors rounded-md ${
+                      isActive
+                        ? 'bg-amber-900/30 text-amber-300'
+                        : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-300'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {cat.name}
+                    <span className="ml-1 rounded bg-amber-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                      New
+                    </span>
+                  </button>
+                );
+              }
+
+              return (
+                <div key={cat.slug} className="group relative">
+                  <button
+                    onClick={() => setCategory(cat.slug)}
+                    className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors rounded-md ${
+                      isActive
+                        ? 'bg-amber-900/30 text-amber-300'
+                        : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-300'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {cat.name}
+                    <ChevronDown className="h-3 w-3 text-amber-500/50 transition-transform group-hover:rotate-180" />
+                  </button>
+
+                  {/* Dropdown */}
+                  <div className="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-200 absolute top-full left-0 z-50 mt-0.5 min-w-[200px] rounded-lg border border-amber-900/30 bg-stone-950/98 backdrop-blur-md shadow-xl shadow-black/40 py-2">
+                    {/* Parent category "All" link */}
+                    <button
+                      onClick={() => setCategory(cat.slug)}
+                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-amber-300/90 font-medium transition-colors hover:bg-amber-900/20 hover:text-amber-200"
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      All {cat.name}
+                    </button>
+                    <div className="mx-3 my-1 border-t border-amber-900/20" />
+                    {cat.children.map((child) => (
+                      <button
+                        key={child.slug}
+                        onClick={() => setCategory(child.slug)}
+                        className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors hover:bg-amber-900/20 hover:text-amber-300 ${
+                          selectedCategory === child.slug
+                            ? 'text-amber-300 bg-amber-900/20'
+                            : 'text-amber-200/60'
+                        }`}
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full ${
+                          selectedCategory === child.slug ? 'bg-amber-400' : 'bg-amber-600/50'
+                        }`} />
+                        {child.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </nav>
+
+          {/* Mobile: horizontal scrollable row without dropdowns */}
+          <nav className="md:hidden flex items-center gap-1 overflow-x-auto py-2 scrollbar-thin" aria-label="Category navigation">
+            {CATEGORY_NAV.map((cat) => {
+              const Icon = cat.icon;
+              const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
+              return (
+                <button
+                  key={cat.slug}
+                  onClick={() => setCategory(cat.slug)}
+                  className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors rounded-md whitespace-nowrap ${
+                    isActive
+                      ? 'bg-amber-900/30 text-amber-300'
+                      : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-300'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {cat.name}
+                </button>
+              );
+            })}
+          </nav>
         </div>
       </div>
     </header>
