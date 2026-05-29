@@ -247,10 +247,23 @@ export async function GET(request: NextRequest) {
       let shopifyProducts: ShopifyProductTransformed[]
 
       if (category && !search) {
-        // Resolve category slug aliases so both DB and Shopify slugs work
-        const categorySlugs = resolveCategorySlugs(category)
-        const allProducts = await fetchShopifyProducts()
-        shopifyProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
+        // Special handling for "new-arrivals" — filter by tag/featured, not by category slug
+        if (category === 'new-arrivals') {
+          const allProducts = await fetchShopifyProducts()
+          shopifyProducts = allProducts.filter(p =>
+            p.tags.some(t => t.toLowerCase().includes('new')) || p.featured
+          )
+          // Fallback: if no tagged/featured products, show the most recent 20%
+          if (shopifyProducts.length === 0 && allProducts.length > 0) {
+            const count = Math.ceil(allProducts.length * 0.2)
+            shopifyProducts = allProducts.slice(0, count)
+          }
+        } else {
+          // Resolve category slug aliases so both DB and Shopify slugs work
+          const categorySlugs = resolveCategorySlugs(category)
+          const allProducts = await fetchShopifyProducts()
+          shopifyProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
+        }
       } else if (search && !category) {
         shopifyProducts = await searchShopifyProducts(search)
       } else if (category && search) {
@@ -481,10 +494,22 @@ export async function GET(request: NextRequest) {
 
       // Use targeted fetch if we have a category or search filter
       if (category && !search) {
-        // Resolve category slug aliases so both DB and Shopify slugs work
-        const categorySlugs = resolveCategorySlugs(category)
-        const allProducts = await fetchShopifyProducts()
-        shopifyProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
+        // Special handling for "new-arrivals" — filter by tag/featured, not by category slug
+        if (category === 'new-arrivals') {
+          const allProducts = await fetchShopifyProducts()
+          shopifyProducts = allProducts.filter(p =>
+            p.tags.some(t => t.toLowerCase().includes('new')) || p.featured
+          )
+          if (shopifyProducts.length === 0 && allProducts.length > 0) {
+            const count = Math.ceil(allProducts.length * 0.2)
+            shopifyProducts = allProducts.slice(0, count)
+          }
+        } else {
+          // Resolve category slug aliases so both DB and Shopify slugs work
+          const categorySlugs = resolveCategorySlugs(category)
+          const allProducts = await fetchShopifyProducts()
+          shopifyProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
+        }
       } else if (search && !category) {
         shopifyProducts = await searchShopifyProducts(search)
       } else if (category && search) {

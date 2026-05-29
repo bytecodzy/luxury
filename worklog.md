@@ -445,3 +445,73 @@ Stage Summary:
 - Category navigation: Couple, Men, Women, Kids, Home, Office, New Arrivals with subcategories
 - Consent dialog appears after AI try-on result, asking customer to share their style preview
 - Happy Customers section shows portfolio items with ratings and reviews on product pages
+
+---
+Task ID: 3
+Agent: General-Purpose Subagent
+Task: Create professional investor brochure PDF for 3 Boxes Luxury
+
+Work Log:
+- Read worklog.md and understood project context (3 Boxes Luxury, v1.2, categories, features)
+- Located PDF skill at /home/z/my-project/skills/pdf/
+- Read SKILL.md and creative.md brief for the Creative pipeline workflow
+- Designed 6-page investor brochure HTML with dark luxury theme (stone-950 bg, amber-600 accents)
+- Page 1: Cover - Company name, diamond logo, tagline "Curated Luxury Gifting, Powered by AI", "Investor Brochure 2025"
+- Page 2: The Opportunity - $40B+ market, 25% CAGR, 500M middle class, market gap visualization, segment bar chart
+- Page 3: Our Solution - 6 feature cards (AI Try-On, Gift Assistant, Gift Builder, Aggregation, Portfolio, Corporate), partner platforms, tech stack
+- Page 4: Product Categories - 6 category cards (Couple/Men/Women/Kids/Home/Office), product counts, subcategories, highlights stats
+- Page 5: Business Model - 4 revenue streams, growth projections ($0.5M→$2.5M→$10M), key metrics (12% conv, $180 AOV, 3.2x LTV/CAC, 45% repeat)
+- Page 6: Vision & Contact - 5-phase roadmap timeline, contact info, CTA box
+- Validated HTML with poster_validate.py — PASS (only minor warnings)
+- Generated PDF using html2pdf-next.js — 6 pages, 1.6 MB, vector output
+- Ran pdf_qa.py — PASS (9 checks passed, 7 margin symmetry warnings expected for asymmetric brochure design)
+- Added Z.ai metadata via meta.brand
+- Saved both HTML and PDF to /home/z/my-project/investor-assets/
+
+Stage Summary:
+- Professional 6-page investor brochure PDF created successfully
+- Dark luxury theme with gold/amber gradient accents matching brand palette
+- Vector PDF output (not raster) — text is selectable and sharp at any zoom
+- Files created:
+  - /home/z/my-project/investor-assets/3boxes-luxury-investor-brochure.pdf (1.6 MB, 6 pages)
+  - /home/z/my-project/investor-assets/3boxes-luxury-investor-brochure.html (44 KB, source)
+
+---
+Task ID: 4
+Agent: General-Purpose Subagent
+Task: Create professional investor pitch deck PPT for 3 Boxes Luxury
+
+Work Log:
+- Read PPT skill SKILL.md, themes.md, design-system.md, html2pptx.md, components.md completely
+- Classified scene: Proposal / Pitch
+- Selected theme: Sandstone (Warm Sand) with Dark Mode — perfect for luxury investor pitch
+  - Primary: #3C2415 (warm brown), Accent A: #C09E30 (gold), Font: Palatino Linotype Bold / Corbel
+  - Dark mode semantic colors: bg #1E120A, surface #2D1B10, text #FFFFFF, border #6B5443
+- Planned 12-slide sequence with diverse component templates:
+  1. Cover (cover-dark-hero)
+  2. The Problem (content-dark-bullets)
+  3. Market Opportunity (content-hero-stat)
+  4. Our Solution (content-asymmetric)
+  5. Product Demo (content-dark-three-card)
+  6. How It Works (content-timeline)
+  7. Categories & Products (content-icon-grid)
+  8. Business Model (content-sidebar-stat)
+  9. Traction (content-kpi-row)
+  10. Competitive Landscape (content-comparison)
+  11. The Ask (content-dark-split)
+  12. Contact & Next Steps (closing-thankyou)
+- Generated gradient PNG backgrounds using Sharp (cover, market, closing gradients)
+- Generated 25+ icon PNGs from react-icons (gold and white variants)
+- Created all 12 HTML slides with Sandstone dark luxury theme and gold accents
+- Fixed blocking validation errors: font sizes < 11pt on categories slide
+- Fixed overflow warnings: reduced padding/spacing on problem slide, adjusted card widths on category/traction slides
+- Converted HTML → PPTX using html2pptx.js with fontConfig (Palatino Linotype + Microsoft YaHei)
+- Generated thumbnail grid and validated with VLM — all 12 slides confirmed clean, no visual issues
+- All content verified via markitdown extraction
+
+Stage Summary:
+- Professional 12-slide investor pitch deck PPTX created successfully
+- Dark luxury aesthetic (Sandstone theme with gold #C09E30 accents)
+- Visual variety: 60% dark backgrounds, 40% light; multiple layout structures
+- Key slides: $40B+ market hero stat, 3-card product features, asymmetric solution layout, gold-accented $500K ask
+- File: /home/z/my-project/investor-assets/3boxes-luxury-pitch-deck.pptx (572 KB, 12 slides)
