@@ -364,3 +364,59 @@ Stage Summary:
 - Active state highlighting using selectedCategory from Zustand store
 - All existing header code preserved unchanged
 - File modified: /home/z/my-project/src/components/header.tsx
+
+---
+Task ID: 6 (Deploy)
+Agent: Deployment Agent
+Task: Deploy v1.2 to Vercel as a new separate deployment (not overwriting v1.1)
+
+Work Log:
+- Read worklog.md to understand previous agents' work (Tasks 3-a through 5-b: v1.2 schema, seed, portfolio, category grid, header nav)
+- Checked Vercel CLI installation: NOT installed initially
+- Installed Vercel CLI globally: `npm i -g vercel` → Vercel CLI 54.6.1 installed successfully
+- Checked existing Vercel project configuration:
+  - Found vercel.json with: buildCommand=bash vercel-build.sh, installCommand=bun install, framework=nextjs, regions=["bom1"]
+  - Found NO .vercel/ directory (project not linked to any Vercel project)
+  - Found vercel-build.sh that handles SQLite→PostgreSQL provider switching during Vercel builds
+  - Found existing deployment scripts: deploy-to-vercel.sh, deploy-vercel-token.sh, vercel-api-deploy.sh
+  - Found docs/VERCEL-DEPLOYMENT-GUIDE.md and docs/VERCEL-WIKI.md with comprehensive deployment documentation
+- Existing Vercel deployments documented in VERCEL-WIKI.md:
+  - Production: https://my-project-sepia-seven-42.vercel.app/ (v1.1, DB + Shopify fallback)
+  - Test: https://3boxes-luxury-test.vercel.app/ (Shopify-only mode)
+- Attempted Vercel deployment:
+  - Ran `vercel --yes --prod` → Error: "The specified token is not valid. Use `vercel login` to generate a new token."
+  - Checked auth state: /home/z/.local/share/com.vercel.cli/auth.json is empty `{}`
+  - No Vercel token found in: environment variables, .env files, .npmrc, .netrc, git config, project files
+  - Attempted `vercel login` → requires browser interaction (not available in sandboxed environment)
+  - Attempted `vercel login <email>` → timed out waiting for email verification
+  - Verified Vercel API requires authentication: curl https://api.vercel.com/v2/user → {"error":{"code":"forbidden","message":"The request is missing an authentication token"}}
+- Verified project build readiness:
+  - Ran `bun run build` → BUILD SUCCEEDED ✅
+  - All 60+ API routes compiled successfully
+  - .next/ directory generated with proper build artifacts
+  - Project is fully deployment-ready
+
+Stage Summary:
+- ❌ DEPLOYMENT FAILED: No Vercel authentication credentials available in the sandboxed environment
+- ✅ BUILD VERIFIED: Project builds successfully locally with all v1.2 changes
+- The project is deployment-ready but requires a Vercel token to complete deployment
+- No code changes were made (as instructed)
+- To complete deployment, provide a Vercel token and run:
+  ```bash
+  cd /home/z/my-project
+  # Option 1: Deploy as new project with token
+  vercel --yes --prod --token YOUR_VERCEL_TOKEN
+  
+  # Option 2: Create new project first, then deploy
+  vercel projects add 3boxes-luxury-v2 --token YOUR_VERCEL_TOKEN
+  echo "y" | vercel link --token YOUR_VERCEL_TOKEN --project 3boxes-luxury-v2
+  vercel --prod --token YOUR_VERCEL_TOKEN --yes
+  
+  # Required environment variables for Shopify-only mode (no PostgreSQL needed):
+  # DATA_SOURCE=shopify
+  # SHOPIFY_STORE_DOMAIN=3boxesluxury-2.myshopify.com
+  # SHOPIFY_ADMIN_API_TOKEN=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
+  # JWT_SECRET=<any-strong-secret>
+  ```
+- Existing v1.1 deployment at https://my-project-sepia-seven-42.vercel.app/ remains untouched
+- Target new project name: "3boxes-luxury-v2"

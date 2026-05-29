@@ -297,12 +297,32 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = {}
 
     if (category) {
-      // Resolve category slug aliases so Shopify slugs also match DB categories
-      const categorySlugs = resolveCategorySlugs(category)
-      if (categorySlugs.length === 1) {
-        where.category = { slug: category }
+      // Special handling for "new-arrivals" — filter by tag, not by category slug
+      if (category === 'new-arrivals') {
+        where.tags = { contains: 'new-arrival' }
+        where.featured = true
+      } else if (category === 'couple' || category === 'men' || category === 'women' || category === 'kids' || category === 'home' || category === 'office') {
+        // Parent category: show products from all subcategories
+        const subcategories = await db.category.findMany({
+          where: { parentId: { not: null } },
+          include: { parent: true },
+        })
+        const childSlugs = subcategories
+          .filter(c => c.parent?.slug === category)
+          .map(c => c.slug)
+        if (childSlugs.length > 0) {
+          where.category = { slug: { in: [...childSlugs, category] } }
+        } else {
+          where.category = { slug: category }
+        }
       } else {
-        where.category = { slug: { in: categorySlugs } }
+        // Resolve category slug aliases so Shopify slugs also match DB categories
+        const categorySlugs = resolveCategorySlugs(category)
+        if (categorySlugs.length === 1) {
+          where.category = { slug: category }
+        } else {
+          where.category = { slug: { in: categorySlugs } }
+        }
       }
     }
 

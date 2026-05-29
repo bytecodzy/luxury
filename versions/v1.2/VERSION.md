@@ -1,39 +1,37 @@
 # 3 BOXES LUXURY - Version 1.2
 
-## Saved: Wed May  6 16:51:48 UTC 2026
+**Tag:** `v1.2`  
+**Date:** 2026-03-05  
+**Status:** ACTIVE
 
-## What's New in v1.2
-- Fixed ALL external product images (46 products now have working images)
-- Generated 19 AI product images for broken/missing product photos
-- Improved image proxy with 3-strategy fetch fallback + SVG placeholder generation
-- All product image URLs converted from broken external URLs to local paths
-- Reset test user passwords to known values
-- Security features already implemented:
-  - JWT access token + refresh token system
-  - Password hashing with bcrypt (12 salt rounds)
-  - Input validation with Zod schemas
-  - Rate limiting on all auth endpoints
-  - Account lockout after 5 failed attempts (30-min lock)
-  - OTP expiry (5 minutes)
-  - Role-based access control with permissions
-  - Admin audit logs
-  - Secure payment callbacks (HMAC-SHA256 + idempotency)
-  - AES-256-GCM encryption for sensitive fields
-  - API logging and monitoring
-  - Corporate registration with company details
+## Changes from Version 1.1
 
-## Login Credentials
-| Role | Email | Password |
-|------|-------|----------|
-| Admin (Super Admin) | admin@3boxesluxury.com | Admin@123 |
-| Customer | testuser@example.com | Test@1234 |
-| Customer | testuser2@example.com | Test@1234 |
-| Customer | testuser3@example.com | Test@1234 |
-| Agent | agent1@example.com | Test@1234 |
-| Corporate | corp@test.com | Test@1234 |
+### 1. AI Selfie Consent Flow
+- After AI Virtual Try-On generates a result, customer is asked for consent to share their AI-generated image
+- Consent form includes: Name, Rating (1-5 stars), Review Title, Review Comment, Consent Checkbox
+- "Share My Style" button submits to `/api/portfolio` with consent data
+- "No, Thanks" option to dismiss
+- Auto-approved for public display when consent is given
 
-## Stats
-- Total Products: 101 (55 own + 46 external)
-- All products have working images
-- 7 user accounts across 4 roles (admin, user, agent, corporate)
-- 11 categories
+### 2. Customer Portfolio (Happy Customers)
+- New `CustomerPortfolio` database model with consent tracking
+- `/api/portfolio` API route (GET, POST, DELETE)
+- "Happy Customers" section on Product Detail page showing AI-generated style previews
+- Each portfolio entry shows: AI image, customer name, star rating, review, "Verified Style Preview" badge
+- Only displays entries with consent given and admin approval
+
+### 3. Restructured Categories
+- **7 Main Categories**: Couple, Men, Women, Kids, Home, Office, New Arrivals
+- **Subcategories**:
+  - Couple: Couple Friendly
+  - Men: Accessories, Shirts, T-Shirts & Polos, Fragrances, Watches, Leather Goods
+  - Women: Jewelry, Sarees, Fashion, Fragrances, Accessories
+  - Kids: Toys & Games, Kids Fashion
+  - Home: Home Décor, Candles & Fragrances, Living
+  - Office: Corporate Gifts, Desk Accessories, Stationery
+  - New Arrivals: (no subcategories - flag category)
+- Category model now supports `parentId` for hierarchy and `order` for sorting
+- Category Grid redesign with expandable subcategory chips
+- Header category navigation bar with dropdown menus (desktop) / scrollable row (mobile)
+- 21 new products added across new subcategories
+- 77 total products (56 remapped + 21 new)
