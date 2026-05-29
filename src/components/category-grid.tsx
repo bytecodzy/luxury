@@ -143,7 +143,10 @@ export function CategoryGrid() {
     queryFn: () => fetch('/api/categories').then((r) => r.json()),
   });
 
-  const categories = data?.categories ?? [];
+  const categories = (data?.categories ?? []).map((cat: Category) => ({
+    ...cat,
+    children: cat.children ?? [],
+  }));
 
   // Find the currently expanded category
   const expandedCategory = categories.find((c) => c.slug === expandedSlug);

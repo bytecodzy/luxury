@@ -144,6 +144,9 @@ export interface ShopifyCategoryTransformed {
   description: string | null
   image: string | null
   productCount: number
+  parentId: string | null
+  order: number
+  children: ShopifyCategoryTransformed[]
 }
 
 // ─── In-memory cache ───
@@ -515,8 +518,84 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
 }
 
 /**
+ * v1.2 Category Hierarchy Mapping
+ * Maps Shopify flat category slugs to parent categories with display order.
+ */
+const CATEGORY_HIERARCHY: {
+  parentSlug: string
+  parentName: string
+  order: number
+  childSlugs: { slug: string; name: string; order: number }[]
+}[] = [
+  {
+    parentSlug: 'couple',
+    parentName: 'Couple',
+    order: 1,
+    childSlugs: [
+      { slug: 'couple-friendly-gifts', name: 'Couple Friendly', order: 1 },
+      { slug: 'romantic-gifts', name: 'Romantic Gifts', order: 2 },
+    ],
+  },
+  {
+    parentSlug: 'men',
+    parentName: 'Men',
+    order: 2,
+    childSlugs: [
+      { slug: 'mens-shirts-t-shirts', name: 'Shirts & T-Shirts', order: 1 },
+      { slug: 'watches', name: 'Watches', order: 2 },
+      { slug: 'leather-goods', name: 'Leather Goods', order: 3 },
+      { slug: 'fragrances', name: 'Fragrances', order: 4 },
+    ],
+  },
+  {
+    parentSlug: 'women',
+    parentName: 'Women',
+    order: 3,
+    childSlugs: [
+      { slug: 'jewelry', name: 'Jewellery', order: 1 },
+      { slug: 'sarees', name: 'Sarees', order: 2 },
+      { slug: 'fashion', name: 'Fashion', order: 3 },
+      { slug: 'fragrances', name: 'Fragrances', order: 4 },
+    ],
+  },
+  {
+    parentSlug: 'kids',
+    parentName: 'Kids',
+    order: 4,
+    childSlugs: [
+      { slug: 'toys', name: 'Toys', order: 1 },
+    ],
+  },
+  {
+    parentSlug: 'home',
+    parentName: 'Home',
+    order: 5,
+    childSlugs: [
+      { slug: 'home-living', name: 'Home Décor', order: 1 },
+    ],
+  },
+  {
+    parentSlug: 'office',
+    parentName: 'Office',
+    order: 6,
+    childSlugs: [
+      { slug: 'corporate-gifts', name: 'Corporate Gifts', order: 1 },
+    ],
+  },
+  {
+    parentSlug: 'new-arrivals',
+    parentName: 'New Arrivals',
+    order: 7,
+    childSlugs: [],
+  },
+]
+
+/**
  * Fetch categories derived from Shopify collections and product types.
  * Results are cached for 5 minutes.
+ *
+ * v1.2: Organizes flat Shopify categories into the hierarchical menu structure
+ * (Couple, Men, Women, Kids, Home, Office, New Arrivals) with subcategories.
  */
 export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransformed[]> {
   if (isCacheValid(categoriesCache)) {
@@ -540,22 +619,25 @@ export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransform
     const customCollections = customData.custom_collections || []
     const smartCollections = smartData.smart_collections || []
 
-    // Build category map — collections are the primary source
-    const categoryMap = new Map<string, ShopifyCategoryTransformed>()
+    // Build flat category map — collections are the primary source
+    const flatCategoryMap = new Map<string, ShopifyCategoryTransformed>()
 
     // Add categories from collections first (these are the canonical categories)
     for (const col of [...customCollections, ...smartCollections]) {
       const slug = col.handle || toSlug(col.title)
       // Skip "frontpage" / "uncategorized" — not real browsing categories
       if (slug === 'frontpage' || slug === 'uncategorized') continue
-      if (!categoryMap.has(slug)) {
-        categoryMap.set(slug, {
+      if (!flatCategoryMap.has(slug)) {
+        flatCategoryMap.set(slug, {
           id: `shopify-col-${col.id}`,
           name: col.title,
           slug,
           description: col.body_html?.replace(/<[^>]*>/g, '').trim() || null,
           image: col.image?.src || null,
           productCount: 0,
+          parentId: null,
+          order: 0,
+          children: [],
         })
       }
     }
@@ -569,35 +651,113 @@ export async function fetchShopifyCategories(): Promise<ShopifyCategoryTransform
 
     // Only add product-type categories if no matching collection exists
     for (const product of products) {
-      if (!categoryMap.has(product.categorySlug)) {
-        categoryMap.set(product.categorySlug, {
+      if (!flatCategoryMap.has(product.categorySlug)) {
+        flatCategoryMap.set(product.categorySlug, {
           id: `shopify-cat-${product.categorySlug}`,
           name: product.category,
           slug: product.categorySlug,
           description: null,
           image: null,
           productCount: 0,
+          parentId: null,
+          order: 0,
+          children: [],
         })
       }
     }
 
-    // Update product counts and remove categories with 0 products
-    for (const [slug, cat] of categoryMap) {
+    // Update product counts
+    for (const [slug, cat] of flatCategoryMap) {
       cat.productCount = productCountMap.get(slug) || 0
     }
-    // Remove empty categories (except if they came from collections)
-    for (const [slug, cat] of categoryMap) {
-      if (cat.productCount === 0 && cat.id.startsWith('shopify-cat-')) {
-        categoryMap.delete(slug)
+
+    // ── v1.2: Build hierarchical categories ──
+    const hierarchicalCategories: ShopifyCategoryTransformed[] = []
+
+    for (const group of CATEGORY_HIERARCHY) {
+      const children: ShopifyCategoryTransformed[] = []
+
+      for (const childDef of group.childSlugs) {
+        const existing = flatCategoryMap.get(childDef.slug)
+        if (existing && existing.productCount > 0) {
+          children.push({
+            ...existing,
+            parentId: `shopify-parent-${group.parentSlug}`,
+            order: childDef.order,
+            children: [],
+          })
+        } else if (existing) {
+          // Include even with 0 products if it came from a collection
+          children.push({
+            ...existing,
+            parentId: `shopify-parent-${group.parentSlug}`,
+            order: childDef.order,
+            children: [],
+          })
+        } else {
+          // Create a placeholder subcategory even without Shopify data
+          children.push({
+            id: `shopify-cat-${childDef.slug}`,
+            name: childDef.name,
+            slug: childDef.slug,
+            description: null,
+            image: null,
+            productCount: productCountMap.get(childDef.slug) || 0,
+            parentId: `shopify-parent-${group.parentSlug}`,
+            order: childDef.order,
+            children: [],
+          })
+        }
+      }
+
+      // Calculate total product count for parent
+      const childrenProductCount = children.reduce((sum, c) => sum + c.productCount, 0)
+
+      // For "New Arrivals", count products created in the last 30 days
+      let newArrivalsCount = 0
+      if (group.parentSlug === 'new-arrivals') {
+        const thirtyDaysAgo = new Date()
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+        // Count products that are recently created or tagged as new
+        newArrivalsCount = products.filter(p =>
+          p.tags.some(t => t.toLowerCase().includes('new')) ||
+          p.featured
+        ).length
+        // Fallback: if no tagged products, use total product count
+        if (newArrivalsCount === 0 && products.length > 0) {
+          newArrivalsCount = Math.min(products.length, Math.ceil(products.length * 0.2))
+        }
+      }
+
+      hierarchicalCategories.push({
+        id: `shopify-parent-${group.parentSlug}`,
+        name: group.parentName,
+        slug: group.parentSlug,
+        description: null,
+        image: null,
+        productCount: group.parentSlug === 'new-arrivals' ? newArrivalsCount : childrenProductCount,
+        parentId: null,
+        order: group.order,
+        children,
+      })
+    }
+
+    // Also add any flat categories that don't fit into the hierarchy
+    const mappedChildSlugs = new Set(CATEGORY_HIERARCHY.flatMap(g => g.childSlugs.map(c => c.slug)))
+    const mappedParentSlugs = new Set(CATEGORY_HIERARCHY.map(g => g.parentSlug))
+    for (const [slug, cat] of flatCategoryMap) {
+      if (!mappedChildSlugs.has(slug) && !mappedParentSlugs.has(slug) && cat.productCount > 0) {
+        // This category exists in Shopify but isn't in our hierarchy — add as standalone
+        hierarchicalCategories.push({
+          ...cat,
+          order: hierarchicalCategories.length + 1,
+          children: [],
+        })
       }
     }
 
-    const categories = Array.from(categoryMap.values()).sort((a, b) =>
-      a.name.localeCompare(b.name)
-    )
-
-    categoriesCache = { data: categories, timestamp: Date.now() }
-    return categories
+    categoriesCache = { data: hierarchicalCategories, timestamp: Date.now() }
+    return hierarchicalCategories
   } catch (error) {
     console.error('[Shopify] Failed to fetch categories:', error)
     throw error

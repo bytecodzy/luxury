@@ -31,12 +31,26 @@ const CATEGORY_SLUG_ALIASES: Record<string, string[]> = {
   'romantic-gifts': ['romantic'],                    // alternate slug
 }
 
+// v1.2: Parent category → child category slug mapping
+// When a parent category is selected, show products from all its subcategories
+const PARENT_CATEGORY_CHILDREN: Record<string, string[]> = {
+  'couple': ['couple-friendly-gifts', 'romantic-gifts', 'couple-gifts'],
+  'men': ['mens-shirts-t-shirts', 'mens-shirts', 'watches', 'leather-goods', 'leather', 'fragrances'],
+  'women': ['jewelry', 'jewellery', 'sarees', 'fashion', 'fragrances'],
+  'kids': ['toys'],
+  'home': ['home-living', 'home'],
+  'office': ['corporate-gifts'],
+  'new-arrivals': [], // Special: no child slugs, uses tag/featured filter
+}
+
 /**
  * Resolve a category slug to all its equivalent slugs (including itself).
  * E.g. "mens-shirts" → ["mens-shirts-t-shirts", "mens-shirts"]
+ * v1.2: Also expands parent categories (e.g. "men" → ["men", "mens-shirts-t-shirts", "watches", ...])
  */
 function resolveCategorySlugs(slug: string): string[] {
   const aliases = [slug]
+  // Expand aliases
   for (const [canonical, alts] of Object.entries(CATEGORY_SLUG_ALIASES)) {
     if (canonical === slug) {
       aliases.push(...alts)
@@ -44,7 +58,12 @@ function resolveCategorySlugs(slug: string): string[] {
       aliases.push(canonical)
     }
   }
-  return aliases
+  // Expand parent categories to include all child slugs
+  const childSlugs = PARENT_CATEGORY_CHILDREN[slug]
+  if (childSlugs && childSlugs.length > 0) {
+    aliases.push(...childSlugs)
+  }
+  return [...new Set(aliases)] // deduplicate
 }
 
 // ─── Product deduplication ───
