@@ -35,6 +35,8 @@ function AppContent() {
         return (
           <>
             <HeroSection />
+            {/* Elegant separator */}
+            <div className="relative h-px w-full bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
             <CategoryGrid />
             <ProductGrid />
             <AppDownloadSection />
@@ -66,6 +68,7 @@ function AppContent() {
         return (
           <>
             <HeroSection />
+            <div className="relative h-px w-full bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
             <CategoryGrid />
             <ProductGrid />
             <AppDownloadSection />
@@ -82,10 +85,10 @@ function AppContent() {
           <AnimatePresence mode="wait">
             <motion.div
               key={view}
-              initial={{ opacity: 0, y: 8 }}
+              initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.25 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2 }}
             >
               {renderView()}
             </motion.div>
@@ -131,9 +134,6 @@ class ErrorBoundary extends React.Component<
           <p className="mb-4 max-w-md text-sm text-amber-200/60">
             {this.state.error?.message || 'An unexpected error occurred'}
           </p>
-          <pre className="mb-6 max-w-lg overflow-auto rounded-lg bg-stone-900 p-4 text-left text-xs text-red-300">
-            {this.state.error?.stack || ''}
-          </pre>
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
             className="rounded-md bg-amber-600 px-6 py-2 text-sm font-medium text-stone-950 hover:bg-amber-500"

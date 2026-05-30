@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useStore } from '@/lib/store';
 import { useQuery } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
+import Image from 'next/image';
 import {
   Heart,
   User,
@@ -88,46 +89,37 @@ const subcategoryIcons: Record<string, LucideIcon> = {
   'office-stationery': Pen,
 };
 
-// ─── Color maps for parent categories ───
+// Category image paths
+const categoryImages: Record<string, string> = {
+  couple: '/images/categories/couple.jpg',
+  men: '/images/categories/men.jpg',
+  women: '/images/categories/women.jpg',
+  kids: '/images/categories/kids.jpg',
+  home: '/images/categories/home.jpg',
+  office: '/images/categories/office.jpg',
+  'new-arrivals': '/images/categories/new-arrivals.jpg',
+};
 
-const categoryGradients: Record<string, string> = {
-  couple: 'from-rose-900/40 via-stone-900/60 to-stone-950/80',
-  men: 'from-amber-900/30 via-stone-900/60 to-stone-950/80',
-  women: 'from-pink-900/30 via-stone-900/60 to-stone-950/80',
-  kids: 'from-cyan-900/30 via-stone-900/60 to-stone-950/80',
-  home: 'from-orange-900/30 via-stone-900/60 to-stone-950/80',
-  office: 'from-yellow-900/30 via-stone-900/60 to-stone-950/80',
-  'new-arrivals': 'from-amber-800/40 via-stone-900/60 to-stone-950/80',
+// ─── Color maps for categories ───
+
+const categoryAccentColors: Record<string, string> = {
+  couple: 'from-rose-500/80 to-rose-900/90',
+  men: 'from-amber-500/80 to-amber-900/90',
+  women: 'from-pink-500/80 to-pink-900/90',
+  kids: 'from-cyan-500/80 to-cyan-900/90',
+  home: 'from-orange-500/80 to-orange-900/90',
+  office: 'from-yellow-500/80 to-yellow-900/90',
+  'new-arrivals': 'from-amber-400/80 to-amber-800/90',
 };
 
 const categoryBorderColors: Record<string, string> = {
-  couple: 'hover:border-rose-500/40 focus-visible:border-rose-500/50',
-  men: 'hover:border-amber-500/40 focus-visible:border-amber-500/50',
-  women: 'hover:border-pink-500/40 focus-visible:border-pink-500/50',
-  kids: 'hover:border-cyan-500/40 focus-visible:border-cyan-500/50',
-  home: 'hover:border-orange-500/40 focus-visible:border-orange-500/50',
-  office: 'hover:border-yellow-500/40 focus-visible:border-yellow-500/50',
-  'new-arrivals': 'hover:border-amber-400/40 focus-visible:border-amber-400/50',
-};
-
-const categoryIconColors: Record<string, string> = {
-  couple: 'text-rose-400/70 group-hover:text-rose-400',
-  men: 'text-amber-400/70 group-hover:text-amber-400',
-  women: 'text-pink-400/70 group-hover:text-pink-400',
-  kids: 'text-cyan-400/70 group-hover:text-cyan-400',
-  home: 'text-orange-400/70 group-hover:text-orange-400',
-  office: 'text-yellow-400/70 group-hover:text-yellow-400',
-  'new-arrivals': 'text-amber-300/70 group-hover:text-amber-300',
-};
-
-const categoryActiveBorders: Record<string, string> = {
-  couple: 'border-rose-500/50 shadow-rose-900/20',
-  men: 'border-amber-500/50 shadow-amber-900/20',
-  women: 'border-pink-500/50 shadow-pink-900/20',
-  kids: 'border-cyan-500/50 shadow-cyan-900/20',
-  home: 'border-orange-500/50 shadow-orange-900/20',
-  office: 'border-yellow-500/50 shadow-yellow-900/20',
-  'new-arrivals': 'border-amber-400/50 shadow-amber-800/20',
+  couple: 'hover:border-rose-400/50',
+  men: 'hover:border-amber-400/50',
+  women: 'hover:border-pink-400/50',
+  kids: 'hover:border-cyan-400/50',
+  home: 'hover:border-orange-400/50',
+  office: 'hover:border-yellow-400/50',
+  'new-arrivals': 'hover:border-amber-300/50',
 };
 
 // ─── Component ───
@@ -148,16 +140,13 @@ export function CategoryGrid() {
     children: cat.children ?? [],
   }));
 
-  // Find the currently expanded category
   const expandedCategory = categories.find((c) => c.slug === expandedSlug);
 
   const handleCategoryClick = (cat: Category) => {
     if (cat.children.length > 0) {
-      // Toggle expand/collapse
       setExpandedSlug(expandedSlug === cat.slug ? null : cat.slug);
       setActiveSubcategory(null);
     } else {
-      // No subcategories — set filter directly
       setExpandedSlug(null);
       setActiveSubcategory(null);
       setCategory(cat.slug);
@@ -172,15 +161,12 @@ export function CategoryGrid() {
   // ─── Loading State ───
   if (isLoading) {
     return (
-      <section className="py-12">
-        <h2 className="mb-8 text-center text-2xl font-bold text-amber-100 sm:text-3xl">
-          {t('categories.title')}
-        </h2>
-        <div className="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible xl:grid-cols-7">
+      <section className="py-10">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
           {Array.from({ length: 7 }).map((_, i) => (
             <Skeleton
               key={i}
-              className="h-32 min-w-[130px] rounded-xl bg-stone-900/50 md:min-w-0"
+              className="aspect-[3/4] rounded-xl bg-stone-900/50"
             />
           ))}
         </div>
@@ -189,17 +175,26 @@ export function CategoryGrid() {
   }
 
   return (
-    <section className="py-12">
-      <h2 className="mb-8 text-center text-2xl font-bold text-amber-100 sm:text-3xl">
-        {t('categories.title')}
-      </h2>
+    <section className="py-8">
+      {/* Section Header */}
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-amber-100 sm:text-2xl">
+            {t('categories.title')}
+          </h2>
+          <p className="mt-1 text-xs text-amber-200/40">
+            Browse our curated collections
+          </p>
+        </div>
+      </div>
 
-      {/* ─── Category Cards ─── */}
-      <div className="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible md:pb-0 xl:grid-cols-7 [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-700/50 [&::-webkit-scrollbar-track]:bg-transparent">
+      {/* ─── Category Cards with Images ─── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
         {categories.map((cat, i) => {
           const IconComponent = parentCategoryIcons[cat.slug] || Gem;
           const isExpanded = expandedSlug === cat.slug;
           const hasChildren = cat.children.length > 0;
+          const imageSrc = categoryImages[cat.slug];
 
           return (
             <motion.button
@@ -209,53 +204,75 @@ export function CategoryGrid() {
               transition={{ delay: i * 0.05, duration: 0.3 }}
               onClick={() => handleCategoryClick(cat)}
               className={`
-                group relative flex flex-col items-center justify-center
-                min-w-[130px] md:min-w-0
-                overflow-hidden rounded-xl border p-5
-                transition-all duration-300
-                bg-gradient-to-br ${categoryGradients[cat.slug] || 'from-stone-900/40 to-stone-950/80'}
+                group relative flex flex-col items-center justify-end
+                overflow-hidden rounded-xl border
+                transition-all duration-300 aspect-[3/4]
                 ${isExpanded
-                  ? `border-amber-500/50 shadow-lg ${categoryActiveBorders[cat.slug] || 'shadow-amber-900/20'}`
-                  : `border-stone-800/50 ${categoryBorderColors[cat.slug] || 'hover:border-amber-600/40'} hover:shadow-lg hover:shadow-amber-900/10`
+                  ? 'border-amber-400/50 shadow-lg shadow-amber-900/20'
+                  : `border-stone-800/40 ${categoryBorderColors[cat.slug] || 'hover:border-amber-600/40'} hover:shadow-lg hover:shadow-amber-900/10`
                 }
                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
               `}
             >
-              {/* Glow effect on hover */}
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-transparent via-amber-500/0 to-amber-500/0 opacity-0 transition-opacity duration-300 group-hover:via-amber-500/5 group-hover:to-amber-500/10 group-hover:opacity-100" />
-
-              {/* Icon */}
-              <div className={`mb-3 transition-colors duration-300 ${categoryIconColors[cat.slug] || 'text-amber-400/70 group-hover:text-amber-400'}`}>
-                <IconComponent className="h-7 w-7" strokeWidth={1.5} />
-              </div>
-
-              {/* Category Name */}
-              <h3 className="text-sm font-semibold text-amber-100/90 transition-colors group-hover:text-amber-100">
-                {cat.name}
-              </h3>
-
-              {/* Product Count */}
-              <p className="mt-1 text-xs text-amber-200/40">
-                {cat.productCount} {t('categories.items')}
-              </p>
-
-              {/* Expand indicator */}
-              {hasChildren && (
-                <motion.div
-                  animate={{ rotate: isExpanded ? 180 : 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="mt-2 text-amber-400/40 transition-colors group-hover:text-amber-400/70"
-                >
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </motion.div>
-              )}
-
-              {/* New Arrivals sparkle accent */}
-              {cat.slug === 'new-arrivals' && (
-                <div className="absolute right-2 top-2">
-                  <Sparkles className="h-3 w-3 text-amber-400/50" />
+              {/* Background Image */}
+              {imageSrc && (
+                <div className="absolute inset-0">
+                  <Image
+                    src={imageSrc}
+                    alt={cat.name}
+                    fill
+                    className="object-cover transition-transform duration-700 group-hover:scale-110"
+                    sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, 14vw"
+                  />
+                  {/* Dark overlay gradient */}
+                  <div className={`absolute inset-0 bg-gradient-to-t ${categoryAccentColors[cat.slug] || 'from-stone-800/90 to-stone-900/70'}`} />
+                  <div className="absolute inset-0 bg-gradient-to-t from-stone-950/80 via-transparent to-transparent" />
                 </div>
               )}
+
+              {/* Fallback gradient if no image */}
+              {!imageSrc && (
+                <div className={`absolute inset-0 bg-gradient-to-br ${categoryAccentColors[cat.slug] || 'from-stone-800 to-stone-900'}`} />
+              )}
+
+              {/* Hover glow */}
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-amber-500/0 via-amber-500/0 to-amber-500/0 opacity-0 transition-opacity duration-300 group-hover:from-amber-500/5 group-hover:via-amber-500/5 group-hover:to-amber-500/10 group-hover:opacity-100" />
+
+              {/* Content at bottom */}
+              <div className="relative z-10 w-full p-3 text-center">
+                {/* Icon */}
+                <div className="mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-all duration-300 group-hover:bg-white/20 group-hover:scale-110">
+                  <IconComponent className="h-4.5 w-4.5 text-white/90" strokeWidth={1.5} />
+                </div>
+
+                {/* Category Name */}
+                <h3 className="text-xs font-semibold text-white/95 sm:text-sm transition-colors group-hover:text-white">
+                  {cat.name}
+                </h3>
+
+                {/* Product Count */}
+                <p className="mt-0.5 text-[10px] text-white/50">
+                  {cat.productCount} {t('categories.items')}
+                </p>
+
+                {/* Expand indicator */}
+                {hasChildren && (
+                  <motion.div
+                    animate={{ rotate: isExpanded ? 180 : 0 }}
+                    transition={{ duration: 0.2 }}
+                    className="mt-1 text-white/40 transition-colors group-hover:text-white/70"
+                  >
+                    <ChevronDown className="mx-auto h-3 w-3" />
+                  </motion.div>
+                )}
+
+                {/* New Arrivals sparkle */}
+                {cat.slug === 'new-arrivals' && (
+                  <div className="absolute right-2 top-2">
+                    <Sparkles className="h-3 w-3 text-amber-300/70" />
+                  </div>
+                )}
+              </div>
             </motion.button>
           );
         })}
@@ -266,12 +283,12 @@ export function CategoryGrid() {
         {expandedCategory && expandedCategory.children.length > 0 && (
           <motion.div
             initial={{ opacity: 0, height: 0, marginTop: 0 }}
-            animate={{ opacity: 1, height: 'auto', marginTop: 16 }}
+            animate={{ opacity: 1, height: 'auto', marginTop: 12 }}
             exit={{ opacity: 0, height: 0, marginTop: 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
             className="overflow-hidden"
           >
-            <div className="rounded-xl border border-stone-800/40 bg-stone-950/60 p-4 backdrop-blur-sm">
+            <div className="rounded-xl border border-amber-900/30 bg-stone-950/80 p-4 backdrop-blur-sm">
               {/* Subcategory header */}
               <div className="mb-3 flex items-center gap-2">
                 {(() => {
@@ -279,7 +296,7 @@ export function CategoryGrid() {
                   return <ParentIcon className="h-4 w-4 text-amber-400/70" strokeWidth={1.5} />;
                 })()}
                 <span className="text-sm font-medium text-amber-200/70">
-                  {expandedCategory.name} — {t('categories.items') || 'Browse'}
+                  {expandedCategory.name} — Browse
                 </span>
               </div>
 

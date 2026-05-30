@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { X, SlidersHorizontal } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
+import { motion } from 'framer-motion';
 
 interface Product {
   id: string;
@@ -160,7 +161,7 @@ export function ProductGrid() {
 
   const products: Product[] = data?.products ?? [];
 
-  // Compute which platforms have products in current results (unfiltered by platform)
+  // Compute which platforms have products in current results
   const availablePlatforms = useMemo(() => {
     const prods = data?.products;
     if (!prods) return [];
@@ -187,220 +188,213 @@ export function ProductGrid() {
   const hasActiveFilters = selectedCategory || searchQuery || sourceFilter !== 'all' || platformFilter !== 'all' || occasionFilter !== 'all' || recipientFilter !== 'all' || relationshipFilter !== 'all' || priceRangeFilter !== 'all';
 
   return (
-    <section className="py-8">
-      {/* Header */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-amber-100 sm:text-2xl">
-            {searchQuery
-              ? t('products.resultsFor', { query: searchQuery })
-              : selectedCategory
-              ? `${selectedCategory.replace('-', ' ').replace(/\b\w/g, (l) => l.toUpperCase())}`
-              : t('products.allProducts')}
-          </h2>
-          {!isLoading && (
-            <p className="mt-1 text-sm text-amber-200/40">
-              {data?.total ?? 0} {t('categories.items')}
-            </p>
-          )}
-        </div>
+    <section className="relative py-6">
+      {/* Subtle background decoration */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-0 top-0 h-32 w-full bg-gradient-to-b from-amber-900/[0.03] to-transparent" />
+      </div>
 
-        <div className="flex items-center gap-3">
-          {/* Clear button */}
-          {hasActiveFilters && (
+      <div className="relative">
+        {/* Header */}
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-amber-100 sm:text-xl">
+              {searchQuery
+                ? t('products.resultsFor', { query: searchQuery })
+                : selectedCategory
+                ? `${selectedCategory.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}`
+                : t('products.allProducts')}
+            </h2>
+            {!isLoading && (
+              <p className="mt-0.5 text-xs text-amber-200/40">
+                {data?.total ?? 0} {t('categories.items')}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Clear button */}
+            {hasActiveFilters && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={clearFilters}
+                className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 h-8 text-xs"
+              >
+                <X className="mr-1 h-3 w-3" />
+                {t('common.clear')}
+              </Button>
+            )}
+
             <Button
               variant="outline"
               size="sm"
-              onClick={clearFilters}
-              className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
+              onClick={() => setShowFilters(!showFilters)}
+              className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 sm:hidden h-8"
             >
-              <X className="mr-1 h-3 w-3" />
-              {t('common.clear')}
+              <SlidersHorizontal className="h-3.5 w-3.5" />
             </Button>
-          )}
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowFilters(!showFilters)}
-            className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 sm:hidden"
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-          </Button>
-
-          {/* Sort */}
-          <Select value={sort} onValueChange={setSort}>
-            <SelectTrigger className="w-[160px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-sm">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent className="border-amber-900/30 bg-stone-900">
-              <SelectItem value="featured">Featured</SelectItem>
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="price-asc">Price: Low to High</SelectItem>
-              <SelectItem value="price-desc">Price: High to Low</SelectItem>
-              <SelectItem value="rating">Top Rated</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Filters Row */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        {/* Source Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-amber-200/40">Source:</span>
-          <Select value={sourceFilter} onValueChange={setSourceFilter}>
-            <SelectTrigger className="w-[140px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
-              <SelectValue placeholder="All Sources" />
-            </SelectTrigger>
-            <SelectContent className="border-amber-900/30 bg-stone-900">
-              <SelectItem value="all">All Products</SelectItem>
-              <SelectItem value="own">Our Collection</SelectItem>
-              <SelectItem value="external">External Platforms</SelectItem>
-            </SelectContent>
-          </Select>
+            {/* Sort */}
+            <Select value={sort} onValueChange={setSort}>
+              <SelectTrigger className="w-[140px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent className="border-amber-900/30 bg-stone-900">
+                <SelectItem value="featured">Featured</SelectItem>
+                <SelectItem value="newest">Newest</SelectItem>
+                <SelectItem value="price-asc">Price: Low to High</SelectItem>
+                <SelectItem value="price-desc">Price: High to Low</SelectItem>
+                <SelectItem value="rating">Top Rated</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        {/* Occasion Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-amber-200/40">Occasion:</span>
-          <Select value={occasionFilter} onValueChange={setOccasionFilter}>
-            <SelectTrigger className="w-[140px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
-              <SelectValue placeholder="All Occasions" />
-            </SelectTrigger>
-            <SelectContent className="border-amber-900/30 bg-stone-900">
-              <SelectItem value="all">All Occasions</SelectItem>
-              {OCCASION_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* Compact Filters Row */}
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          {/* Source Filter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider">Source</span>
+            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+              <SelectTrigger className="w-[120px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-7">
+                <SelectValue placeholder="All Sources" />
+              </SelectTrigger>
+              <SelectContent className="border-amber-900/30 bg-stone-900">
+                <SelectItem value="all">All Products</SelectItem>
+                <SelectItem value="own">Our Collection</SelectItem>
+                <SelectItem value="external">External Platforms</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Occasion Filter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider">Occasion</span>
+            <Select value={occasionFilter} onValueChange={setOccasionFilter}>
+              <SelectTrigger className="w-[120px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-7">
+                <SelectValue placeholder="All" />
+              </SelectTrigger>
+              <SelectContent className="border-amber-900/30 bg-stone-900">
+                <SelectItem value="all">All Occasions</SelectItem>
+                {OCCASION_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Recipient Filter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider">For</span>
+            <Select value={recipientFilter} onValueChange={setRecipientFilter}>
+              <SelectTrigger className="w-[100px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-7">
+                <SelectValue placeholder="All" />
+              </SelectTrigger>
+              <SelectContent className="border-amber-900/30 bg-stone-900">
+                <SelectItem value="all">All</SelectItem>
+                {RECIPIENT_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Price Range Filter */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider">Price</span>
+            <Select value={priceRangeFilter} onValueChange={setPriceRangeFilter}>
+              <SelectTrigger className="w-[110px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-7">
+                <SelectValue placeholder="Any" />
+              </SelectTrigger>
+              <SelectContent className="border-amber-900/30 bg-stone-900">
+                <SelectItem value="all">Any Price</SelectItem>
+                {PRICE_RANGE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        {/* Recipient Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-amber-200/40">Recipient:</span>
-          <Select value={recipientFilter} onValueChange={setRecipientFilter}>
-            <SelectTrigger className="w-[120px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
-              <SelectValue placeholder="All" />
-            </SelectTrigger>
-            <SelectContent className="border-amber-900/30 bg-stone-900">
-              <SelectItem value="all">All Recipients</SelectItem>
-              {RECIPIENT_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {/* Platform Filter Chips */}
+        {availablePlatforms.length > 0 && (
+          <div className="mb-5 flex flex-wrap items-center gap-2">
+            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider mr-1">Platform</span>
+            <button
+              onClick={() => setPlatformFilter('all')}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                platformFilter === 'all'
+                  ? 'border-amber-500/50 bg-amber-600/20 text-amber-300'
+                  : 'border-amber-900/20 bg-stone-900/40 text-amber-200/50 hover:border-amber-600/30 hover:text-amber-200/70'
+              }`}
+            >
+              <span className="h-2 w-2 rounded-full bg-amber-400" />
+              All
+            </button>
+            {availablePlatforms.map((p) => {
+              const slug = p.value;
+              const isActive = platformFilter === slug;
+              return (
+                <button
+                  key={slug}
+                  onClick={() => setPlatformFilter(isActive ? 'all' : slug)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                    isActive
+                      ? PLATFORM_CHIP_ACTIVE_BG[slug] || 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
+                      : 'border-amber-900/20 bg-stone-900/40 text-amber-200/50 hover:border-amber-600/30 hover:text-amber-200/70'
+                  }`}
+                >
+                  <span className={`h-2 w-2 rounded-full ${PLATFORM_DOT_COLORS[slug] || 'bg-emerald-500'}`} />
+                  {p.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Relationship Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-amber-200/40">For:</span>
-          <Select value={relationshipFilter} onValueChange={setRelationshipFilter}>
-            <SelectTrigger className="w-[130px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
-              <SelectValue placeholder="Any" />
-            </SelectTrigger>
-            <SelectContent className="border-amber-900/30 bg-stone-900">
-              <SelectItem value="all">Any Relationship</SelectItem>
-              {RELATIONSHIP_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Price Range Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-amber-200/40">Price:</span>
-          <Select value={priceRangeFilter} onValueChange={setPriceRangeFilter}>
-            <SelectTrigger className="w-[130px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
-              <SelectValue placeholder="Any Price" />
-            </SelectTrigger>
-            <SelectContent className="border-amber-900/30 bg-stone-900">
-              <SelectItem value="all">Any Price</SelectItem>
-              {PRICE_RANGE_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Platform Filter Chips */}
-      {availablePlatforms.length > 0 && (
-        <div className="mb-6 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-amber-200/40 mr-1">Platform:</span>
-          {/* "All" chip */}
-          <button
-            onClick={() => setPlatformFilter('all')}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
-              platformFilter === 'all'
-                ? 'border-amber-500/50 bg-amber-600/20 text-amber-300'
-                : 'border-amber-900/20 bg-stone-900/40 text-amber-200/50 hover:border-amber-600/30 hover:text-amber-200/70'
-            }`}
-          >
-            <span className="h-2 w-2 rounded-full bg-amber-400" />
-            All
-          </button>
-          {/* Platform chips */}
-          {availablePlatforms.map((p) => {
-            const slug = p.value;
-            const isActive = platformFilter === slug;
-            return (
-              <button
-                key={slug}
-                onClick={() => setPlatformFilter(isActive ? 'all' : slug)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
-                  isActive
-                    ? PLATFORM_CHIP_ACTIVE_BG[slug] || 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
-                    : 'border-amber-900/20 bg-stone-900/40 text-amber-200/50 hover:border-amber-600/30 hover:text-amber-200/70'
-                }`}
-              >
-                <span className={`h-2 w-2 rounded-full ${PLATFORM_DOT_COLORS[slug] || 'bg-emerald-500'}`} />
-                {p.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Grid */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/60">
-              <Skeleton className="aspect-square bg-stone-800" />
-              <div className="p-4 space-y-2">
-                <Skeleton className="h-3 w-16 bg-stone-800" />
-                <Skeleton className="h-4 w-3/4 bg-stone-800" />
-                <Skeleton className="h-5 w-20 bg-stone-800" />
-                <Skeleton className="h-8 w-full bg-stone-800" />
+        {/* Grid */}
+        {isLoading ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="overflow-hidden rounded-xl border border-amber-900/15 bg-stone-900/40">
+                <Skeleton className="aspect-square bg-stone-800/60" />
+                <div className="p-3 space-y-2">
+                  <Skeleton className="h-3 w-16 bg-stone-800/60" />
+                  <Skeleton className="h-4 w-3/4 bg-stone-800/60" />
+                  <Skeleton className="h-5 w-20 bg-stone-800/60" />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      ) : products.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <span className="text-4xl">🔍</span>
-          <h3 className="mt-4 text-lg font-semibold text-amber-100">{t('products.noProductsFound')}</h3>
-          <p className="mt-2 text-sm text-amber-200/40">
-            {t('products.tryAdjusting')}
-          </p>
-          <Button
-            onClick={clearFilters}
-            variant="outline"
-            className="mt-4 border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
+            ))}
+          </div>
+        ) : products.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <span className="text-4xl">🔍</span>
+            <h3 className="mt-4 text-lg font-semibold text-amber-100">{t('products.noProductsFound')}</h3>
+            <p className="mt-2 text-sm text-amber-200/40">
+              {t('products.tryAdjusting')}
+            </p>
+            <Button
+              onClick={clearFilters}
+              variant="outline"
+              className="mt-4 border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
+            >
+              {t('products.viewAllProducts')}
+            </Button>
+          </div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
           >
-            {t('products.viewAllProducts')}
-          </Button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-          {products.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
-      )}
+            {products.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </motion.div>
+        )}
+      </div>
     </section>
   );
 }
