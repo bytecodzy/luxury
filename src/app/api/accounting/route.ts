@@ -57,14 +57,13 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  // Get overall summary
-  const allEntries = await db.accountEntry.findMany({ where });
-  const totalCredits = allEntries
-    .filter((e) => e.type === 'credit')
-    .reduce((sum, e) => sum + e.amount, 0);
-  const totalDebits = allEntries
-    .filter((e) => e.type === 'debit')
-    .reduce((sum, e) => sum + e.amount, 0);
+  // Get overall summary using aggregation (efficient)
+  const [creditAgg, debitAgg] = await Promise.all([
+    db.accountEntry.aggregate({ _sum: { amount: true }, where: { ...where, type: 'credit' } }),
+    db.accountEntry.aggregate({ _sum: { amount: true }, where: { ...where, type: 'debit' } }),
+  ]);
+  const totalCredits = creditAgg._sum.amount || 0;
+  const totalDebits = debitAgg._sum.amount || 0;
 
   return NextResponse.json({
     entries: entriesWithBalance,

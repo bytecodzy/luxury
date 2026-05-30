@@ -15,15 +15,25 @@ export async function GET(request: NextRequest) {
     }
 
     const shares = await db.agentDocShare.findMany({
-      include: {
-        document: { select: { id: true, title: true, slug: true } },
-        agent: { select: { id: true, name: true, email: true } },
-        admin: { select: { id: true, name: true } },
-      },
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ shares })
+    // Enrich with document and user info
+    const enriched = await Promise.all(shares.map(async (share) => {
+      const [doc, agent, admin] = await Promise.all([
+        db.wikiDocument.findUnique({ where: { id: share.docId }, select: { id: true, title: true, category: true } }),
+        db.user.findUnique({ where: { id: share.agentId }, select: { id: true, name: true, email: true } }),
+        db.user.findUnique({ where: { id: share.sharedBy }, select: { id: true, name: true } }),
+      ])
+      return {
+        ...share,
+        document: doc,
+        agent,
+        admin,
+      }
+    }))
+
+    return NextResponse.json({ shares: enriched })
   } catch (error) {
     console.error('Admin share-doc GET error:', error)
     return NextResponse.json({ error: 'Failed to fetch shares' }, { status: 500 })
@@ -63,25 +73,17 @@ export async function POST(request: NextRequest) {
     if (!agent) {
       return NextResponse.json({ error: 'Agent not found' }, { status: 404 })
     }
-    if (agent.role !== 'agent') {
-      return NextResponse.json({ error: 'Target user is not an agent' }, { status: 400 })
-    }
 
-    // Create or update the share record (unique constraint on [docId, agentId])
+    // Create or update the share record
     try {
       const share = await db.agentDocShare.create({
         data: {
           docId,
           agentId,
-          adminId: user.id,
+          sharedBy: user.id,
           canDownload: canDownload !== undefined ? canDownload : true,
           canShare: canShare !== undefined ? canShare : false,
           message: message || null,
-        },
-        include: {
-          document: { select: { id: true, title: true, slug: true } },
-          agent: { select: { id: true, name: true, email: true } },
-          admin: { select: { id: true, name: true } },
         },
       })
 

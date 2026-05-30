@@ -5,7 +5,7 @@ import { requireAdmin } from '@/lib/auth-helper';
 export async function GET(request: NextRequest) {
   try {
     const adminCheck = await requireAdmin(request);
-    if (adminCheck) return adminCheck;
+    if (adminCheck.error) return adminCheck.error;
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');

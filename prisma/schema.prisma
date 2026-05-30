@@ -456,11 +456,31 @@ model WikiDocument {
 }
 
 model AgentDocShare {
-  id         String   @id @default(cuid())
-  agentId    String
-  docId      String
-  sharedBy   String
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  agentId      String
+  docId        String
+  sharedBy     String
+  canDownload  Boolean  @default(true)
+  canShare     Boolean  @default(false)
+  message      String?
+  createdAt    DateTime @default(now())
+}
+
+model Coupon {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  title       String?
+  type        String    @default("percentage") // percentage, fixed, free_shipping
+  value       Float     @default(0)
+  minOrder    Float?    @default(0)
+  maxDiscount Float?
+  validFrom   DateTime  @default(now())
+  validTo     DateTime
+  isActive    Boolean   @default(true)
+  usageLimit  Int?      // null = unlimited
+  usedCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model SupportTicket {

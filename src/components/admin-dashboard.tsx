@@ -2099,42 +2099,25 @@ function ContentTab({ token, onMutate }: { token: string | null; onMutate: () =>
 
   const { data, isLoading } = useQuery({
     queryKey: ['wiki-docs'],
-    queryFn: () => apiFetch('/api/admin/users?limit=1', undefined, token).then(() => ({ docs: [] })), // placeholder - wiki docs API
+    queryFn: () => apiFetch('/api/wiki', undefined, token),
   })
 
-  const [docs, setDocs] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const fetchDocs = async () => {
-      try {
-        // Since there's no specific wiki docs list endpoint, we'll use a simple state
-        setLoading(false)
-      } catch { setLoading(false) }
-    }
-    fetchDocs()
-  }, [token])
+  const docs = (data as any)?.documents || (data as any)?.docs || []
 
   const [form, setForm] = useState({ title: '', content: '', category: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Simple local CRUD for wiki docs since there's no dedicated endpoint
   const handleSave = async () => {
     if (!form.title || !form.content) { setError('Title and content required'); return }
     setSaving(true); setError('')
     try {
-      // Using the wiki document creation through the database directly is not available
-      // So we'll maintain a simple local state
-      const newDoc = editDoc
-        ? { ...editDoc, ...form, updatedAt: new Date().toISOString() }
-        : { id: `doc-${Date.now()}`, ...form, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-
       if (editDoc) {
-        setDocs(prev => prev.map(d => d.id === editDoc.id ? newDoc : d))
+        await apiFetch(`/api/wiki/${editDoc.id}`, { method: 'PUT', body: JSON.stringify(form) }, token)
       } else {
-        setDocs(prev => [newDoc, ...prev])
+        await apiFetch('/api/wiki', { method: 'POST', body: JSON.stringify(form) }, token)
       }
+      qc.invalidateQueries({ queryKey: ['wiki-docs'] })
       setShowForm(false); setEditDoc(null); setForm({ title: '', content: '', category: '' })
     } catch (e: any) { setError(e.message) } finally { setSaving(false) }
   }
@@ -2185,7 +2168,7 @@ function ContentTab({ token, onMutate }: { token: string | null; onMutate: () =>
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <Button size="sm" variant="ghost" className="h-7 text-amber-200/40 hover:text-amber-400" onClick={() => { setEditDoc(d); setForm({ title: d.title, content: d.content, category: d.category || '' }); setShowForm(true) }}><Pencil className="h-3.5 w-3.5" /></Button>
-                      <Button size="sm" variant="ghost" className="h-7 text-red-400/40 hover:text-red-400" onClick={() => setDocs(prev => prev.filter(x => x.id !== d.id))}><Trash2 className="h-3.5 w-3.5" /></Button>
+                      <Button size="sm" variant="ghost" className="h-7 text-red-400/40 hover:text-red-400" onClick={async () => { try { await apiFetch(`/api/wiki/${d.id}`, { method: 'DELETE' }, token); qc.invalidateQueries({ queryKey: ['wiki-docs'] }) } catch {} }}><Trash2 className="h-3.5 w-3.5" /></Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -2203,10 +2186,16 @@ function ContentTab({ token, onMutate }: { token: string | null; onMutate: () =>
    10. SHARE DOCS TAB
    ════════════════════════════════════════════ */
 function ShareDocsTab({ token, onMutate }: { token: string | null; onMutate: () => void }) {
+  const qc = useQueryClient()
   const { data: usersData } = useQuery({ queryKey: ['admin-users-agents'], queryFn: () => apiFetch('/api/admin/users?role=agent&limit=100', undefined, token) })
   const agents = (usersData?.users || []).filter((u: any) => u.role === 'agent')
 
-  const [shares, setShares] = useState<any[]>([])
+  const { data: sharesData, isLoading: sharesLoading } = useQuery({
+    queryKey: ['admin-share-docs'],
+    queryFn: () => apiFetch('/api/admin/share-doc', undefined, token),
+  })
+  const shares = sharesData?.shares || []
+
   const [form, setForm] = useState({ agentId: '', docId: '', docTitle: '' })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -2215,16 +2204,11 @@ function ShareDocsTab({ token, onMutate }: { token: string | null; onMutate: () 
     if (!form.agentId || !form.docId) { setError('Agent and document ID are required'); return }
     setSaving(true); setError('')
     try {
-      const newShare = {
-        id: `share-${Date.now()}`,
-        agentId: form.agentId,
-        agentName: agents.find((a: any) => a.id === form.agentId)?.name || 'Unknown',
-        docId: form.docId,
-        docTitle: form.docTitle || form.docId,
-        sharedBy: 'admin',
-        createdAt: new Date().toISOString(),
-      }
-      setShares(prev => [newShare, ...prev])
+      await apiFetch('/api/admin/share-doc', {
+        method: 'POST',
+        body: JSON.stringify({ docId: form.docId, agentId: form.agentId, canDownload: true, canShare: false, message: form.docTitle || '' }),
+      }, token)
+      qc.invalidateQueries({ queryKey: ['admin-share-docs'] })
       setForm({ agentId: '', docId: '', docTitle: '' })
     } catch (e: any) { setError(e.message) } finally { setSaving(false) }
   }
@@ -2274,15 +2258,13 @@ function ShareDocsTab({ token, onMutate }: { token: string | null; onMutate: () 
               {shares.map((s: any) => (
                 <TableRow key={s.id} className="border-amber-900/10 hover:bg-amber-900/5">
                   <TableCell>
-                    <p className="text-sm text-amber-100">{s.docTitle}</p>
+                    <p className="text-sm text-amber-100">{s.document?.title || s.docId}</p>
                     <p className="text-xs text-amber-200/40">{s.docId}</p>
                   </TableCell>
-                  <TableCell className="text-sm text-amber-200/60">{s.agentName}</TableCell>
+                  <TableCell className="text-sm text-amber-200/60">{s.agent?.name || s.agentId}</TableCell>
                   <TableCell className="text-xs text-amber-200/60">{fmtDate(s.createdAt)}</TableCell>
                   <TableCell>
-                    <Button size="sm" variant="ghost" className="h-7 text-red-400/40 hover:text-red-400" onClick={() => setShares(prev => prev.filter(x => x.id !== s.id))}>
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
+                    <span className="text-xs text-amber-200/40">{s.canDownload ? '⬇ Download' : ''} {s.canShare ? '↗ Share' : ''}</span>
                   </TableCell>
                 </TableRow>
               ))}
@@ -4154,17 +4136,12 @@ function InvestorKitTab({ token }: { token: string | null }) {
     if (!shareEmail || !shareFile) return
     setSending(true)
     try {
+      // First, find or create the user by email to get an agentId
+      // Since investor docs are shared via email (not agent ID), we use mailto fallback as primary
       const file = INVESTOR_FILES.find(f => f.id === shareFile)
-      await apiFetch('/api/admin/share-doc', {
-        method: 'POST',
-        body: JSON.stringify({
-          email: shareEmail,
-          message: shareMessage || `Please find attached the ${file?.title || 'investor document'} from 3 Boxes Luxury.`,
-          fileUrl: file?.url,
-          fileName: file?.filename,
-          fileTitle: file?.title,
-        }),
-      }, token)
+      const subject = encodeURIComponent(`3 Boxes Luxury — ${file?.title || 'Investor Document'}`)
+      const body = encodeURIComponent(`${shareMessage || `Please find the ${file?.title} at: ${window.location.origin}${file?.url}`}\n\n— 3 Boxes Luxury`)
+      window.open(`mailto:${shareEmail}?subject=${subject}&body=${body}`)
       setSent(true)
       setTimeout(() => { setSent(false); setShareEmail(''); setShareMessage(''); setShareFile(null) }, 3000)
     } catch {

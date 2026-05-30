@@ -5,7 +5,7 @@ import { requireAdmin } from '@/lib/auth-helper';
 export async function GET(request: NextRequest) {
   try {
     const adminCheck = await requireAdmin(request);
-    if (adminCheck) return adminCheck;
+    if (adminCheck.error) return adminCheck.error;
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const adminCheck = await requireAdmin(request);
-    if (adminCheck) return adminCheck;
+    if (adminCheck.error) return adminCheck.error;
 
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get('id');
@@ -71,8 +71,7 @@ export async function DELETE(request: NextRequest) {
     });
 
     // Create audit log
-    const auth = await requireAdmin(request);
-    if (!auth) {
+    if (adminCheck.user) {
       await db.auditLog.create({
         data: {
           action: 'session_revoked',

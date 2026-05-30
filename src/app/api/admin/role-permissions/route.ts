@@ -33,7 +33,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
 export async function GET(request: NextRequest) {
   try {
     const adminCheck = await requireAdmin(request);
-    if (adminCheck) return adminCheck;
+    if (adminCheck.error) return adminCheck.error;
 
     return NextResponse.json({ rolePermissions: ROLE_PERMISSIONS });
   } catch (error) {
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const adminCheck = await requireAdmin(request);
-    if (adminCheck) return adminCheck;
+    if (adminCheck.error) return adminCheck.error;
 
     const body = await request.json();
     const { role, permissions } = body;

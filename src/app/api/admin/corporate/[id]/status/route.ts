@@ -8,7 +8,7 @@ export async function PATCH(
 ) {
   try {
     const adminCheck = await requireAdmin(request);
-    if (adminCheck) return adminCheck;
+    if (adminCheck.error) return adminCheck.error;
 
     const { id } = await params;
     const body = await request.json();
