@@ -54,14 +54,14 @@ const darkTheme = {
 }
 
 const lightTheme = {
-  bg: 'bg-stone-50',
-  cardBg: 'bg-white',
+  bg: 'bg-amber-50/30',
+  cardBg: 'bg-white border-amber-200/40',
   sidebarBg: 'bg-white',
   text: 'text-stone-900',
   textMuted: 'text-stone-500',
-  border: 'border-stone-200',
-  input: 'bg-stone-100',
-  hover: 'hover:bg-stone-100',
+  border: 'border-amber-200/50',
+  input: 'bg-amber-50/50',
+  hover: 'hover:bg-amber-100/40',
   activeItem: 'bg-amber-600 text-white',
 }
 const inputCls = 'border-amber-900/40 bg-stone-800/50 text-amber-100 placeholder:text-amber-200/30'
@@ -245,15 +245,15 @@ export function AdminDashboard() {
         <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-2'} px-3 py-4 border-b ${t.border}`}>
           {!sidebarCollapsed && (
             <>
-              <img src="/images/logo.png" alt="3BL" className="h-8 w-8 rounded-lg object-cover shrink-0" />
+              <img src="/images/logo-uploaded.png" alt="3BL" className="h-10 w-10 object-contain contrast-150 brightness-130 saturate-130 drop-shadow-[0_0_10px_rgba(255,215,0,0.6)] shrink-0" />
               <div className="min-w-0">
-                <p className={`text-xs font-bold truncate ${t.text}`}>3 BOXES LUXURY</p>
+                <p className={`text-sm font-bold truncate ${t.text}`}>3 BOXES LUXURY</p>
                 <p className={`text-[10px] truncate ${t.textMuted}`}>Management Console</p>
               </div>
             </>
           )}
           {sidebarCollapsed && (
-            <img src="/images/logo.png" alt="3BL" className="h-7 w-7 rounded-lg object-cover" />
+            <img src="/images/logo-uploaded.png" alt="3BL" className="h-9 w-9 object-contain contrast-150 brightness-130 saturate-130 drop-shadow-[0_0_10px_rgba(255,215,0,0.6)]" />
           )}
           <Button
             variant="ghost"
@@ -334,7 +334,7 @@ export function AdminDashboard() {
             <Menu className={`h-5 w-5 ${t.text}`} />
           </Button>
 
-          <img src="/images/logo.png" alt="3BL" className="h-7 w-7 rounded object-cover lg:hidden" />
+          <img src="/images/logo-uploaded.png" alt="3BL" className="h-9 w-9 object-contain contrast-150 brightness-130 saturate-130 drop-shadow-[0_0_10px_rgba(255,215,0,0.6)] lg:hidden" />
 
           <div className="hidden lg:block">
             <h1 className={`text-sm font-semibold ${t.text}`}>3 BOXES LUXURY — Management Console</h1>

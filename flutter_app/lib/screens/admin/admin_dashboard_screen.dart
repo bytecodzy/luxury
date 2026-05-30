@@ -155,15 +155,55 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen>
             title: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.admin_panel_settings, color: gold, size: 22),
-                const SizedBox(width: 8),
-                Text(
-                  'Admin Dashboard',
-                  style: GoogleFonts.poppins(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    boxShadow: [
+                      BoxShadow(
+                        color: gold.withOpacity(0.5),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                      BoxShadow(
+                        color: gold.withOpacity(0.25),
+                        blurRadius: 16,
+                        spreadRadius: 2,
+                      ),
+                    ],
                   ),
+                  child: SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: Image.network(
+                      '${AppConfig.effectiveBaseUrl}/images/logo-uploaded.png',
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => Icon(Icons.admin_panel_settings, color: gold, size: 22),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '3 BOXES LUXURY',
+                      style: GoogleFonts.poppins(
+                        color: gold,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    Text(
+                      'Management Console',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white54,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

@@ -69,7 +69,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               title: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.diamond, color: gold, size: 22),
+                  SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Image.network(
+                      '${AppConfig.effectiveBaseUrl}/images/logo-uploaded.png',
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => Icon(Icons.diamond, color: gold, size: 22),
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     AppConfig.appName,

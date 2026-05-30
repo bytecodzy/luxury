@@ -49,7 +49,7 @@ class AppConfig {
   static const int surfaceBg = 0xFF292524;
 
   static String getImageUrl(String? path) {
-    if (path == null || path.isEmpty) return '${effectiveBaseUrl}/images/logo.png';
+    if (path == null || path.isEmpty) return '${effectiveBaseUrl}/images/logo-uploaded.png';
     // Data URLs (base64) can be used directly
     if (path.startsWith('data:')) return path;
     // Vercel Blob URLs are absolute and can be used directly

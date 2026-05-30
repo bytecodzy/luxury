@@ -178,11 +178,22 @@ class _MainNavigationState extends State<MainNavigation> {
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: const Color(AppConfig.cardBg),
+          border: Border(
+            top: BorderSide(
+              color: const Color(AppConfig.primaryGold).withOpacity(0.15),
+              width: 0.5,
+            ),
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.4),
               blurRadius: 12,
               offset: const Offset(0, -2),
+            ),
+            BoxShadow(
+              color: const Color(AppConfig.primaryGold).withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, -1),
             ),
           ],
         ),
