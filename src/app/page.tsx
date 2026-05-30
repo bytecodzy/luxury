@@ -35,8 +35,6 @@ function AppContent() {
         return (
           <>
             <HeroSection />
-            {/* Elegant separator */}
-            <div className="relative h-px w-full bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
             <CategoryGrid />
             <ProductGrid />
             <AppDownloadSection />
@@ -68,7 +66,6 @@ function AppContent() {
         return (
           <>
             <HeroSection />
-            <div className="relative h-px w-full bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
             <CategoryGrid />
             <ProductGrid />
             <AppDownloadSection />

@@ -82,7 +82,7 @@ export function AppDownloadSection() {
               Available on iOS & Android
             </div>
             <h2 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">
-              <span className="text-amber-50">Get the </span>
+              <span className="text-amber-50">Install the </span>
               <span className="luxury-text">3 BOXES LUXURY</span>
               <span className="text-amber-50"> App</span>
             </h2>
@@ -94,7 +94,7 @@ export function AppDownloadSection() {
 
           {/* Main content grid */}
           <div className="grid gap-10 lg:grid-cols-2 lg:gap-16">
-            {/* Left - Phone mockup & download buttons */}
+            {/* Left - Phone mockup & install buttons */}
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               whileInView={{ opacity: 1, x: 0 }}
@@ -172,9 +172,9 @@ export function AppDownloadSection() {
                 <div className="absolute -inset-4 -z-10 rounded-[3rem] bg-amber-500/5 blur-xl" />
               </div>
 
-              {/* Download buttons */}
+              {/* Install buttons */}
               <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row">
-                {/* Google Play / PWA Install button */}
+                {/* PWA Install / Google Play button */}
                 {canInstall ? (
                   <motion.button
                     whileHover={{ scale: 1.03 }}
@@ -199,46 +199,44 @@ export function AppDownloadSection() {
                     </div>
                   </motion.div>
                 ) : (
-                  <a href="#" aria-label="Get it on Google Play">
-                    <motion.div
-                      whileHover={{ scale: 1.03 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-stone-900 px-5 py-3 shadow-lg shadow-amber-900/10 transition-colors hover:border-amber-500/40 hover:bg-stone-800"
-                    >
-                      <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none">
-                        <path d="M3.61 1.814L13.793 12 3.61 22.186a.996.996 0 01-.61-.92V2.734c0-.382.218-.726.558-.92h.052z" fill="#4285F4" />
-                        <path d="M17.092 8.65l-3.3 3.35 3.3 3.35 3.743-2.09a1 1 0 000-1.74l-3.743-2.87z" fill="#FBBC04" />
-                        <path d="M3.61 1.814L13.793 12l3.3-3.35L4.396 1.098c-.25-.134-.522-.178-.786-.116V1.814z" fill="#EA4335" />
-                        <path d="M3.61 22.186L17.092 15.35 13.793 12 3.61 22.186z" fill="#34A853" />
-                      </svg>
-                      <div className="text-left">
-                        <div className="text-[10px] leading-tight text-amber-200/50">GET IT ON</div>
-                        <div className="text-sm font-semibold text-amber-100">Google Play</div>
-                      </div>
-                    </motion.div>
-                  </a>
-                )}
-
-                {/* App Store button */}
-                <a href="#" aria-label="Download on the App Store">
-                  <motion.div
+                  <motion.button
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.98 }}
+                    onClick={handleInstallClick}
                     className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-stone-900 px-5 py-3 shadow-lg shadow-amber-900/10 transition-colors hover:border-amber-500/40 hover:bg-stone-800"
                   >
-                    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="currentColor" fillOpacity="0.9">
-                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
+                    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none">
+                      <path d="M3.61 1.814L13.793 12 3.61 22.186a.996.996 0 01-.61-.92V2.734c0-.382.218-.726.558-.92h.052z" fill="#4285F4" />
+                      <path d="M17.092 8.65l-3.3 3.35 3.3 3.35 3.743-2.09a1 1 0 000-1.74l-3.743-2.87z" fill="#FBBC04" />
+                      <path d="M3.61 1.814L13.793 12l3.3-3.35L4.396 1.098c-.25-.134-.522-.178-.786-.116V1.814z" fill="#EA4335" />
+                      <path d="M3.61 22.186L17.092 15.35 13.793 12 3.61 22.186z" fill="#34A853" />
                     </svg>
                     <div className="text-left">
-                      <div className="text-[10px] leading-tight text-amber-200/50">Download on the</div>
-                      <div className="text-sm font-semibold text-amber-100">App Store</div>
+                      <div className="text-[10px] leading-tight text-amber-200/50">INSTALL ON</div>
+                      <div className="text-sm font-semibold text-amber-100">Google Play</div>
                     </div>
-                  </motion.div>
-                </a>
+                  </motion.button>
+                )}
+
+                {/* App Store / iOS install button */}
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleInstallClick}
+                  className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-stone-900 px-5 py-3 shadow-lg shadow-amber-900/10 transition-colors hover:border-amber-500/40 hover:bg-stone-800"
+                >
+                  <svg viewBox="0 0 24 24" className="h-7 w-7" fill="currentColor" fillOpacity="0.9">
+                    <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
+                  </svg>
+                  <div className="text-left">
+                    <div className="text-[10px] leading-tight text-amber-200/50">INSTALL ON</div>
+                    <div className="text-sm font-semibold text-amber-100">App Store</div>
+                  </div>
+                </motion.button>
               </div>
 
               <p className="mt-4 text-xs text-amber-200/40">
-                Free download • Works on iOS 15+ & Android 10+
+                Free install • Works on iOS 15+ & Android 10+
               </p>
             </motion.div>
 
@@ -308,13 +306,11 @@ export function AppDownloadSection() {
                 ) : (
                   <Button
                     size="lg"
+                    onClick={handleInstallClick}
                     className="gap-2 bg-amber-600 px-8 py-6 text-base font-bold text-stone-950 transition-all duration-300 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
-                    asChild
                   >
-                    <a href="#">
-                      <Download className="h-5 w-5" />
-                      Download Now
-                    </a>
+                    <Download className="h-5 w-5" />
+                    Install App Now
                   </Button>
                 )}
                 <span className="flex items-center gap-1 text-xs text-amber-200/40">

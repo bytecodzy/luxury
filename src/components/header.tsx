@@ -5,7 +5,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Smartphone, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2 } from 'lucide-react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2 } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
@@ -151,13 +151,13 @@ export function Header() {
             }}
             className="flex-shrink-0 flex items-center gap-3 group"
           >
-            <div className="logo-flashy">
+            <div className="relative flex h-12 w-12 items-center justify-center sm:h-14 sm:w-14">
               <Image
-                src="/images/logo.png"
+                src="/images/logo-new.png"
                 alt="3 Boxes Luxury Logo"
                 width={56}
                 height={56}
-                className="h-14 w-auto sm:h-16"
+                className="h-12 w-12 object-contain drop-shadow-[0_0_8px_rgba(212,164,55,0.4)] sm:h-14 sm:w-14"
                 priority
               />
             </div>
@@ -193,31 +193,23 @@ export function Header() {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            {/* Get App / Install Button */}
-            {canInstall ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => promptInstall()}
-                className="hidden lg:flex items-center gap-1.5 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/60"
-              >
-                <Download className="h-4 w-4" />
-                <span className="text-xs font-medium">Install App</span>
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
+            {/* Install App Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (canInstall) {
+                  promptInstall();
+                } else {
                   const section = document.getElementById('app-download');
                   section?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="hidden lg:flex items-center gap-1.5 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/60"
-              >
-                <Smartphone className="h-4 w-4" />
-                <span className="text-xs font-medium">Get App</span>
-              </Button>
-            )}
+                }
+              }}
+              className="hidden lg:flex items-center gap-1.5 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/60"
+            >
+              <Download className="h-4 w-4" />
+              <span className="text-xs font-medium">Install App</span>
+            </Button>
 
             {/* Locale Switcher (Desktop) */}
             <LocaleSwitcher />
@@ -342,13 +334,13 @@ export function Header() {
               </SheetTrigger>
               <SheetContent side="right" className="border-amber-900/30 bg-stone-950">
                 <SheetTitle className="flex items-center gap-2">
-                  <div className="logo-flashy">
+                  <div className="relative flex h-10 w-10 items-center justify-center">
                     <Image
-                      src="/images/logo.png"
+                      src="/images/logo-new.png"
                       alt="3 Boxes Luxury Logo"
                       width={40}
                       height={40}
-                      className="h-10 w-auto"
+                      className="h-10 w-10 object-contain drop-shadow-[0_0_8px_rgba(212,164,55,0.4)]"
                     />
                   </div>
                   <span className="gold-shimmer text-lg font-bold tracking-widest">
@@ -473,9 +465,8 @@ export function Header() {
                     }}
                     className="rounded-md px-4 py-3 text-left text-amber-100 font-medium transition-colors bg-amber-600/10 border border-amber-500/30 hover:bg-amber-600/20 flex items-center gap-2"
                   >
-                    {canInstall ? <Download className="h-5 w-5" /> : <Smartphone className="h-5 w-5" />}
-                    {canInstall ? 'Install App' : 'Get the App'}
-                    {!canInstall && <Download className="h-3 w-3 text-amber-400/60" />}
+                    <Download className="h-5 w-5" />
+                    Install App
                   </button>
 
                   {/* Mobile Locale Switcher */}

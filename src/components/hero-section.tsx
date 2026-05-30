@@ -11,19 +11,26 @@ export function HeroSection() {
   const { t } = useTranslation();
 
   return (
-    <section className="relative overflow-hidden">
-      {/* Subtle luxury background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-stone-950 via-stone-900/80 to-stone-950" />
+    <section className="relative overflow-hidden rounded-2xl border border-amber-900/20">
+      {/* Background Image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/images/hero-bg.png')" }}
+      />
+
+      {/* Dark gradient overlay for text readability */}
+      <div className="absolute inset-0 bg-gradient-to-b from-stone-950/80 via-stone-950/60 to-stone-950/85" />
+      <div className="absolute inset-0 bg-gradient-to-r from-stone-950/70 via-transparent to-stone-950/70" />
 
       {/* Decorative golden accents */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -left-20 top-1/2 h-60 w-60 -translate-y-1/2 rounded-full bg-amber-500/[0.04] blur-3xl" />
-        <div className="absolute -right-20 top-1/3 h-48 w-48 rounded-full bg-amber-600/[0.03] blur-3xl" />
-        <div className="absolute left-1/2 top-0 h-px w-3/4 -translate-x-1/2 bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+        <div className="absolute -left-20 top-1/2 h-60 w-60 -translate-y-1/2 rounded-full bg-amber-500/[0.06] blur-3xl" />
+        <div className="absolute -right-20 top-1/3 h-48 w-48 rounded-full bg-amber-600/[0.05] blur-3xl" />
+        <div className="absolute left-1/2 top-0 h-px w-3/4 -translate-x-1/2 bg-gradient-to-r from-transparent via-amber-500/25 to-transparent" />
       </div>
 
       {/* Content */}
-      <div className="relative container mx-auto px-4 py-12 sm:py-16 lg:py-20">
+      <div className="relative container mx-auto px-4 py-14 sm:py-18 lg:py-22">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -35,7 +42,7 @@ export function HeroSection() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.1, duration: 0.5 }}
-            className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5"
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 backdrop-blur-sm"
           >
             <Crown className="h-3.5 w-3.5 text-amber-400" />
             <span className="text-xs font-medium uppercase tracking-[0.2em] text-amber-400/90">
@@ -59,7 +66,7 @@ export function HeroSection() {
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4, duration: 0.6 }}
-            className="mt-3 max-w-lg text-sm text-amber-100/60 sm:text-base"
+            className="mt-3 max-w-lg text-sm text-amber-100/70 sm:text-base"
           >
             {t('hero.subtitle')}
           </motion.p>
@@ -85,7 +92,7 @@ export function HeroSection() {
               variant="outline"
               size="default"
               onClick={toggleGiftBuilder}
-              className="border-amber-500/50 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-100 hover:border-amber-500/60 gap-2"
+              className="border-amber-500/50 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-100 hover:border-amber-500/60 gap-2 backdrop-blur-sm"
             >
               <Gift className="h-4 w-4" />
               {t('hero.giftBuilder')}
@@ -96,7 +103,7 @@ export function HeroSection() {
       </div>
 
       {/* Bottom decorative line */}
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-500/25 to-transparent" />
     </section>
   );
 }

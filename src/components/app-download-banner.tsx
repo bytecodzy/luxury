@@ -4,12 +4,14 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Smartphone, Download, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { usePWAInstall } from '@/hooks/usePWAInstall';
 
 const STORAGE_KEY = '3bl_app_banner_dismissed';
 
 export function AppDownloadBanner() {
   const [isDismissed, setIsDismissed] = useState(true); // Start true to prevent flash
   const [mounted, setMounted] = useState(false);
+  const { canInstall, promptInstall, isInstalled } = usePWAInstall();
 
   useEffect(() => {
     setMounted(true);
@@ -36,11 +38,21 @@ export function AppDownloadBanner() {
     }
   };
 
+  const handleInstall = () => {
+    if (canInstall) {
+      promptInstall();
+    } else {
+      const section = document.getElementById('app-download');
+      section?.scrollIntoView({ behavior: 'smooth' });
+    }
+    handleDismiss();
+  };
+
   // Don't render until mounted to avoid hydration mismatch
   if (!mounted) return null;
 
-  // Don't show if dismissed
-  if (isDismissed) return null;
+  // Don't show if dismissed or already installed
+  if (isDismissed || isInstalled) return null;
 
   return (
     <AnimatePresence>
@@ -75,21 +87,19 @@ export function AppDownloadBanner() {
             {/* Text & action */}
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-bold text-amber-100">
-                Download our app
+                Install our app
               </h3>
               <p className="mt-0.5 line-clamp-2 text-xs text-amber-200/50">
-                Get the 3 BOXES LUXURY app for iOS &amp; Android — exclusive deals await.
+                Install the 3 BOXES LUXURY app for iOS &amp; Android — exclusive deals await.
               </p>
               <div className="mt-2">
                 <Button
                   size="sm"
-                  asChild
+                  onClick={handleInstall}
                   className="h-7 gap-1.5 bg-amber-600 text-xs font-semibold text-stone-950 hover:bg-amber-500"
                 >
-                  <a href="#">
-                    <Download className="h-3.5 w-3.5" />
-                    Get the App
-                  </a>
+                  <Download className="h-3.5 w-3.5" />
+                  Install App
                 </Button>
               </div>
             </div>
