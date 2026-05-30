@@ -27,14 +27,14 @@ export function Footer() {
         <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-5">
           {/* Brand */}
           <div>
-            <div className="flex items-center gap-2">
-              <div className="relative flex h-11 w-11 items-center justify-center">
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-16 w-16 items-center justify-center">
                 <Image
                   src="/images/logo-uploaded.png"
                   alt="3 Boxes Luxury Logo"
-                  width={44}
-                  height={44}
-                  className="h-11 w-11 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]"
+                  width={64}
+                  height={64}
+                  className="h-16 w-16 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]"
                 />
               </div>
               <h3 className="gold-shimmer text-lg font-bold tracking-widest">

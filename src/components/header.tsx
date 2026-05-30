@@ -140,7 +140,7 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-amber-900/30 bg-stone-950/95 backdrop-blur-md">
       <div className="container mx-auto px-4">
-        <div className="flex h-20 items-center justify-between gap-4">
+        <div className="flex h-24 items-center justify-between gap-4">
           {/* Logo */}
           <button
             onClick={() => {
@@ -151,17 +151,17 @@ export function Header() {
             }}
             className="flex-shrink-0 flex items-center gap-3 group"
           >
-            <div className="relative flex h-12 w-12 items-center justify-center sm:h-14 sm:w-14">
+            <div className="relative flex h-16 w-16 items-center justify-center sm:h-20 sm:w-20">
               <Image
                 src="/images/logo-uploaded.png"
                 alt="3 Boxes Luxury Logo"
-                width={56}
-                height={56}
-                className="h-12 w-12 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)] sm:h-14 sm:w-14"
+                width={80}
+                height={80}
+                className="h-16 w-16 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)] sm:h-20 sm:w-20"
                 priority
               />
             </div>
-            <h1 className="gold-shimmer text-2xl font-bold tracking-widest sm:text-3xl hidden sm:block">
+            <h1 className="gold-shimmer text-2xl font-bold tracking-widest sm:text-3xl hidden sm:block ml-1">
               3 BOXES LUXURY
             </h1>
           </button>
@@ -323,13 +323,13 @@ export function Header() {
               </SheetTrigger>
               <SheetContent side="right" className="border-amber-900/30 bg-stone-950">
                 <SheetTitle className="flex items-center gap-2">
-                  <div className="relative flex h-10 w-10 items-center justify-center">
+                  <div className="relative flex h-14 w-14 items-center justify-center">
                     <Image
                       src="/images/logo-uploaded.png"
                       alt="3 Boxes Luxury Logo"
-                      width={40}
-                      height={40}
-                      className="h-10 w-10 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]"
+                      width={56}
+                      height={56}
+                      className="h-14 w-14 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]"
                     />
                   </div>
                   <span className="gold-shimmer text-lg font-bold tracking-widest">
