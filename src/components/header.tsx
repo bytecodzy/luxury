@@ -157,7 +157,7 @@ export function Header() {
                 alt="3 Boxes Luxury Logo"
                 width={56}
                 height={56}
-                className="h-12 w-12 object-contain brightness-150 contrast-110 saturate-150 mix-blend-screen drop-shadow-[0_0_16px_rgba(255,215,0,0.8)] drop-shadow-[0_0_8px_rgba(245,230,163,0.6)] drop-shadow-[0_0_4px_rgba(255,255,255,0.4)] sm:h-14 sm:w-14"
+                className="h-12 w-12 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)] sm:h-14 sm:w-14"
                 priority
               />
             </div>
@@ -340,7 +340,7 @@ export function Header() {
                       alt="3 Boxes Luxury Logo"
                       width={40}
                       height={40}
-                      className="h-10 w-10 object-contain brightness-150 contrast-110 saturate-150 mix-blend-screen drop-shadow-[0_0_16px_rgba(255,215,0,0.8)] drop-shadow-[0_0_8px_rgba(245,230,163,0.6)] drop-shadow-[0_0_4px_rgba(255,255,255,0.4)]"
+                      className="h-10 w-10 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]"
                     />
                   </div>
                   <span className="gold-shimmer text-lg font-bold tracking-widest">

@@ -34,7 +34,7 @@ export function Footer() {
                   alt="3 Boxes Luxury Logo"
                   width={44}
                   height={44}
-                  className="h-11 w-11 object-contain brightness-150 contrast-110 saturate-150 mix-blend-screen drop-shadow-[0_0_16px_rgba(255,215,0,0.8)] drop-shadow-[0_0_8px_rgba(245,230,163,0.6)] drop-shadow-[0_0_4px_rgba(255,255,255,0.4)]"
+                  className="h-11 w-11 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]"
                 />
               </div>
               <h3 className="gold-shimmer text-lg font-bold tracking-widest">
