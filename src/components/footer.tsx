@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useTranslation } from '@/hooks/useTranslation';
-import { Smartphone, Download, Building2 } from 'lucide-react';
+import { Smartphone, Download } from 'lucide-react';
 import { useStore } from '@/lib/store';
 
 export function Footer() {
@@ -75,15 +75,6 @@ export function Footer() {
                   </span>
                 </li>
               ))}
-              <li>
-                <button
-                  onClick={() => setView('downloads')}
-                  className="flex items-center gap-1.5 text-sm text-amber-300/70 transition-colors hover:text-amber-300"
-                >
-                  <Building2 className="h-3.5 w-3.5" />
-                  Investor Kit
-                </button>
-              </li>
             </ul>
           </div>
 

@@ -35,7 +35,8 @@ import {
   Eye, ArrowUpRight, ArrowDownRight, TrendingUp, DollarSign, Box, UserCheck,
   Globe, ExternalLink, Image as ImageIcon, RefreshCw, Link2, ShoppingCart,
   Handshake, Building2, Megaphone, ThumbsUp, ThumbsDown, Users as UsersIcon,
-  FolderOpen, BarChart3, Download, Truck as TruckIcon,
+  FolderOpen, BarChart3, Download, Truck as TruckIcon, Mail, Send, Copy, CheckCircle,
+  Presentation,
 } from 'lucide-react'
 
 /* ─── style constants ─── */
@@ -138,6 +139,7 @@ export function AdminDashboard() {
     { value: 'integrations', icon: Globe, label: 'Integrations' },
     { value: 'partners', icon: Handshake, label: 'Partners' },
     { value: 'corporate', icon: Building2, label: 'Corporate' },
+    { value: 'investor', icon: Building2, label: 'Investor Kit' },
   ]
 
   return (
@@ -184,6 +186,7 @@ export function AdminDashboard() {
         <TabsContent value="integrations"><IntegrationsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="partners"><PartnersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
         <TabsContent value="corporate"><CorporateTab token={authToken} onMutate={invalidateAll} /></TabsContent>
+        <TabsContent value="investor"><InvestorKitTab token={authToken} /></TabsContent>
       </Tabs>
     </motion.div>
   )
@@ -3678,6 +3681,216 @@ function RejectAccountForm({ account, onClose, onRejected, isPending }: { accoun
           {isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} Reject
         </Button>
       </div>
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════
+   INVESTOR KIT TAB (Admin-Only)
+   ════════════════════════════════════════════ */
+const INVESTOR_FILES = [
+  {
+    id: 'brochure',
+    title: 'Investor Brochure',
+    description: 'Comprehensive 6-page investor brochure covering market opportunity, AI-powered solution, product categories, business model, and growth roadmap.',
+    filename: '3boxes-luxury-investor-brochure.pdf',
+    url: '/downloads/3boxes-luxury-investor-brochure.pdf',
+    size: '1.7 MB',
+    icon: FileText,
+    color: 'text-amber-400',
+    bg: 'bg-amber-600/10',
+  },
+  {
+    id: 'pitch-deck',
+    title: 'Investor Pitch Deck',
+    description: 'Professional 12-slide pitch deck with dark luxury aesthetic, market analysis, competitive landscape, product demo, and investment ask.',
+    filename: '3boxes-luxury-pitch-deck.pptx',
+    url: '/downloads/3boxes-luxury-pitch-deck.pptx',
+    size: '572 KB',
+    icon: Presentation,
+    color: 'text-rose-400',
+    bg: 'bg-rose-600/10',
+  },
+  {
+    id: 'tech-doc',
+    title: 'Technical Documentation',
+    description: 'Complete technical documentation covering system architecture, API endpoints, database schema, deployment topology, and AI pipeline details.',
+    filename: '3_Boxes_Luxury_Technical_Document.pdf',
+    url: '/downloads/3_Boxes_Luxury_Technical_Document.pdf',
+    size: '43 KB',
+    icon: BookOpen,
+    color: 'text-emerald-400',
+    bg: 'bg-emerald-600/10',
+  },
+]
+
+function InvestorKitTab({ token }: { token: string | null }) {
+  const [shareEmail, setShareEmail] = useState('')
+  const [shareMessage, setShareMessage] = useState('')
+  const [shareFile, setShareFile] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
+
+  const handleDownload = (file: typeof INVESTOR_FILES[0]) => {
+    const link = document.createElement('a')
+    link.href = file.url
+    link.download = file.filename
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const handleShareViaEmail = async () => {
+    if (!shareEmail || !shareFile) return
+    setSending(true)
+    try {
+      const file = INVESTOR_FILES.find(f => f.id === shareFile)
+      await apiFetch('/api/admin/share-doc', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: shareEmail,
+          message: shareMessage || `Please find attached the ${file?.title || 'investor document'} from 3 Boxes Luxury.`,
+          fileUrl: file?.url,
+          fileName: file?.filename,
+          fileTitle: file?.title,
+        }),
+      }, token)
+      setSent(true)
+      setTimeout(() => { setSent(false); setShareEmail(''); setShareMessage(''); setShareFile(null) }, 3000)
+    } catch {
+      // fallback: open mailto
+      const file = INVESTOR_FILES.find(f => f.id === shareFile)
+      const subject = encodeURIComponent(`3 Boxes Luxury — ${file?.title || 'Investor Document'}`)
+      const body = encodeURIComponent(`${shareMessage || `Please find the ${file?.title} at: ${window.location.origin}${file?.url}`}\n\n— 3 Boxes Luxury`)
+      window.open(`mailto:${shareEmail}?subject=${subject}&body=${body}`)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const handleCopyLink = (file: typeof INVESTOR_FILES[0]) => {
+    const url = `${window.location.origin}${file.url}`
+    navigator.clipboard.writeText(url)
+    setCopied(file.id)
+    setTimeout(() => setCopied(null), 2000)
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-2">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600/10">
+          <Building2 className="h-5 w-5 text-amber-400" />
+        </div>
+        <div>
+          <h2 className="text-lg font-bold text-amber-100">Investor Kit</h2>
+          <p className="text-xs text-amber-200/50">Admin-only access. Share documents securely with specific users via email.</p>
+        </div>
+      </div>
+
+      {/* Security Notice */}
+      <div className="rounded-lg border border-amber-600/20 bg-amber-900/10 p-4 flex items-start gap-3">
+        <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-medium text-amber-300">Restricted Access</p>
+          <p className="text-xs text-amber-200/50 mt-1">These documents are confidential and only accessible to administrators. Share them with specific users via email — they will not appear on the public site.</p>
+        </div>
+      </div>
+
+      {/* Document Cards */}
+      <div className="grid grid-cols-1 gap-4">
+        {INVESTOR_FILES.map((file) => {
+          const Icon = file.icon
+          return (
+            <Card key={file.id} className={cardCls}>
+              <CardContent className="p-5">
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${file.bg} shrink-0`}>
+                    <Icon className={`h-6 w-6 ${file.color}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-semibold text-amber-100">{file.title}</h3>
+                    <p className="text-xs text-amber-200/50 mt-1">{file.description}</p>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-amber-200/40">
+                      <span>{file.filename}</span>
+                      <span>{file.size}</span>
+                    </div>
+                  </div>
+                  <div className="flex sm:flex-col items-center gap-2 shrink-0">
+                    <Button size="sm" className={btnPrimary} onClick={() => handleDownload(file)}>
+                      <Download className="h-4 w-4 mr-1" />Download
+                    </Button>
+                    <Button size="sm" variant="outline" className={btnOutline} onClick={() => { setShareFile(file.id); setSent(false) }}>
+                      <Mail className="h-4 w-4 mr-1" />Share
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-amber-200/40 hover:text-amber-300" onClick={() => handleCopyLink(file)}>
+                      {copied === file.id ? <CheckCircle className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+
+      {/* Share via Email Dialog */}
+      <Dialog open={!!shareFile} onOpenChange={() => setShareFile(null)}>
+        <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-amber-100 flex items-center gap-2">
+              <Send className="h-5 w-5 text-amber-400" />
+              Share via Email
+            </DialogTitle>
+          </DialogHeader>
+          {sent ? (
+            <div className="flex flex-col items-center py-6 text-center">
+              <CheckCircle className="h-12 w-12 text-green-400 mb-3" />
+              <p className="text-sm font-medium text-amber-100">Document shared successfully!</p>
+              <p className="text-xs text-amber-200/50 mt-1">The email has been sent to {shareEmail}</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <Label className={lblCls}>Recipient Email *</Label>
+                <Input
+                  className={`${inputCls} mt-1`}
+                  type="email"
+                  placeholder="investor@example.com"
+                  value={shareEmail}
+                  onChange={e => setShareEmail(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className={lblCls}>Personal Message (optional)</Label>
+                <Textarea
+                  className={`${inputCls} mt-1`}
+                  rows={3}
+                  placeholder="Add a personal note to the recipient..."
+                  value={shareMessage}
+                  onChange={e => setShareMessage(e.target.value)}
+                />
+              </div>
+              <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                <p className="text-xs text-amber-200/40">Document:</p>
+                <p className="text-sm font-medium text-amber-100 mt-0.5">
+                  {INVESTOR_FILES.find(f => f.id === shareFile)?.title}
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" className={btnOutline} onClick={() => setShareFile(null)}>Cancel</Button>
+                <Button className={btnPrimary} onClick={handleShareViaEmail} disabled={sending || !shareEmail}>
+                  {sending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Send className="mr-1 h-4 w-4" />}
+                  Send Email
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
