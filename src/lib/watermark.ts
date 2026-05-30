@@ -39,7 +39,7 @@ async function createWatermarkBuffer(width: number, height: number): Promise<Buf
  */
 async function getWatermarkBuffer(width: number, height: number): Promise<Buffer> {
   // Try using the logo file
-  const logoPath = join(process.cwd(), 'public', 'images', 'logo.png')
+  const logoPath = join(process.cwd(), 'public', 'images', 'logo-uploaded.png')
   if (existsSync(logoPath)) {
     try {
       const logoData = readFileSync(logoPath)
