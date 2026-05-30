@@ -148,124 +148,149 @@ export function CategoryGrid() {
   // ─── Loading State ───
   if (isLoading) {
     return (
-      <section className="py-3">
-        <div className="flex items-center gap-2 overflow-x-auto">
-          {Array.from({ length: 7 }).map((_, i) => (
-            <div key={i} className="h-8 w-24 animate-pulse rounded-full bg-stone-800/60" />
-          ))}
+      <section className="py-4">
+        <div className="relative overflow-hidden rounded-2xl">
+          <div className="absolute inset-0 bg-gradient-to-r from-stone-900 via-stone-900/80 to-stone-900" />
+          <div className="relative flex items-center gap-2 overflow-x-auto px-4 py-3">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="h-8 w-24 animate-pulse rounded-full bg-stone-800/60" />
+            ))}
+          </div>
         </div>
       </section>
     );
   }
 
   return (
-    <section className="py-3">
-      {/* Compact Banner Strip */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-700/40 [&::-webkit-scrollbar-track]:bg-transparent">
-        {categories.map((cat, i) => {
-          const IconComponent = parentCategoryIcons[cat.slug] || Gem;
-          const isExpanded = expandedSlug === cat.slug;
-          const hasChildren = cat.children.length > 0;
+    <section className="py-4">
+      <div className="relative overflow-hidden rounded-2xl border border-amber-900/20">
+        {/* Background Image */}
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: "url('/images/category-bg.png')" }}
+        />
 
-          return (
-            <motion.button
-              key={cat.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.03, duration: 0.25 }}
-              onClick={() => handleCategoryClick(cat)}
-              className={`
-                group relative inline-flex items-center gap-1.5 whitespace-nowrap
-                rounded-full border px-3.5 py-1.5
-                text-xs font-medium transition-all duration-200
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
-                ${isExpanded
-                  ? `border-amber-500/40 bg-amber-500/10 text-amber-200 shadow-sm shadow-amber-500/10 ${categoryAccent[cat.slug] || ''}`
-                  : 'border-stone-800/50 bg-stone-900/40 text-amber-200/50 hover:border-amber-600/30 hover:bg-stone-900/70 hover:text-amber-200/80'
-                }
-              `}
-            >
-              <IconComponent className={`h-3 w-3 ${isExpanded ? (categoryAccentText[cat.slug] || 'text-amber-400') : 'text-amber-400/50 group-hover:text-amber-400/80'}`} strokeWidth={1.5} />
-              {cat.name}
-              {hasChildren && (
-                <motion.span
-                  animate={{ rotate: isExpanded ? 180 : 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="ml-0.5"
+        {/* Dark overlay for readability */}
+        <div className="absolute inset-0 bg-gradient-to-r from-stone-950/90 via-stone-950/80 to-stone-950/70" />
+        <div className="absolute inset-0 bg-gradient-to-t from-stone-950/60 via-transparent to-stone-950/30" />
+
+        {/* Subtle golden glow at top */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/30 to-transparent" />
+
+        {/* Content */}
+        <div className="relative px-4 py-4 sm:px-6 sm:py-5">
+          {/* Category Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stone-700/40 [&::-webkit-scrollbar-track]:bg-transparent">
+            {categories.map((cat, i) => {
+              const IconComponent = parentCategoryIcons[cat.slug] || Gem;
+              const isExpanded = expandedSlug === cat.slug;
+              const hasChildren = cat.children.length > 0;
+
+              return (
+                <motion.button
+                  key={cat.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03, duration: 0.25 }}
+                  onClick={() => handleCategoryClick(cat)}
+                  className={`
+                    group relative inline-flex items-center gap-1.5 whitespace-nowrap
+                    rounded-full border px-3.5 py-1.5
+                    text-xs font-medium transition-all duration-200
+                    backdrop-blur-sm
+                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
+                    ${isExpanded
+                      ? `border-amber-500/40 bg-amber-500/15 text-amber-200 shadow-sm shadow-amber-500/10 ${categoryAccent[cat.slug] || ''}`
+                      : 'border-white/10 bg-white/5 text-amber-200/60 hover:border-amber-500/30 hover:bg-white/10 hover:text-amber-200/90'
+                    }
+                  `}
                 >
-                  <ChevronDown className="h-2.5 w-2.5 opacity-40" />
-                </motion.span>
-              )}
-              {cat.slug === 'new-arrivals' && (
-                <Sparkles className="h-2.5 w-2.5 text-amber-400/60" />
-              )}
-            </motion.button>
-          );
-        })}
-      </div>
+                  <IconComponent className={`h-3 w-3 ${isExpanded ? (categoryAccentText[cat.slug] || 'text-amber-400') : 'text-amber-400/50 group-hover:text-amber-400/80'}`} strokeWidth={1.5} />
+                  {cat.name}
+                  {hasChildren && (
+                    <motion.span
+                      animate={{ rotate: isExpanded ? 180 : 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="ml-0.5"
+                    >
+                      <ChevronDown className="h-2.5 w-2.5 opacity-40" />
+                    </motion.span>
+                  )}
+                  {cat.slug === 'new-arrivals' && (
+                    <Sparkles className="h-2.5 w-2.5 text-amber-400/60" />
+                  )}
+                </motion.button>
+              );
+            })}
+          </div>
 
-      {/* ─── Subcategory Chips (compact) ─── */}
-      <AnimatePresence>
-        {expandedCategory && expandedCategory.children.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, height: 0, marginTop: 0 }}
-            animate={{ opacity: 1, height: 'auto', marginTop: 8 }}
-            exit={{ opacity: 0, height: 0, marginTop: 0 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="overflow-hidden"
-          >
-            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-amber-900/20 bg-stone-950/50 px-3 py-2 backdrop-blur-sm">
-              {/* "All" chip */}
-              <button
-                onClick={() => {
-                  setActiveSubcategory(null);
-                  setCategory(expandedCategory.slug);
-                }}
-                className={`
-                  inline-flex items-center gap-1 rounded-full border px-2.5 py-1
-                  text-[11px] font-medium transition-all duration-200
-                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
-                  ${activeSubcategory === null
-                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-                    : 'border-stone-700/40 bg-stone-900/30 text-amber-200/40 hover:border-amber-600/20 hover:text-amber-200/70'
-                  }
-                `}
+          {/* ─── Subcategory Chips (compact) ─── */}
+          <AnimatePresence>
+            {expandedCategory && expandedCategory.children.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                animate={{ opacity: 1, height: 'auto', marginTop: 8 }}
+                exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                transition={{ duration: 0.2, ease: 'easeInOut' }}
+                className="overflow-hidden"
               >
-                <LayoutGrid className="h-2.5 w-2.5" />
-                All
-              </button>
-
-              {/* Individual subcategory chips */}
-              {expandedCategory.children.map((sub) => {
-                const SubIcon = subcategoryIcons[sub.slug] || Gem;
-                const isActive = activeSubcategory === sub.slug;
-
-                return (
-                  <motion.button
-                    key={sub.id}
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.12 }}
-                    onClick={() => handleSubcategoryClick(sub, expandedCategory.slug)}
+                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-white/10 bg-black/30 px-3 py-2 backdrop-blur-md">
+                  {/* "All" chip */}
+                  <button
+                    onClick={() => {
+                      setActiveSubcategory(null);
+                      setCategory(expandedCategory.slug);
+                    }}
                     className={`
                       inline-flex items-center gap-1 rounded-full border px-2.5 py-1
                       text-[11px] font-medium transition-all duration-200
                       focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
-                      ${isActive
-                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-                        : 'border-stone-700/40 bg-stone-900/30 text-amber-200/40 hover:border-amber-600/20 hover:text-amber-200/70'
+                      ${activeSubcategory === null
+                        ? 'border-amber-500/40 bg-amber-500/15 text-amber-200'
+                        : 'border-white/10 bg-white/5 text-amber-200/40 hover:border-amber-500/20 hover:text-amber-200/70'
                       }
                     `}
                   >
-                    <SubIcon className="h-2.5 w-2.5" />
-                    {sub.name}
-                  </motion.button>
-                );
-              })}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                    <LayoutGrid className="h-2.5 w-2.5" />
+                    All
+                  </button>
+
+                  {/* Individual subcategory chips */}
+                  {expandedCategory.children.map((sub) => {
+                    const SubIcon = subcategoryIcons[sub.slug] || Gem;
+                    const isActive = activeSubcategory === sub.slug;
+
+                    return (
+                      <motion.button
+                        key={sub.id}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ duration: 0.12 }}
+                        onClick={() => handleSubcategoryClick(sub, expandedCategory.slug)}
+                        className={`
+                          inline-flex items-center gap-1 rounded-full border px-2.5 py-1
+                          text-[11px] font-medium transition-all duration-200
+                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
+                          ${isActive
+                            ? 'border-amber-500/40 bg-amber-500/15 text-amber-200'
+                            : 'border-white/10 bg-white/5 text-amber-200/40 hover:border-amber-500/20 hover:text-amber-200/70'
+                          }
+                        `}
+                      >
+                        <SubIcon className="h-2.5 w-2.5" />
+                        {sub.name}
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Bottom golden accent line */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+      </div>
     </section>
   );
 }
