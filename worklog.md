@@ -63,3 +63,29 @@ Stage Summary:
 - Dashboard tab enhanced with recharts sparklines, area chart, pie chart, activity feed, and quick actions
 - Light/dark theme toggle fully functional on sidebar, topbar, and dashboard tab
 - All other tab components (Products, Categories, Inventory, etc.) remain unchanged
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Apply consistent UI across admin, mobile app, PWA, and deploy to Vercel
+
+Work Log:
+- Made logo bigger in header (h-12→h-16 mobile, h-14→h-20 desktop), footer (h-11→h-16), mobile menu (h-10→h-14)
+- Updated admin dashboard logo references from /images/logo.png → /images/logo-uploaded.png
+- Made admin sidebar logo bigger (h-8→h-10 expanded, h-7→h-9 collapsed, h-7→h-9 topbar mobile)
+- Added golden glow (drop-shadow + contrast/brightness/saturate filters) to all admin logo instances
+- Updated light theme to use amber/gold accent colors instead of plain stone
+- Updated Flutter app config: logo fallback from logo.png → logo-uploaded.png
+- Updated Flutter home screen: replaced diamond icon with actual logo image (40x40)
+- Updated Flutter admin screen: replaced admin_panel_settings icon with logo + gold glow shadow
+- Changed Flutter admin title from "Admin Dashboard" to "3 BOXES LUXURY" with "Management Console" subtitle
+- Added gold border/shadow to Flutter bottom navigation bar
+- Regenerated PWA icons (192x192, 512x512, maskable variants) from uploaded logo
+- Committed all changes and deployed to Vercel production
+- Production URL: https://my-project-fawn-mu.vercel.app
+
+Stage Summary:
+- Consistent branding across web, admin, and Flutter app source
+- All logos now use logo-uploaded.png with golden glow effect
+- PWA icons regenerated from the actual logo
+- Deployed to Vercel production successfully
