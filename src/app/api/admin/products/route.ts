@@ -38,7 +38,11 @@ export async function GET(request: NextRequest) {
   ]);
 
   return NextResponse.json({
-    products,
+    products: products.map((p: any) => ({
+      ...p,
+      images: typeof p.images === 'string' ? JSON.parse(p.images || '[]') : p.images,
+      tags: typeof p.tags === 'string' ? JSON.parse(p.tags || 'null') : p.tags,
+    })),
     pagination: {
       page,
       limit,

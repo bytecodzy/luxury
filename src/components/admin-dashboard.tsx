@@ -121,6 +121,7 @@ export function AdminDashboard() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const activeItemRef = useRef<HTMLButtonElement>(null)
 
   const t = theme === 'dark' ? darkTheme : lightTheme
 
@@ -147,6 +148,11 @@ export function AdminDashboard() {
     window.addEventListener('admin:navigate', handler)
     return () => window.removeEventListener('admin:navigate', handler)
   }, [])
+
+  // Auto-scroll sidebar to show active item
+  useEffect(() => {
+    activeItemRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [activeTab])
 
   if (!authUser || authUser.role !== 'admin') {
     return (
@@ -272,6 +278,7 @@ export function AdminDashboard() {
             return (
               <button
                 key={item.value}
+                ref={isActive ? activeItemRef : undefined}
                 onClick={() => { setActiveTab(item.value); setMobileMenuOpen(false) }}
                 className={`flex items-center w-full ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg text-sm transition-colors ${
                   isActive ? t.activeItem : `${t.textMuted} ${t.hover}`
@@ -291,6 +298,7 @@ export function AdminDashboard() {
             return (
               <button
                 key={item.value}
+                ref={isActive ? activeItemRef : undefined}
                 onClick={() => { setActiveTab(item.value); setMobileMenuOpen(false) }}
                 className={`flex items-center w-full ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg text-sm transition-colors ${
                   isActive ? t.activeItem : `${t.textMuted} ${t.hover}`
@@ -693,7 +701,11 @@ function ProductsTab({ token, onMutate }: { token: string | null; onMutate: () =
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-products'] }); onMutate(); setShowDelete(null) },
   })
 
-  const products = data?.products || []
+  const products = (data?.products || []).map((p: any) => ({
+    ...p,
+    images: typeof p.images === 'string' ? (() => { try { return JSON.parse(p.images || '[]') } catch { return [] } })() : (Array.isArray(p.images) ? p.images : []),
+    tags: typeof p.tags === 'string' ? (() => { try { return JSON.parse(p.tags || '[]') } catch { return [] } })() : (Array.isArray(p.tags) ? p.tags : []),
+  }))
   const pagination = data?.pagination
 
   return (

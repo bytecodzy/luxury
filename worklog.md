@@ -115,3 +115,25 @@ Stage Summary:
 - Content and Share Docs tabs now persist data properly
 - Investor Kit sharing works via email
 - All admin tabs should now work correctly
+
+---
+Task ID: 1
+Agent: main
+Task: Fix admin dashboard pages not opening (Orders, Products, Categories, Role Permissions, etc.)
+
+Work Log:
+- Investigated admin dashboard architecture - single-page app with sidebar navigation managed by state
+- All API endpoints (/api/admin/orders, /api/admin/products, /api/admin/categories, /api/admin/permissions) working correctly
+- Used browser testing agent to identify root cause: sidebar scroll bug - lower menu items (Import, Reports, Integrations, Partners, Corporate, Investor Kit) were not visible and not scrollable into view
+- Added useRef + useEffect to auto-scroll sidebar to active item when activeTab changes
+- Fixed product images display - API returned images as JSON strings, frontend now parses them to arrays
+- Fixed admin/products API route to return parsed image arrays instead of JSON strings
+- Verified all 18 admin sidebar pages work correctly after fixes
+
+Stage Summary:
+- Root cause: Sidebar navigation didn't auto-scroll to show active/selected items, making lower items (Import through Investor Kit) inaccessible
+- Fix 1: Added activeItemRef with scrollIntoView on activeTab change
+- Fix 2: Fixed product images JSON string→array parsing in both frontend and API
+- All 18 admin pages now render and navigate correctly
+- Product images display properly in Products tab
+- Permission matrix works in Users & Perms tab
