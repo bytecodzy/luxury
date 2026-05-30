@@ -8,9 +8,6 @@ import {
   Card, CardContent, CardHeader, CardTitle,
 } from '@/components/ui/card'
 import {
-  Tabs, TabsContent, TabsList, TabsTrigger,
-} from '@/components/ui/tabs'
-import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -36,12 +33,37 @@ import {
   Globe, ExternalLink, Image as ImageIcon, RefreshCw, Link2, ShoppingCart,
   Handshake, Building2, Megaphone, ThumbsUp, ThumbsDown, Users as UsersIcon,
   FolderOpen, BarChart3, Download, Truck as TruckIcon, Mail, Send, Copy, CheckCircle,
-  Presentation,
+  Presentation, Sun, Moon, Menu, ChevronLeft, ChevronRight, LogOut, Home,
 } from 'lucide-react'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 
 /* ─── style constants ─── */
-const tabCls = 'data-[state=active]:bg-amber-600 data-[state=active]:text-stone-950 text-amber-200/60 text-xs'
 const cardCls = 'border-amber-900/30 bg-stone-900/80'
+
+/* ─── theme constants ─── */
+const darkTheme = {
+  bg: 'bg-stone-950',
+  cardBg: 'bg-stone-900/80',
+  sidebarBg: 'bg-stone-950',
+  text: 'text-amber-100',
+  textMuted: 'text-amber-200/60',
+  border: 'border-amber-900/30',
+  input: 'bg-stone-800/50',
+  hover: 'hover:bg-amber-900/20',
+  activeItem: 'bg-amber-600 text-stone-950',
+}
+
+const lightTheme = {
+  bg: 'bg-stone-50',
+  cardBg: 'bg-white',
+  sidebarBg: 'bg-white',
+  text: 'text-stone-900',
+  textMuted: 'text-stone-500',
+  border: 'border-stone-200',
+  input: 'bg-stone-100',
+  hover: 'hover:bg-stone-100',
+  activeItem: 'bg-amber-600 text-white',
+}
 const inputCls = 'border-amber-900/40 bg-stone-800/50 text-amber-100 placeholder:text-amber-200/30'
 const lblCls = 'text-amber-200/60 text-xs'
 const selCls = 'border-amber-900/40 bg-stone-800/50 text-amber-100'
@@ -96,6 +118,11 @@ export function AdminDashboard() {
   const { authUser, authToken, setView, clearAuth, setAuthView } = useStore()
   const qc = useQueryClient()
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const t = theme === 'dark' ? darkTheme : lightTheme
 
   // 401 auto-logout
   useEffect(() => {
@@ -103,6 +130,23 @@ export function AdminDashboard() {
     window.addEventListener('auth:unauthorized', handler)
     return () => window.removeEventListener('auth:unauthorized', handler)
   }, [clearAuth, setAuthView])
+
+  // Close mobile menu on resize
+  useEffect(() => {
+    const onResize = () => { if (window.innerWidth >= 1024) setMobileMenuOpen(false) }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Quick Actions navigation
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (typeof detail === 'string') setActiveTab(detail)
+    }
+    window.addEventListener('admin:navigate', handler)
+    return () => window.removeEventListener('admin:navigate', handler)
+  }, [])
 
   if (!authUser || authUser.role !== 'admin') {
     return (
@@ -121,7 +165,7 @@ export function AdminDashboard() {
 
   const invalidateAll = () => qc.invalidateQueries()
 
-  const tabItems = [
+  const sidebarItems = [
     { value: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { value: 'products', icon: Package, label: 'Products' },
     { value: 'categories', icon: FolderOpen, label: 'Categories' },
@@ -139,63 +183,263 @@ export function AdminDashboard() {
     { value: 'integrations', icon: Globe, label: 'Integrations' },
     { value: 'partners', icon: Handshake, label: 'Partners' },
     { value: 'corporate', icon: Building2, label: 'Corporate' },
-    { value: 'investor', icon: Building2, label: 'Investor Kit' },
   ]
 
+  const investorItems = [
+    { value: 'investor', icon: Presentation, label: 'Investor Kit' },
+  ]
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard': return <DashboardTab token={authToken} theme={theme} />
+      case 'products': return <ProductsTab token={authToken} onMutate={invalidateAll} />
+      case 'categories': return <CategoriesTab token={authToken} onMutate={invalidateAll} />
+      case 'inventory': return <InventoryTab token={authToken} onMutate={invalidateAll} />
+      case 'orders': return <OrdersTab token={authToken} onMutate={invalidateAll} />
+      case 'invoices': return <InvoicesTab token={authToken} onMutate={invalidateAll} />
+      case 'accounting': return <AccountingTab token={authToken} onMutate={invalidateAll} />
+      case 'vendors': return <VendorsTab token={authToken} onMutate={invalidateAll} />
+      case 'users': return <UsersPermsTab token={authToken} onMutate={invalidateAll} />
+      case 'content': return <ContentTab token={authToken} onMutate={invalidateAll} />
+      case 'sharedocs': return <ShareDocsTab token={authToken} onMutate={invalidateAll} />
+      case 'offers': return <OffersTab token={authToken} onMutate={invalidateAll} />
+      case 'import': return <ImportTab token={authToken} onMutate={invalidateAll} />
+      case 'reports': return <ReportsTab token={authToken} />
+      case 'integrations': return <IntegrationsTab token={authToken} onMutate={invalidateAll} />
+      case 'partners': return <PartnersTab token={authToken} onMutate={invalidateAll} />
+      case 'corporate': return <CorporateTab token={authToken} onMutate={invalidateAll} />
+      case 'investor': return <InvestorKitTab token={authToken} />
+      default: return <DashboardTab token={authToken} theme={theme} />
+    }
+  }
+
   return (
-    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="py-6">
-      <div className="mb-6 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600/20">
-          <LayoutDashboard className="h-5 w-5 text-amber-400" />
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className={`fixed inset-0 z-50 flex ${t.bg} ${t.text} overflow-hidden`}
+    >
+      {/* Mobile overlay */}
+      <AnimatePresence>
+        {mobileMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Sidebar */}
+      <motion.aside
+        initial={false}
+        animate={{ width: sidebarCollapsed ? 64 : 240 }}
+        transition={{ duration: 0.2 }}
+        className={`fixed lg:relative z-50 h-full ${t.sidebarBg} border-r ${t.border} flex flex-col shrink-0 transition-transform duration-300 ${
+          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
+        {/* Sidebar header */}
+        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-2'} px-3 py-4 border-b ${t.border}`}>
+          {!sidebarCollapsed && (
+            <>
+              <img src="/images/logo.png" alt="3BL" className="h-8 w-8 rounded-lg object-cover shrink-0" />
+              <div className="min-w-0">
+                <p className={`text-xs font-bold truncate ${t.text}`}>3 BOXES LUXURY</p>
+                <p className={`text-[10px] truncate ${t.textMuted}`}>Management Console</p>
+              </div>
+            </>
+          )}
+          {sidebarCollapsed && (
+            <img src="/images/logo.png" alt="3BL" className="h-7 w-7 rounded-lg object-cover" />
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`hidden lg:flex h-6 w-6 p-0 ml-auto ${t.textMuted} shrink-0`}
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          >
+            {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </Button>
         </div>
-        <div>
-          <h1 className="text-xl font-bold text-amber-100">Admin Dashboard</h1>
-          <p className="text-xs text-amber-200/50">3 BOXES LUXURY &mdash; Management Console</p>
+
+        {/* Main nav */}
+        <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
+          {sidebarItems.map(item => {
+            const isActive = activeTab === item.value
+            return (
+              <button
+                key={item.value}
+                onClick={() => { setActiveTab(item.value); setMobileMenuOpen(false) }}
+                className={`flex items-center w-full ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg text-sm transition-colors ${
+                  isActive ? t.activeItem : `${t.textMuted} ${t.hover}`
+                }`}
+                title={sidebarCollapsed ? item.label : undefined}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+              </button>
+            )
+          })}
+
+          {/* Separator + Investor Kit */}
+          <div className={`my-2 border-t ${t.border}`} />
+          {investorItems.map(item => {
+            const isActive = activeTab === item.value
+            return (
+              <button
+                key={item.value}
+                onClick={() => { setActiveTab(item.value); setMobileMenuOpen(false) }}
+                className={`flex items-center w-full ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg text-sm transition-colors ${
+                  isActive ? t.activeItem : `${t.textMuted} ${t.hover}`
+                }`}
+                title={sidebarCollapsed ? item.label : undefined}
+              >
+                <item.icon className="h-4 w-4 shrink-0" />
+                {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                {!sidebarCollapsed && (
+                  <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-amber-600/20 text-amber-500 border border-amber-600/30">🔒</span>
+                )}
+              </button>
+            )
+          })}
+        </nav>
+
+        {/* Exit button */}
+        <div className={`p-2 border-t ${t.border}`}>
+          <button
+            onClick={() => setView('home')}
+            className={`flex items-center w-full ${sidebarCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg text-sm ${t.textMuted} ${t.hover} transition-colors`}
+            title={sidebarCollapsed ? 'Back to Home' : undefined}
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            {!sidebarCollapsed && <span>Exit Admin</span>}
+          </button>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          <Badge className={roleColor('admin')}>Admin</Badge>
-          <span className="text-xs text-amber-200/50">{authUser.email}</span>
-        </div>
+      </motion.aside>
+
+      {/* Main area */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Topbar */}
+        <header className={`flex items-center gap-3 px-4 py-3 border-b ${t.border} ${t.sidebarBg} shrink-0`}>
+          {/* Mobile hamburger */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="lg:hidden h-8 w-8 p-0"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          >
+            <Menu className={`h-5 w-5 ${t.text}`} />
+          </Button>
+
+          <img src="/images/logo.png" alt="3BL" className="h-7 w-7 rounded object-cover lg:hidden" />
+
+          <div className="hidden lg:block">
+            <h1 className={`text-sm font-semibold ${t.text}`}>3 BOXES LUXURY — Management Console</h1>
+          </div>
+
+          <div className="ml-auto flex items-center gap-3">
+            {/* Theme toggle */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`h-8 w-8 p-0 ${t.textMuted}`}
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+
+            <Badge className={roleColor('admin')}>Admin</Badge>
+            <span className={`text-xs ${t.textMuted} hidden sm:inline`}>{authUser.email}</span>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`h-8 gap-1.5 text-xs ${t.textMuted}`}
+              onClick={() => setView('home')}
+            >
+              <Home className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Home</span>
+            </Button>
+          </div>
+        </header>
+
+        {/* Content */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.15 }}
+            >
+              {renderContent()}
+            </motion.div>
+          </AnimatePresence>
+        </main>
       </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <div className="mb-6 overflow-x-auto">
-          <TabsList className="inline-flex h-auto w-max gap-1 bg-stone-900/60 p-1">
-            {tabItems.map(t => (
-              <TabsTrigger key={t.value} value={t.value} className={tabCls}>
-                <t.icon className="mr-1 h-3 w-3" />{t.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-
-        <TabsContent value="dashboard"><DashboardTab token={authToken} /></TabsContent>
-        <TabsContent value="products"><ProductsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="categories"><CategoriesTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="inventory"><InventoryTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="orders"><OrdersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="invoices"><InvoicesTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="accounting"><AccountingTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="vendors"><VendorsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="users"><UsersPermsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="content"><ContentTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="sharedocs"><ShareDocsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="offers"><OffersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="import"><ImportTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="reports"><ReportsTab token={authToken} /></TabsContent>
-        <TabsContent value="integrations"><IntegrationsTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="partners"><PartnersTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="corporate"><CorporateTab token={authToken} onMutate={invalidateAll} /></TabsContent>
-        <TabsContent value="investor"><InvestorKitTab token={authToken} /></TabsContent>
-      </Tabs>
     </motion.div>
   )
 }
 
 /* ════════════════════════════════════════════
-   1. DASHBOARD TAB
+   1. DASHBOARD TAB — Interactive with Charts
    ════════════════════════════════════════════ */
-function DashboardTab({ token }: { token: string | null }) {
+
+/* Fake chart data for visual appeal */
+const revenueData = [
+  { month: 'Oct', revenue: 420000 },
+  { month: 'Nov', revenue: 580000 },
+  { month: 'Dec', revenue: 890000 },
+  { month: 'Jan', revenue: 720000 },
+  { month: 'Feb', revenue: 930000 },
+  { month: 'Mar', revenue: 1150000 },
+]
+
+const orderStatusData = [
+  { name: 'Delivered', value: 42, color: '#22c55e' },
+  { name: 'Processing', value: 23, color: '#3b82f6' },
+  { name: 'Shipped', value: 18, color: '#a855f7' },
+  { name: 'Pending', value: 12, color: '#eab308' },
+  { name: 'Cancelled', value: 5, color: '#ef4444' },
+]
+
+const sparkRevenue = [
+  { v: 30 }, { v: 45 }, { v: 28 }, { v: 55 }, { v: 48 }, { v: 62 }, { v: 58 }, { v: 75 },
+]
+const sparkOrders = [
+  { v: 20 }, { v: 35 }, { v: 42 }, { v: 30 }, { v: 55 }, { v: 48 }, { v: 62 }, { v: 50 },
+]
+const sparkProducts = [
+  { v: 40 }, { v: 38 }, { v: 42 }, { v: 45 }, { v: 43 }, { v: 50 }, { v: 48 }, { v: 52 },
+]
+const sparkUsers = [
+  { v: 15 }, { v: 22 }, { v: 28 }, { v: 35 }, { v: 30 }, { v: 42 }, { v: 38 }, { v: 45 },
+]
+
+const recentActivityItems = [
+  { icon: ShoppingBag, text: 'New order #ORD-2048 placed', time: '2 min ago', color: 'text-blue-400' },
+  { icon: Users, text: 'New user Priya Sharma registered', time: '15 min ago', color: 'text-purple-400' },
+  { icon: DollarSign, text: 'Payment of ₹45,000 received', time: '1 hr ago', color: 'text-green-400' },
+  { icon: Package, text: 'Product "Oud Royale" stock low (3 left)', time: '2 hr ago', color: 'text-amber-400' },
+  { icon: CheckCircle, text: 'Order #ORD-2035 delivered', time: '3 hr ago', color: 'text-green-400' },
+  { icon: ShoppingBag, text: 'New order #ORD-2047 placed', time: '4 hr ago', color: 'text-blue-400' },
+]
+
+function DashboardTab({ token, theme }: { token: string | null; theme: 'dark' | 'light' }) {
+  const t = theme === 'dark' ? darkTheme : lightTheme
+  const chartStroke = theme === 'dark' ? '#d97706' : '#b45309'
+  const chartFill = theme === 'dark' ? '#d97706' : '#b45309'
+  const gridColor = theme === 'dark' ? '#44403c' : '#e7e5e4'
+  const axisColor = theme === 'dark' ? '#a8a29e' : '#78716c'
+  const tooltipBg = theme === 'dark' ? '#1c1917' : '#ffffff'
+  const tooltipBorder = theme === 'dark' ? '#44403c' : '#e7e5e4'
+  const tooltipText = theme === 'dark' ? '#fef3c7' : '#1c1917'
+
   const { data: productsData } = useQuery({ queryKey: ['admin-products'], queryFn: () => apiFetch('/api/admin/products?limit=1', undefined, token) })
   const { data: usersData } = useQuery({ queryKey: ['admin-users'], queryFn: () => apiFetch('/api/admin/users?limit=1', undefined, token) })
   const { data: ordersData } = useQuery({ queryKey: ['admin-orders'], queryFn: () => apiFetch('/api/admin/orders?limit=1', undefined, token) })
@@ -206,29 +450,43 @@ function DashboardTab({ token }: { token: string | null }) {
   const totalOrders = ordersData?.pagination?.total || 0
   const totalRevenue = accountingData?.summary?.totalCredits || 0
 
-  const { data: recentOrders } = useQuery({ queryKey: ['recent-orders'], queryFn: () => apiFetch('/api/admin/orders?limit=5', undefined, token).catch(() => null) })
-
   const summaryCards = [
-    { title: 'Total Revenue', value: fmt(totalRevenue), icon: DollarSign, color: 'text-green-400', bg: 'bg-green-600/10' },
-    { title: 'Total Orders', value: totalOrders.toString(), icon: ShoppingBag, color: 'text-blue-400', bg: 'bg-blue-600/10' },
-    { title: 'Products', value: totalProducts.toString(), icon: Package, color: 'text-amber-400', bg: 'bg-amber-600/10' },
-    { title: 'Users', value: totalUsers.toString(), icon: Users, color: 'text-purple-400', bg: 'bg-purple-600/10' },
+    { title: 'Total Revenue', value: fmt(totalRevenue), icon: DollarSign, color: 'text-green-400', bg: 'bg-green-600/10', sparkData: sparkRevenue, sparkColor: '#22c55e' },
+    { title: 'Total Orders', value: totalOrders.toString(), icon: ShoppingBag, color: 'text-blue-400', bg: 'bg-blue-600/10', sparkData: sparkOrders, sparkColor: '#3b82f6' },
+    { title: 'Products', value: totalProducts.toString(), icon: Package, color: 'text-amber-400', bg: 'bg-amber-600/10', sparkData: sparkProducts, sparkColor: '#d97706' },
+    { title: 'Users', value: totalUsers.toString(), icon: Users, color: 'text-purple-400', bg: 'bg-purple-600/10', sparkData: sparkUsers, sparkColor: '#a855f7' },
   ]
 
   return (
     <div className="space-y-6">
+      {/* Summary Cards with Sparklines */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {summaryCards.map((c, i) => (
           <motion.div key={c.title} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.08 }}>
-            <Card className={cardCls}>
+            <Card className={`${t.cardBg} ${t.border}`}>
               <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${c.bg}`}>
-                    <c.icon className={`h-5 w-5 ${c.color}`} />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${c.bg}`}>
+                      <c.icon className={`h-5 w-5 ${c.color}`} />
+                    </div>
+                    <div>
+                      <p className={`text-xs ${t.textMuted}`}>{c.title}</p>
+                      <p className={`text-lg font-bold ${t.text}`}>{c.value}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className={lblCls}>{c.title}</p>
-                    <p className="text-lg font-bold text-amber-100">{c.value}</p>
+                  <div className="h-10 w-20">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={c.sparkData}>
+                        <defs>
+                          <linearGradient id={`spark-${i}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={c.sparkColor} stopOpacity={0.3} />
+                            <stop offset="95%" stopColor={c.sparkColor} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <Area type="monotone" dataKey="v" stroke={c.sparkColor} strokeWidth={1.5} fill={`url(#spark-${i})`} />
+                      </AreaChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
               </CardContent>
@@ -237,30 +495,179 @@ function DashboardTab({ token }: { token: string | null }) {
         ))}
       </div>
 
-      <Card className={cardCls}>
+      {/* Charts Row */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Revenue Overview */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="lg:col-span-2"
+        >
+          <Card className={`${t.cardBg} ${t.border}`}>
+            <CardHeader className="pb-2">
+              <CardTitle className={`text-sm font-semibold ${t.text}`}>Revenue Overview</CardTitle>
+              <p className={`text-xs ${t.textMuted}`}>Last 6 months</p>
+            </CardHeader>
+            <CardContent>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={revenueData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={chartFill} stopOpacity={0.3} />
+                        <stop offset="95%" stopColor={chartFill} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                    <XAxis dataKey="month" tick={{ fill: axisColor, fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: axisColor, fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `₹${(v / 100000).toFixed(0)}L`} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, color: tooltipText, fontSize: 12 }}
+                      formatter={(value: any) => [fmt(value as number), 'Revenue']}
+                    />
+                    <Area type="monotone" dataKey="revenue" stroke={chartStroke} strokeWidth={2} fill="url(#revenueGrad)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Orders by Status Pie Chart */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <Card className={`${t.cardBg} ${t.border} h-full`}>
+            <CardHeader className="pb-2">
+              <CardTitle className={`text-sm font-semibold ${t.text}`}>Orders by Status</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={orderStatusData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={40}
+                      outerRadius={65}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {orderStatusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ backgroundColor: tooltipBg, border: `1px solid ${tooltipBorder}`, borderRadius: 8, color: tooltipText, fontSize: 12 }}
+                      formatter={(value: any) => [`${value}%`, 'Share']}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {orderStatusData.map((entry) => (
+                  <div key={entry.name} className="flex items-center gap-1.5 text-xs">
+                    <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                    <span className={t.textMuted}>{entry.name}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
+
+      {/* Quick Stats Row */}
+      <Card className={`${t.cardBg} ${t.border}`}>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold text-amber-100">Quick Stats</CardTitle>
+          <CardTitle className={`text-sm font-semibold ${t.text}`}>Quick Stats</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-4">
-              <p className={lblCls}>Account Balance</p>
-              <p className="mt-1 text-lg font-bold text-amber-100">{fmt(accountingData?.summary?.balance || 0)}</p>
+            <div className={`rounded-lg border ${t.border} ${t.input} p-4`}>
+              <p className={`text-xs ${t.textMuted}`}>Account Balance</p>
+              <p className={`mt-1 text-lg font-bold ${t.text}`}>{fmt(accountingData?.summary?.balance || 0)}</p>
               <div className="mt-2 flex items-center gap-1 text-xs text-green-400">
                 <TrendingUp className="h-3 w-3" /> Net position
               </div>
             </div>
-            <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-4">
-              <p className={lblCls}>Total Credits</p>
+            <div className={`rounded-lg border ${t.border} ${t.input} p-4`}>
+              <p className={`text-xs ${t.textMuted}`}>Total Credits</p>
               <p className="mt-1 text-lg font-bold text-green-400">{fmt(accountingData?.summary?.totalCredits || 0)}</p>
             </div>
-            <div className="rounded-lg border border-amber-900/20 bg-stone-800/30 p-4">
-              <p className={lblCls}>Total Debits</p>
+            <div className={`rounded-lg border ${t.border} ${t.input} p-4`}>
+              <p className={`text-xs ${t.textMuted}`}>Total Debits</p>
               <p className="mt-1 text-lg font-bold text-red-400">{fmt(accountingData?.summary?.totalDebits || 0)}</p>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      {/* Bottom Row: Recent Activity + Quick Actions */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Recent Activity */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+          className="lg:col-span-2"
+        >
+          <Card className={`${t.cardBg} ${t.border}`}>
+            <CardHeader className="pb-2">
+              <CardTitle className={`text-sm font-semibold ${t.text}`}>Recent Activity</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="max-h-72 space-y-1 overflow-y-auto">
+                {recentActivityItems.map((item, i) => (
+                  <div key={i} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 ${t.hover} transition-colors`}>
+                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${theme === 'dark' ? 'bg-stone-800/60' : 'bg-stone-100'}`}>
+                      <item.icon className={`h-4 w-4 ${item.color}`} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-sm ${t.text} truncate`}>{item.text}</p>
+                    </div>
+                    <span className={`text-xs whitespace-nowrap ${t.textMuted}`}>{item.time}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Quick Actions */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.6 }}
+        >
+          <Card className={`${t.cardBg} ${t.border}`}>
+            <CardHeader className="pb-2">
+              <CardTitle className={`text-sm font-semibold ${t.text}`}>Quick Actions</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Button className={`w-full justify-start gap-2 ${btnPrimary}`} onClick={() => window.dispatchEvent(new CustomEvent('admin:navigate', { detail: 'products' }))}>
+                <Plus className="h-4 w-4" /> Add Product
+              </Button>
+              <Button variant="outline" className={`w-full justify-start gap-2 ${btnOutline}`} onClick={() => window.dispatchEvent(new CustomEvent('admin:navigate', { detail: 'orders' }))}>
+                <ShoppingBag className="h-4 w-4" /> View Orders
+              </Button>
+              <Button variant="outline" className={`w-full justify-start gap-2 ${btnOutline}`} onClick={() => window.dispatchEvent(new CustomEvent('admin:navigate', { detail: 'inventory' }))}>
+                <Warehouse className="h-4 w-4" /> Manage Inventory
+              </Button>
+              <Button variant="outline" className={`w-full justify-start gap-2 ${btnOutline}`} onClick={() => window.dispatchEvent(new CustomEvent('admin:navigate', { detail: 'reports' }))}>
+                <BarChart3 className="h-4 w-4" /> Generate Report
+              </Button>
+              <Button variant="outline" className={`w-full justify-start gap-2 ${btnOutline}`} onClick={() => window.dispatchEvent(new CustomEvent('admin:navigate', { detail: 'users' }))}>
+                <Users className="h-4 w-4" /> Manage Users
+              </Button>
+            </CardContent>
+          </Card>
+        </motion.div>
+      </div>
     </div>
   )
 }
