@@ -153,11 +153,11 @@ export function Header() {
           >
             <div className="relative flex h-12 w-12 items-center justify-center sm:h-14 sm:w-14">
               <Image
-                src="/images/logo-new.png"
+                src="/images/logo-uploaded.png"
                 alt="3 Boxes Luxury Logo"
                 width={56}
                 height={56}
-                className="h-12 w-12 object-contain drop-shadow-[0_0_8px_rgba(212,164,55,0.4)] sm:h-14 sm:w-14"
+                className="h-12 w-12 object-contain brightness-110 contrast-105 drop-shadow-[0_0_12px_rgba(212,164,55,0.6)] drop-shadow-[0_0_4px_rgba(255,220,130,0.4)] sm:h-14 sm:w-14"
                 priority
               />
             </div>
@@ -336,11 +336,11 @@ export function Header() {
                 <SheetTitle className="flex items-center gap-2">
                   <div className="relative flex h-10 w-10 items-center justify-center">
                     <Image
-                      src="/images/logo-new.png"
+                      src="/images/logo-uploaded.png"
                       alt="3 Boxes Luxury Logo"
                       width={40}
                       height={40}
-                      className="h-10 w-10 object-contain drop-shadow-[0_0_8px_rgba(212,164,55,0.4)]"
+                      className="h-10 w-10 object-contain brightness-110 contrast-105 drop-shadow-[0_0_12px_rgba(212,164,55,0.6)] drop-shadow-[0_0_4px_rgba(255,220,130,0.4)]"
                     />
                   </div>
                   <span className="gold-shimmer text-lg font-bold tracking-widest">

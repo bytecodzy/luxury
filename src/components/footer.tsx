@@ -28,13 +28,13 @@ export function Footer() {
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2">
-              <div className="logo-flashy">
+              <div className="relative flex h-11 w-11 items-center justify-center">
                 <Image
-                  src="/images/logo.png"
+                  src="/images/logo-uploaded.png"
                   alt="3 Boxes Luxury Logo"
                   width={44}
                   height={44}
-                  className="h-11 w-auto"
+                  className="h-11 w-11 object-contain brightness-110 contrast-105 drop-shadow-[0_0_12px_rgba(212,164,55,0.6)] drop-shadow-[0_0_4px_rgba(255,220,130,0.4)]"
                 />
               </div>
               <h3 className="gold-shimmer text-lg font-bold tracking-widest">
@@ -106,10 +106,10 @@ export function Footer() {
           {/* Get the App */}
           <div>
             <h4 className="text-sm font-semibold uppercase tracking-wider text-amber-400/80">
-              Get the App
+              Install App
             </h4>
             <p className="mt-3 text-sm text-amber-200/50">
-              Install our Android app directly — no app store needed. Shop luxury gifts on the go.
+              Install our app directly — no app store needed. Shop luxury gifts on the go.
             </p>
             <div className="mt-4 flex flex-col gap-2">
               <button
