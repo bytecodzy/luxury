@@ -89,3 +89,29 @@ Stage Summary:
 - All logos now use logo-uploaded.png with golden glow effect
 - PWA icons regenerated from the actual logo
 - Deployed to Vercel production successfully
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix admin dashboard pages not opening properly
+
+Work Log:
+- Investigated all admin API endpoints and found multiple critical bugs
+- Fixed requireAdmin check bug: `if(adminCheck)` always truthy → changed to `if(adminCheck.error)` in 6 handlers
+  - audit-logs GET, sessions GET+DELETE, role-permissions GET+POST, corporate/[id]/status PATCH
+- Fixed sessions DELETE: inverted audit log logic (`if(!auth)` → `if(adminCheck.user)`)
+- Added missing Coupon model to Prisma schema (was causing 500 on coupons tab)
+- Updated AgentDocShare schema: added canDownload, canShare, message fields
+- Fixed share-doc API route: changed adminId→sharedBy, removed broken relation includes, added manual data enrichment
+- Fixed ContentTab: replaced fake API call with real /api/wiki endpoint, CRUD now persists
+- Fixed ShareDocsTab: now calls real /api/admin/share-doc API instead of local state
+- Fixed InvestorKitTab: email sharing now uses mailto: instead of wrong API payload
+- Fixed accounting route: replaced full-table scan with Prisma aggregate for summary
+- Deployed all fixes to Vercel production
+
+Stage Summary:
+- 6 critical API routes fixed (requireAdmin bug)
+- Coupon model added to database
+- Content and Share Docs tabs now persist data properly
+- Investor Kit sharing works via email
+- All admin tabs should now work correctly
