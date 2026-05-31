@@ -23,26 +23,54 @@ const PLATFORM_LOGO_MAP: Record<string, string> = {
 // product-type mapping produces different ones (e.g. "mens-shirts-t-shirts").
 // This map normalises category slugs so that a request using either variant
 // resolves to the same set of products.
+//
+// Header sub-menu slugs (men-accessories, women-jewelry, etc.) MUST map to
+// the actual Shopify/DB category slugs so clicking sub-menus shows products.
 const CATEGORY_SLUG_ALIASES: Record<string, string[]> = {
-  'mens-shirts-t-shirts': ['mens-shirts'],           // DB seed slug → Shopify slug
-  'couple-friendly-gifts': ['couple-gifts'],        // DB seed slug → Shopify slug
-  'leather-goods': ['leather'],                      // alternate slug
-  'home-living': ['home'],                           // alternate slug
-  'romantic-gifts': ['romantic'],                    // alternate slug
-  'corporate-gifts': ['office-corporate-gifts'],     // DB seed slug → Shopify slug
-  'office-desk': ['desk-accessories'],                // alternate slug
-  'office-stationery': ['stationery'],                // alternate slug
+  // Men sub-categories → Shopify slugs
+  'men-accessories': ['leather-goods', 'fashion'],
+  'men-shirts': ['mens-shirts-t-shirts'],
+  'men-tshirts': ['mens-shirts-t-shirts'],
+  'men-fragrances': ['fragrances'],
+  'men-watches': ['watches'],
+  'men-leather': ['leather-goods'],
+  // Women sub-categories → Shopify slugs
+  'women-jewelry': ['jewelry', 'jewellery'],
+  'women-sarees': ['sarees'],
+  'women-fashion': ['fashion'],
+  'women-fragrances': ['fragrances'],
+  'women-accessories': ['fashion'],
+  // Kids sub-categories → Shopify slugs
+  'kids-toys': ['toys'],
+  'kids-fashion': ['fashion'],
+  // Home sub-categories → Shopify slugs
+  'home-decor': ['home-living'],
+  'home-candles': ['fragrances', 'home-living'],
+  // Couple sub-categories
+  'couple-friendly': ['couple-friendly-gifts'],
+  // Office sub-categories
+  'office-corporate-gifts': ['corporate-gifts'],
+  'office-desk': ['desk-accessories'],
+  'office-stationery': ['stationery'],
+  // Legacy/alternate mappings
+  'mens-shirts-t-shirts': ['mens-shirts'],
+  'couple-friendly-gifts': ['couple-gifts'],
+  'leather-goods': ['leather'],
+  'home-living': ['home'],
+  'romantic-gifts': ['romantic'],
+  'corporate-gifts': ['office-corporate-gifts'],
 }
 
 // v1.2: Parent category → child category slug mapping
 // When a parent category is selected, show products from all its subcategories
+// Includes BOTH header sub-menu slugs AND Shopify/DB slugs so all paths work
 const PARENT_CATEGORY_CHILDREN: Record<string, string[]> = {
-  'couple': ['couple-friendly-gifts', 'romantic-gifts', 'couple-gifts'],
-  'men': ['mens-shirts-t-shirts', 'mens-shirts', 'watches', 'leather-goods', 'leather', 'fragrances'],
-  'women': ['jewelry', 'jewellery', 'sarees', 'fashion', 'fragrances'],
-  'kids': ['toys'],
-  'home': ['home-living', 'home'],
-  'office': ['corporate-gifts', 'office-corporate-gifts', 'office-desk', 'office-stationery'],
+  'couple': ['couple-friendly', 'couple-friendly-gifts', 'romantic-gifts', 'couple-gifts'],
+  'men': ['men-accessories', 'men-shirts', 'men-tshirts', 'men-fragrances', 'men-watches', 'men-leather', 'mens-shirts-t-shirts', 'mens-shirts', 'watches', 'leather-goods', 'leather', 'fragrances'],
+  'women': ['women-jewelry', 'women-sarees', 'women-fashion', 'women-fragrances', 'women-accessories', 'jewelry', 'jewellery', 'sarees', 'fashion', 'fragrances'],
+  'kids': ['kids-toys', 'kids-fashion', 'toys'],
+  'home': ['home-decor', 'home-candles', 'home-living', 'home'],
+  'office': ['office-corporate-gifts', 'office-desk', 'office-stationery', 'corporate-gifts', 'desk-accessories', 'stationery'],
   'new-arrivals': [], // Special: no child slugs, uses tag/featured filter
 }
 
@@ -738,29 +766,41 @@ export async function GET(request: NextRequest) {
   const dataSource = process.env.DATA_SOURCE // 'shopify' to skip DB, 'database' for DB-first (default)
   const preferShopify = dataSource === 'shopify' || !!process.env.VERCEL
 
+  // ─── EARLY RETURN: Office and New Arrivals always serve static products ───
+  // These categories are not in Shopify, so we serve curated static products directly.
+  // This must happen BEFORE any Shopify API call so these products always work on Vercel.
+  const officeCategorySlugs = ['office', 'office-corporate-gifts', 'office-desk', 'office-stationery', 'corporate-gifts', 'desk-accessories', 'stationery']
+  if (category && officeCategorySlugs.includes(category) && !search) {
+    const officeSlugs = resolveCategorySlugs(category)
+    const filtered = STATIC_OFFICE_PRODUCTS.filter(p => officeSlugs.includes(p.categorySlug))
+    return NextResponse.json({
+      products: filtered,
+      total: filtered.length,
+      page,
+      totalPages: Math.ceil(filtered.length / limit),
+      source: 'static',
+    })
+  }
+  if (category === 'new-arrivals' && !search) {
+    return NextResponse.json({
+      products: STATIC_NEW_ARRIVALS_PRODUCTS,
+      total: STATIC_NEW_ARRIVALS_PRODUCTS.length,
+      page,
+      totalPages: Math.ceil(STATIC_NEW_ARRIVALS_PRODUCTS.length / limit),
+      source: 'static',
+    })
+  }
+
   // ─── Shopify-only path (no DB, no duplication) ───
   if (preferShopify) {
     try {
       let shopifyProducts: ShopifyProductTransformed[]
 
       if (category && !search) {
-        // Special handling for "new-arrivals" — filter by tag/featured, not by category slug
-        if (category === 'new-arrivals') {
-          const allProducts = await fetchShopifyProducts()
-          shopifyProducts = allProducts.filter(p =>
-            p.tags.some(t => t.toLowerCase().includes('new')) || p.featured
-          )
-          // Fallback: if no tagged/featured products, show the most recent 20%
-          if (shopifyProducts.length === 0 && allProducts.length > 0) {
-            const count = Math.ceil(allProducts.length * 0.2)
-            shopifyProducts = allProducts.slice(0, count)
-          }
-        } else {
-          // Resolve category slug aliases so both DB and Shopify slugs work
-          const categorySlugs = resolveCategorySlugs(category)
-          const allProducts = await fetchShopifyProducts()
-          shopifyProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
-        }
+        // Resolve category slug aliases so both DB and Shopify slugs work
+        const categorySlugs = resolveCategorySlugs(category)
+        const allProducts = await fetchShopifyProducts()
+        shopifyProducts = allProducts.filter((p) => categorySlugs.includes(p.categorySlug))
       } else if (search && !category) {
         shopifyProducts = await searchShopifyProducts(search)
       } else if (category && search) {
@@ -805,37 +845,23 @@ export async function GET(request: NextRequest) {
         relationship: relationship || null,
       })
 
-    // ─── Inject static fallback products for Office and New Arrivals ───
-    // Shopify doesn't have products in these categories, so we inject our own
-    let finalProducts = result.products
-    let finalTotal = result.total
-
-    if (category === 'office' || category === 'office-corporate-gifts' || category === 'office-desk' || category === 'office-stationery') {
-      const officeSlugs = resolveCategorySlugs(category)
-      const filtered = STATIC_OFFICE_PRODUCTS.filter(p => officeSlugs.includes(p.categorySlug))
-      if (filtered.length > 0) {
-        finalProducts = filtered
-        finalTotal = filtered.length
-      }
-    } else if (category === 'new-arrivals') {
-      // For new arrivals, only show exclusive new arrivals products (no duplicates from other categories)
-      finalProducts = STATIC_NEW_ARRIVALS_PRODUCTS
-      finalTotal = STATIC_NEW_ARRIVALS_PRODUCTS.length
-    }
-
     return NextResponse.json({
-      products: finalProducts,
-      total: finalTotal,
+      products: result.products,
+      total: result.total,
       page,
-      totalPages: Math.ceil(finalTotal / limit),
+      totalPages: Math.ceil(result.total / limit),
       source: 'shopify',
     })
     } catch (shopifyError) {
       console.error('[Products API] Shopify fetch failed:', shopifyError)
-      return NextResponse.json(
-        { error: 'Failed to fetch products from Shopify' },
-        { status: 500 }
-      )
+      // Even if Shopify fails, return empty results rather than a 500 error
+      return NextResponse.json({
+        products: [],
+        total: 0,
+        page,
+        totalPages: 0,
+        source: 'shopify-error',
+      })
     }
   }
 
@@ -1073,37 +1099,23 @@ export async function GET(request: NextRequest) {
         relationship: relationship || null,
       })
 
-    // ─── Inject static fallback products for Office and New Arrivals ───
-    // Shopify doesn't have products in these categories, so we inject our own
-    let finalProducts = result.products
-    let finalTotal = result.total
-
-    if (category === 'office' || category === 'office-corporate-gifts' || category === 'office-desk' || category === 'office-stationery') {
-      const officeSlugs = resolveCategorySlugs(category)
-      const filtered = STATIC_OFFICE_PRODUCTS.filter(p => officeSlugs.includes(p.categorySlug))
-      if (filtered.length > 0) {
-        finalProducts = filtered
-        finalTotal = filtered.length
-      }
-    } else if (category === 'new-arrivals') {
-      // For new arrivals, only show exclusive new arrivals products (no duplicates from other categories)
-      finalProducts = STATIC_NEW_ARRIVALS_PRODUCTS
-      finalTotal = STATIC_NEW_ARRIVALS_PRODUCTS.length
-    }
-
     return NextResponse.json({
-      products: finalProducts,
-      total: finalTotal,
+      products: result.products,
+      total: result.total,
       page,
-      totalPages: Math.ceil(finalTotal / limit),
+      totalPages: Math.ceil(result.total / limit),
       source: 'shopify',
     })
     } catch (shopifyError) {
       console.error('[Products API] Shopify fallback also failed:', shopifyError)
-      return NextResponse.json(
-        { error: 'Failed to fetch products from both database and Shopify' },
-        { status: 500 }
-      )
+      // Return empty results instead of 500 error
+      return NextResponse.json({
+        products: [],
+        total: 0,
+        page,
+        totalPages: 0,
+        source: 'error',
+      })
     }
   }
 }

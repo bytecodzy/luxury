@@ -567,7 +567,7 @@ const CATEGORY_HIERARCHY: {
     parentName: 'Couple',
     order: 1,
     childSlugs: [
-      { slug: 'couple-friendly-gifts', name: 'Couple Friendly', order: 1 },
+      { slug: 'couple-friendly', name: 'Couple Friendly', order: 1 },
       { slug: 'romantic-gifts', name: 'Romantic Gifts', order: 2 },
     ],
   },
@@ -576,10 +576,12 @@ const CATEGORY_HIERARCHY: {
     parentName: 'Men',
     order: 2,
     childSlugs: [
-      { slug: 'mens-shirts-t-shirts', name: 'Shirts & T-Shirts', order: 1 },
-      { slug: 'watches', name: 'Watches', order: 2 },
-      { slug: 'leather-goods', name: 'Leather Goods', order: 3 },
-      { slug: 'fragrances', name: 'Fragrances', order: 4 },
+      { slug: 'men-accessories', name: 'Accessories', order: 1 },
+      { slug: 'men-shirts', name: 'Shirts', order: 2 },
+      { slug: 'men-tshirts', name: 'T-Shirts & Polos', order: 3 },
+      { slug: 'men-fragrances', name: 'Fragrances', order: 4 },
+      { slug: 'men-watches', name: 'Watches', order: 5 },
+      { slug: 'men-leather', name: 'Leather Goods', order: 6 },
     ],
   },
   {
@@ -587,10 +589,11 @@ const CATEGORY_HIERARCHY: {
     parentName: 'Women',
     order: 3,
     childSlugs: [
-      { slug: 'jewelry', name: 'Jewellery', order: 1 },
-      { slug: 'sarees', name: 'Sarees', order: 2 },
-      { slug: 'fashion', name: 'Fashion', order: 3 },
-      { slug: 'fragrances', name: 'Fragrances', order: 4 },
+      { slug: 'women-jewelry', name: 'Jewelry', order: 1 },
+      { slug: 'women-sarees', name: 'Sarees', order: 2 },
+      { slug: 'women-fashion', name: 'Fashion', order: 3 },
+      { slug: 'women-fragrances', name: 'Fragrances', order: 4 },
+      { slug: 'women-accessories', name: 'Accessories', order: 5 },
     ],
   },
   {
@@ -598,7 +601,8 @@ const CATEGORY_HIERARCHY: {
     parentName: 'Kids',
     order: 4,
     childSlugs: [
-      { slug: 'toys', name: 'Toys', order: 1 },
+      { slug: 'kids-toys', name: 'Toys & Games', order: 1 },
+      { slug: 'kids-fashion', name: 'Kids Fashion', order: 2 },
     ],
   },
   {
@@ -606,7 +610,9 @@ const CATEGORY_HIERARCHY: {
     parentName: 'Home',
     order: 5,
     childSlugs: [
-      { slug: 'home-living', name: 'Home Décor', order: 1 },
+      { slug: 'home-decor', name: 'Home Décor', order: 1 },
+      { slug: 'home-candles', name: 'Candles & Fragrances', order: 2 },
+      { slug: 'home-living', name: 'Living', order: 3 },
     ],
   },
   {
@@ -614,7 +620,7 @@ const CATEGORY_HIERARCHY: {
     parentName: 'Office',
     order: 6,
     childSlugs: [
-      { slug: 'corporate-gifts', name: 'Corporate Gifts', order: 1 },
+      { slug: 'office-corporate-gifts', name: 'Corporate Gifts', order: 1 },
       { slug: 'office-desk', name: 'Desk Accessories', order: 2 },
       { slug: 'office-stationery', name: 'Stationery', order: 3 },
     ],

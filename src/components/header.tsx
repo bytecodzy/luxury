@@ -459,7 +459,7 @@ export function Header() {
       {/* Category Navigation Bar */}
       <div className="border-t border-amber-900/20 bg-stone-950/90">
         <div className="container mx-auto px-4">
-          {/* Desktop: horizontal row with hover dropdowns */}
+          {/* Desktop: horizontal row with hover/click dropdowns */}
           <nav className="hidden md:flex items-center gap-0.5" aria-label="Category navigation">
             {CATEGORY_NAV.map((cat) => {
               const Icon = cat.icon;
@@ -471,7 +471,7 @@ export function Header() {
                 return (
                   <button
                     key={cat.slug}
-                    onClick={() => setCategory(cat.slug)}
+                    onClick={() => { setCategory(cat.slug); }}
                     className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors rounded-md ${
                       isActive
                         ? 'bg-amber-900/30 text-amber-300'
@@ -488,7 +488,18 @@ export function Header() {
               }
 
               return (
-                <div key={cat.slug} className="group relative">
+                <div
+                  key={cat.slug}
+                  className="group relative"
+                  onMouseEnter={() => {
+                    const el = document.getElementById(`dropdown-${cat.slug}`);
+                    if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
+                  }}
+                  onMouseLeave={() => {
+                    const el = document.getElementById(`dropdown-${cat.slug}`);
+                    if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
+                  }}
+                >
                   <button
                     onClick={() => setCategory(cat.slug)}
                     className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors rounded-md ${
@@ -503,10 +514,14 @@ export function Header() {
                   </button>
 
                   {/* Dropdown */}
-                  <div className="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-all duration-200 absolute top-full left-0 z-50 mt-0.5 min-w-[200px] rounded-lg border border-amber-900/30 bg-stone-950/98 backdrop-blur-md shadow-xl shadow-black/40 py-2">
+                  <div
+                    id={`dropdown-${cat.slug}`}
+                    style={{ visibility: 'hidden', opacity: 0, transition: 'all 0.2s' }}
+                    className="absolute top-full left-0 z-50 mt-0.5 min-w-[200px] rounded-lg border border-amber-900/30 bg-stone-950/98 backdrop-blur-md shadow-xl shadow-black/40 py-2"
+                  >
                     {/* Parent category "All" link */}
                     <button
-                      onClick={() => setCategory(cat.slug)}
+                      onClick={() => { setCategory(cat.slug); }}
                       className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-amber-300/90 font-medium transition-colors hover:bg-amber-900/20 hover:text-amber-200"
                     >
                       <Icon className="h-3.5 w-3.5" />
@@ -516,7 +531,7 @@ export function Header() {
                     {cat.children.map((child) => (
                       <button
                         key={child.slug}
-                        onClick={() => setCategory(child.slug)}
+                        onClick={() => { setCategory(child.slug); }}
                         className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors hover:bg-amber-900/20 hover:text-amber-300 ${
                           selectedCategory === child.slug
                             ? 'text-amber-300 bg-amber-900/20'
