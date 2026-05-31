@@ -170,3 +170,29 @@ Stage Summary:
 - DB path for new-arrivals now also matches products with categorySlug 'new-arrivals'
 - All Office subcategory slugs properly resolve through aliases and parent-child mappings
 - Lint check passed on all modified files
+
+---
+Task ID: 1-5
+Agent: Main
+Task: Fix product images not displaying on Vercel for Office and New Arrivals, add unique products, remove duplicates
+
+Work Log:
+- Analyzed the dual-source product architecture (SQLite DB for local, Shopify for Vercel)
+- Identified that Shopify doesn't have Office/New Arrivals categories, causing 0 products on Vercel
+- Generated 12 new product images using AI Image Generation (corp-gift-4,5, desk-4,5, stationery-4,5, new-arrival-1-6)
+- Added STATIC_OFFICE_PRODUCTS (12 products) and STATIC_NEW_ARRIVALS_PRODUCTS (6 products) as fallback in products API
+- Updated PARENT_CATEGORY_CHILDREN['office'] to include all subcategory slugs
+- Added CATEGORY_SLUG_ALIASES for office subcategories
+- Added Office category mappings in Shopify PRODUCT_TYPE_TO_CATEGORY
+- Added fallback images for Office and New Arrivals in Shopify CATEGORY_FALLBACK_IMAGES
+- Updated Shopify CATEGORY_HIERARCHY for Office with desk and stationery children
+- Added 6 additional Office products and 6 exclusive New Arrivals products to seed data
+- Fixed New Arrivals query to show only exclusive products (no duplicates from other categories)
+- Re-seeded database (87 products total)
+- Pushed all changes to GitHub/Vercel
+
+Stage Summary:
+- Office section now has 15 unique products with local images across 3 subcategories
+- New Arrivals section now has 6 exclusive products (not duplicates from other categories)
+- Vercel will show static fallback products for Office and New Arrivals when Shopify returns 0 results
+- All product images use local paths (/images/products/) that are committed to the repo
