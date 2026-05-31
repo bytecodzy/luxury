@@ -262,6 +262,12 @@ const PRODUCT_TYPE_TO_CATEGORY: Record<string, { name: string; slug: string }> =
   'gift boxes': { name: 'Romantic Gifts', slug: 'romantic-gifts' },
   'accessories': { name: 'Fashion', slug: 'fashion' },
   'accessory': { name: 'Fashion', slug: 'fashion' },
+  // Office categories
+  'corporate gifts': { name: 'Corporate Gifts', slug: 'corporate-gifts' },
+  'corporate gift': { name: 'Corporate Gifts', slug: 'corporate-gifts' },
+  'office': { name: 'Office', slug: 'corporate-gifts' },
+  'stationery': { name: 'Stationery', slug: 'stationery' },
+  'desk accessories': { name: 'Desk Accessories', slug: 'office-desk' },
 }
 
 function getCategoryForProductType(productType: string): { name: string; slug: string } {
@@ -376,6 +382,35 @@ const CATEGORY_FALLBACK_IMAGES: Record<string, string[]> = {
     '/images/products/toy-1.jpg',
     '/images/products/toy-2.jpg',
     '/images/products/toy-3.jpg',
+  ],
+  'corporate-gifts': [
+    '/images/products/corp-gift-1.jpg',
+    '/images/products/corp-gift-2.jpg',
+    '/images/products/corp-gift-3.jpg',
+    '/images/products/corp-gift-4.jpg',
+    '/images/products/corp-gift-5.jpg',
+  ],
+  'office-desk': [
+    '/images/products/desk-1.jpg',
+    '/images/products/desk-2.jpg',
+    '/images/products/desk-3.jpg',
+    '/images/products/desk-4.jpg',
+    '/images/products/desk-5.jpg',
+  ],
+  'office-stationery': [
+    '/images/products/stationery-1.jpg',
+    '/images/products/stationery-2.jpg',
+    '/images/products/stationery-3.jpg',
+    '/images/products/stationery-4.jpg',
+    '/images/products/stationery-5.jpg',
+  ],
+  'new-arrivals': [
+    '/images/products/new-arrival-1.jpg',
+    '/images/products/new-arrival-2.jpg',
+    '/images/products/new-arrival-3.jpg',
+    '/images/products/new-arrival-4.jpg',
+    '/images/products/new-arrival-5.jpg',
+    '/images/products/new-arrival-6.jpg',
   ],
   uncategorized: [
     '/images/placeholder.jpg',
@@ -580,6 +615,8 @@ const CATEGORY_HIERARCHY: {
     order: 6,
     childSlugs: [
       { slug: 'corporate-gifts', name: 'Corporate Gifts', order: 1 },
+      { slug: 'office-desk', name: 'Desk Accessories', order: 2 },
+      { slug: 'office-stationery', name: 'Stationery', order: 3 },
     ],
   },
   {

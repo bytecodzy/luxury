@@ -137,3 +137,36 @@ Stage Summary:
 - All 18 admin pages now render and navigate correctly
 - Product images display properly in Products tab
 - Permission matrix works in Users & Perms tab
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Fix product display issues on Vercel - add unique products to Office and New Arrivals sections
+
+Work Log:
+- Updated /src/app/api/products/route.ts:
+  - Added STATIC_OFFICE_PRODUCTS constant (12 products: 4 Corporate Gifts, 4 Desk Accessories, 4 Stationery)
+  - Added STATIC_NEW_ARRIVALS_PRODUCTS constant (6 exclusive new arrival products)
+  - Updated PARENT_CATEGORY_CHILDREN['office'] to include all Office subcategory slugs: ['corporate-gifts', 'office-corporate-gifts', 'office-desk', 'office-stationery']
+  - Added CATEGORY_SLUG_ALIASES for Office: 'corporate-gifts' → ['office-corporate-gifts'], 'office-desk' → ['desk-accessories'], 'office-stationery' → ['stationery']
+  - Added fallback injection logic in Shopify-only path (Vercel): when category is 'office' or Office subcategories, inject STATIC_OFFICE_PRODUCTS; when category is 'new-arrivals', combine STATIC_NEW_ARRIVALS_PRODUCTS with Shopify tagged products
+  - Added same fallback injection logic in DB error fallback path (Shopify fallback when DB fails)
+  - Updated DB path new-arrivals handling: changed from `where.tags = { contains: 'new-arrival' }; where.featured = true` to `where.OR = [{ category: { slug: 'new-arrivals' } }, { tags: { contains: 'new-arrival' }, featured: true }]`
+
+- Updated /src/lib/shopify.ts:
+  - Added Office category mappings to PRODUCT_TYPE_TO_CATEGORY: 'corporate gifts', 'corporate gift', 'office', 'stationery', 'desk accessories'
+  - Added fallback images for Office categories in CATEGORY_FALLBACK_IMAGES: 'corporate-gifts', 'office-desk', 'office-stationery', 'new-arrivals'
+  - Updated CATEGORY_HIERARCHY for Office to include all 3 subcategories: Corporate Gifts, Desk Accessories, Stationery
+
+- Updated /prisma/seed.ts:
+  - Added 6 additional Office products after existing ones (2 Corporate Gifts, 2 Desk Accessories, 2 Stationery)
+  - Added 6 exclusive New Arrivals products with categorySlug "new-arrivals"
+  - All new products reference the generated image paths (corp-gift-4/5.jpg, desk-4/5.jpg, stationery-4/5.jpg, new-arrival-1 through 6.jpg)
+
+Stage Summary:
+- Office section now has 12 unique products across 3 subcategories (Corporate Gifts, Desk Accessories, Stationery)
+- New Arrivals section now has 6 exclusive products that show on Vercel even without Shopify data
+- Both Shopify-only path (Vercel) and DB fallback path inject static products
+- DB path for new-arrivals now also matches products with categorySlug 'new-arrivals'
+- All Office subcategory slugs properly resolve through aliases and parent-child mappings
+- Lint check passed on all modified files
