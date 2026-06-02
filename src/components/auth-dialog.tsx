@@ -27,10 +27,14 @@ export function AuthDialog() {
   const authView = useStore((s) => s.authView)
   const authTwoFAStep = useStore((s) => s.authTwoFAStep)
   const authPendingUserId = useStore((s) => s.authPendingUserId)
+  const authTwoFAMethod = useStore((s) => s.authTwoFAMethod)
+  const authPendingEmail = useStore((s) => s.authPendingEmail)
   const setAuth = useStore((s) => s.setAuth)
   const setAuthView = useStore((s) => s.setAuthView)
   const setAuthTwoFAStep = useStore((s) => s.setAuthTwoFAStep)
   const setAuthPendingUserId = useStore((s) => s.setAuthPendingUserId)
+  const setAuthTwoFAMethod = useStore((s) => s.setAuthTwoFAMethod)
+  const setAuthPendingEmail = useStore((s) => s.setAuthPendingEmail)
 
   // Login form
   const [loginEmail, setLoginEmail] = useState('')
@@ -59,6 +63,7 @@ export function AuthDialog() {
 
   // 2FA
   const [twoFACode, setTwoFACode] = useState('')
+  const [resendCooldown, setResendCooldown] = useState(0)
 
   // UI state
   const [error, setError] = useState<string | null>(null)
@@ -74,7 +79,7 @@ export function AuthDialog() {
     switch (selectedLoginRole) {
       case 'corporate': return { email: 'corporate@3boxes.com', password: 'Enter your password' }
       case 'team': return { email: 'team@3boxes.com', password: 'Enter your password' }
-      default: return { email: 'customer@3boxes.com', password: 'Enter your password' }
+      default: return { email: 'pmkshar@gmail.com', password: 'Enter your password' }
     }
   }
 
@@ -105,6 +110,7 @@ export function AuthDialog() {
     setRegEmployeeId('')
     setRegDepartment('')
     setTwoFACode('')
+    setResendCooldown(0)
     setError(null)
     setSuccess(null)
     setLoading(false)
@@ -168,8 +174,33 @@ export function AuthDialog() {
         // Check if 2FA is required by the server
         if (data.requiresTwoFactor) {
           setAuthPendingUserId(data.userId)
+          setAuthTwoFAMethod(data.method || 'email')
+          setAuthPendingEmail(data.email || null)
           setAuthTwoFAStep(true)
-          setSuccess('A verification code has been sent. Please enter it below.')
+
+          const isEmail2FA = data.method === 'email'
+          if (isEmail2FA) {
+            setSuccess(`A 6-digit verification code has been sent to ${data.email || 'your email'}. Please check your inbox.`)
+            // In demo/dev mode, show the OTP via toast for testing
+            if (data._otp) {
+              showToast('info', `🔐 Your verification code: ${data._otp}`)
+            }
+          } else {
+            setSuccess('Please enter the verification code from your authenticator app.')
+          }
+
+          // Start resend cooldown timer
+          setResendCooldown(60)
+          const cooldownInterval = setInterval(() => {
+            setResendCooldown(prev => {
+              if (prev <= 1) {
+                clearInterval(cooldownInterval)
+                return 0
+              }
+              return prev - 1
+            })
+          }, 1000)
+
           return
         }
 
@@ -177,16 +208,6 @@ export function AuthDialog() {
         if (data.emailVerified === false) {
           setError('Please verify your email address before logging in.')
           return
-        }
-
-        // Mandatory 2FA for corporate and team accounts
-        if ((selectedLoginRole === 'corporate' || selectedLoginRole === 'team') && !data.requiresTwoFactor) {
-          if (data.user && data.user.id) {
-            setAuthPendingUserId(data.user.id)
-            setAuthTwoFAStep(true)
-            setSuccess('Two-factor verification is required for your account type. A verification code has been sent to your registered email/phone.')
-            return
-          }
         }
 
         // Successful login
@@ -212,7 +233,7 @@ export function AuthDialog() {
         setLoading(false)
       }
     },
-    [loginEmail, loginPassword, selectedLoginRole, setAuth, setAuthPendingUserId, setAuthTwoFAStep]
+    [loginEmail, loginPassword, selectedLoginRole, setAuth, setAuthPendingUserId, setAuthTwoFAStep, setAuthTwoFAMethod, setAuthPendingEmail]
   )
 
   const handleRegister = useCallback(
@@ -375,6 +396,7 @@ export function AuthDialog() {
           body: JSON.stringify({
             userId: authPendingUserId,
             code: twoFACode,
+            method: authTwoFAMethod || 'email',
           }),
         })
 
@@ -411,7 +433,7 @@ export function AuthDialog() {
         setLoading(false)
       }
     },
-    [twoFACode, authPendingUserId, setAuth, setAuthTwoFAStep]
+    [twoFACode, authPendingUserId, authTwoFAMethod, setAuth, setAuthTwoFAStep]
   )
 
   const handleSocialLogin = useCallback(
@@ -499,22 +521,39 @@ export function AuthDialog() {
                   Two-Factor Authentication
                 </DialogTitle>
                 <DialogDescription className="text-amber-200/50">
-                  {(selectedLoginRole === 'corporate' || selectedLoginRole === 'team')
-                    ? 'Two-factor verification is required for your account type'
-                    : 'Enter the 6-digit code sent to your device'}
+                  {authTwoFAMethod === 'email'
+                    ? 'Enter the 6-digit code sent to your email'
+                    : 'Enter the 6-digit code from your authenticator app'}
                 </DialogDescription>
               </DialogHeader>
 
               <form onSubmit={handle2FAVerify} className="space-y-6">
                 <div className="flex flex-col items-center gap-4">
                   <div className="flex h-16 w-16 items-center justify-center rounded-full border border-amber-700/40 bg-amber-900/20">
-                    <Shield className="h-8 w-8 text-amber-500" />
+                    {authTwoFAMethod === 'email' ? (
+                      <Mail className="h-8 w-8 text-amber-500" />
+                    ) : (
+                      <Shield className="h-8 w-8 text-amber-500" />
+                    )}
                   </div>
-                  <p className="text-center text-sm text-amber-200/60">
-                    {(selectedLoginRole === 'corporate' || selectedLoginRole === 'team')
-                      ? 'A verification code has been sent to your registered email/phone'
-                      : 'Please enter the verification code to continue'}
-                  </p>
+                  {authTwoFAMethod === 'email' && (
+                    <div className="text-center space-y-1">
+                      <p className="text-sm text-amber-200/60">
+                        A verification code has been sent to
+                      </p>
+                      <p className="text-sm font-semibold text-amber-300">
+                        {authPendingEmail || 'your email'}
+                      </p>
+                      <p className="text-xs text-amber-200/40">
+                        Code expires in 5 minutes
+                      </p>
+                    </div>
+                  )}
+                  {authTwoFAMethod !== 'email' && (
+                    <p className="text-center text-sm text-amber-200/60">
+                      Please enter the verification code from your authenticator app
+                    </p>
+                  )}
 
                   <InputOTP
                     maxLength={6}
@@ -589,10 +628,58 @@ export function AuthDialog() {
                   )}
                 </Button>
 
+                {/* Resend OTP for email method */}
+                {authTwoFAMethod === 'email' && (
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      disabled={resendCooldown > 0}
+                      onClick={async () => {
+                        if (resendCooldown > 0 || !authPendingUserId) return
+                        try {
+                          const res = await fetch('/api/auth/2fa/email-otp', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ userId: authPendingUserId }),
+                          })
+                          const data = await res.json()
+                          if (data._otp) {
+                            showToast('info', `🔐 Your new verification code: ${data._otp}`)
+                          }
+                          if (data.success) {
+                            showToast('success', 'A new verification code has been sent to your email.')
+                            setSuccess(`A new code has been sent to ${data.email || authPendingEmail || 'your email'}.`)
+                          }
+                          // Restart cooldown
+                          setResendCooldown(60)
+                          const cooldownInterval = setInterval(() => {
+                            setResendCooldown(prev => {
+                              if (prev <= 1) {
+                                clearInterval(cooldownInterval)
+                                return 0
+                              }
+                              return prev - 1
+                            })
+                          }, 1000)
+                        } catch {
+                          setError('Failed to resend code. Please try again.')
+                        }
+                      }}
+                      className="text-sm text-amber-200/50 transition-colors hover:text-amber-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {resendCooldown > 0
+                        ? `Resend code in ${resendCooldown}s`
+                        : "Didn't receive the code? Resend"}
+                    </button>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={() => {
                     setAuthTwoFAStep(false)
+                    setAuthTwoFAMethod(null)
+                    setAuthPendingEmail(null)
                     setTwoFACode('')
                     setError(null)
                     setSuccess(null)

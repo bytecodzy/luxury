@@ -44,6 +44,8 @@ interface AppState {
   authView: 'login' | 'register' | null
   authTwoFAStep: boolean
   authPendingUserId: string | null
+  authTwoFAMethod: 'email' | 'totp' | null
+  authPendingEmail: string | null
   giftBuilderView: boolean
 
   // Multi-currency & i18n
@@ -72,6 +74,8 @@ interface AppState {
   setAuthView: (view: 'login' | 'register' | null) => void
   setAuthTwoFAStep: (step: boolean) => void
   setAuthPendingUserId: (id: string | null) => void
+  setAuthTwoFAMethod: (method: 'email' | 'totp' | null) => void
+  setAuthPendingEmail: (email: string | null) => void
   toggleGiftBuilder: () => void
   setLocale: (locale: string) => void
   setCurrency: (code: string) => void
@@ -136,6 +140,8 @@ export const useStore = create<AppState>((set, get) => ({
   authView: null,
   authTwoFAStep: false,
   authPendingUserId: null,
+  authTwoFAMethod: null,
+  authPendingEmail: null,
   giftBuilderView: false,
 
   // Multi-currency & i18n
@@ -188,7 +194,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       // ignore storage errors
     }
-    set({ authUser: user, authToken: token, authView: null, authTwoFAStep: false, authPendingUserId: null })
+    set({ authUser: user, authToken: token, authView: null, authTwoFAStep: false, authPendingUserId: null, authTwoFAMethod: null, authPendingEmail: null })
   },
   clearAuth: () => {
     try {
@@ -196,11 +202,13 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       // ignore storage errors
     }
-    set({ authUser: null, authToken: null, authView: null, authTwoFAStep: false, authPendingUserId: null })
+    set({ authUser: null, authToken: null, authView: null, authTwoFAStep: false, authPendingUserId: null, authTwoFAMethod: null, authPendingEmail: null })
   },
   setAuthView: (view) => set({ authView: view }),
   setAuthTwoFAStep: (step) => set({ authTwoFAStep: step }),
   setAuthPendingUserId: (id) => set({ authPendingUserId: id }),
+  setAuthTwoFAMethod: (method) => set({ authTwoFAMethod: method }),
+  setAuthPendingEmail: (email) => set({ authPendingEmail: email }),
   toggleGiftBuilder: () => set((state) => ({ giftBuilderView: !state.giftBuilderView })),
   setAppTheme: (theme) => {
     try {

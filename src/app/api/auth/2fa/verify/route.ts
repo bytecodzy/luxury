@@ -3,6 +3,7 @@ import { getSessionAsync, createSession } from '@/lib/sessions';
 import { db } from '@/lib/db';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { verifyOtp, DEMO_USER_MAP } from '@/lib/demo-otp-store';
 
 const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
 
@@ -11,25 +12,18 @@ const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
  * Implements TOTP algorithm per RFC 6238.
  */
 function verifyTOTP(secret: string, code: string, window: number = 1): boolean {
-  // Decode base32 secret
   const key = base32Decode(secret);
-
-  // Get current time step (30-second intervals)
   const timeStep = Math.floor(Date.now() / 1000 / 30);
 
-  // Check current and adjacent windows
   for (let i = -window; i <= window; i++) {
     const step = timeStep + i;
     const timeBuffer = Buffer.alloc(8);
-    // Write time step as big-endian 64-bit integer
     timeBuffer.writeBigUInt64BE(BigInt(step));
 
-    // HMAC-SHA1
     const hmac = crypto.createHmac('sha1', key);
     hmac.update(timeBuffer);
     const hmacResult = hmac.digest();
 
-    // Dynamic truncation
     const offset = hmacResult[hmacResult.length - 1] & 0x0f;
     const binary =
       ((hmacResult[offset] & 0x7f) << 24) |
@@ -48,9 +42,6 @@ function verifyTOTP(secret: string, code: string, window: number = 1): boolean {
   return false;
 }
 
-/**
- * Decode a base32 string to a Buffer.
- */
 function base32Decode(str: string): Buffer {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   str = str.toUpperCase().replace(/=+$/, '');
@@ -73,7 +64,7 @@ function base32Decode(str: string): Buffer {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { code, enable, userId } = body;
+    const { code, enable, userId, method } = body;
 
     if (!code) {
       return NextResponse.json(
@@ -82,8 +73,139 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // If this is a login 2FA verification (userId provided, no session needed)
+    // If this is a login 2FA verification (userId provided, no session)
     if (userId && !enable) {
+      const isEmailMethod = method === 'email' || userId.startsWith('demo-');
+
+      // ─── Email OTP Verification ───
+      if (isEmailMethod) {
+        let verified = false;
+        let user: Awaited<ReturnType<typeof db.user.findUnique>> = null;
+
+        // For demo users: check in-memory OTP store first
+        if (userId.startsWith('demo-')) {
+          const result = verifyOtp(userId, code);
+          if (result.valid) {
+            verified = true;
+          }
+        } else {
+          // For real DB users: check DB for OTP
+          try {
+            user = await db.user.findUnique({ where: { id: userId } });
+            if (user && user.otpCode && user.otpExpiry) {
+              if (new Date() <= new Date(user.otpExpiry) && user.otpCode === code) {
+                verified = true;
+                // Clear the OTP after successful verification
+                await db.user.update({
+                  where: { id: user.id },
+                  data: { otpCode: null, otpExpiry: null },
+                }).catch(() => {});
+              }
+            }
+          } catch (dbErr) {
+            console.warn('[2FA Verify] DB lookup failed, checking in-memory store:', dbErr);
+            // Fallback to in-memory store
+            const result = verifyOtp(userId, code);
+            if (result.valid) {
+              verified = true;
+            }
+          }
+        }
+
+        if (!verified) {
+          return NextResponse.json(
+            { error: 'Invalid or expired verification code. Please try again.' },
+            { status: 401 }
+          );
+        }
+
+        // If user found in DB, use DB user data for session creation
+        if (user) {
+          if (!user.isActive) {
+            return NextResponse.json(
+              { error: 'Your account has been deactivated' },
+              { status: 403 }
+            );
+          }
+
+          const jwtToken = jwt.sign(
+            { type: 'session', userId: user.id, email: user.email, name: user.name, role: user.role },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+          );
+
+          try {
+            await createSession(jwtToken, {
+              id: user.id, email: user.email, name: user.name, role: user.role,
+              avatar: user.avatar, isActive: user.isActive, approvalStatus: user.approvalStatus,
+              emailVerified: user.emailVerified, phoneVerified: user.phoneVerified,
+              twoFactorEnabled: user.twoFactorEnabled,
+            });
+          } catch (sessionError) {
+            console.warn('[Auth 2FA] DB session creation failed, JWT-only auth:', sessionError);
+          }
+
+          return NextResponse.json({
+            user: {
+              id: user.id, email: user.email, name: user.name, role: user.role,
+              avatar: user.avatar, phone: user.phone, isActive: user.isActive,
+              emailVerified: user.emailVerified, phoneVerified: user.phoneVerified,
+              twoFactorEnabled: user.twoFactorEnabled, approvalStatus: user.approvalStatus,
+              createdAt: user.createdAt,
+            },
+            token: jwtToken,
+            verified: true,
+          });
+        }
+
+        // Demo user fallback - construct user from userId
+        const demoUserData = DEMO_USER_MAP[userId];
+        if (demoUserData) {
+          const jwtToken = jwt.sign(
+            {
+              type: 'session',
+              userId,
+              email: demoUserData.email,
+              name: demoUserData.name,
+              role: demoUserData.role,
+              permissions: demoUserData.permissions,
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+          );
+
+          try {
+            await createSession(jwtToken, {
+              id: userId, email: demoUserData.email, name: demoUserData.name,
+              role: demoUserData.role, avatar: null, isActive: true,
+              approvalStatus: 'approved', emailVerified: true, phoneVerified: false,
+              twoFactorEnabled: true,
+            });
+          } catch {
+            console.log('[Auth 2FA] DB session creation failed, using JWT-only for demo user');
+          }
+
+          return NextResponse.json({
+            user: {
+              id: userId, email: demoUserData.email, name: demoUserData.name,
+              role: demoUserData.role, avatar: null, phone: null, isActive: true,
+              emailVerified: true, phoneVerified: false, twoFactorEnabled: true,
+              approvalStatus: 'approved', createdAt: new Date().toISOString(),
+            },
+            token: jwtToken,
+            permissions: demoUserData.permissions,
+            verified: true,
+            _demo: true,
+          });
+        }
+
+        return NextResponse.json(
+          { error: 'User not found. Please try logging in again.' },
+          { status: 400 }
+        );
+      }
+
+      // ─── TOTP Verification (Authenticator App) ───
       const user = await db.user.findUnique({
         where: { id: userId },
       });
@@ -95,7 +217,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Verify the TOTP code
       if (!verifyTOTP(user.twoFactorSecret, code)) {
         return NextResponse.json(
           { error: 'Invalid verification code' },
@@ -103,7 +224,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Check if user is still active and approved
       if (!user.isActive) {
         return NextResponse.json(
           { error: 'Your account has been deactivated' },
@@ -118,49 +238,29 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Create session with JWT token (works on Vercel serverless without DB lookup)
       const jwtToken = jwt.sign(
-        {
-          type: 'session',
-          userId: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-        },
+        { type: 'session', userId: user.id, email: user.email, name: user.name, role: user.role },
         JWT_SECRET,
         { expiresIn: '7d' }
       );
 
       try {
         await createSession(jwtToken, {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          avatar: user.avatar,
-          isActive: user.isActive,
-          approvalStatus: user.approvalStatus,
-          emailVerified: user.emailVerified,
-          phoneVerified: user.phoneVerified,
+          id: user.id, email: user.email, name: user.name, role: user.role,
+          avatar: user.avatar, isActive: user.isActive, approvalStatus: user.approvalStatus,
+          emailVerified: user.emailVerified, phoneVerified: user.phoneVerified,
           twoFactorEnabled: user.twoFactorEnabled,
         });
       } catch (sessionError) {
-        console.warn('[Auth 2FA] DB session creation failed, JWT-only auth will be used:', sessionError);
+        console.warn('[Auth 2FA] DB session creation failed, JWT-only auth:', sessionError);
       }
 
       return NextResponse.json({
         user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          avatar: user.avatar,
-          phone: user.phone,
-          isActive: user.isActive,
-          emailVerified: user.emailVerified,
-          phoneVerified: user.phoneVerified,
-          twoFactorEnabled: user.twoFactorEnabled,
-          approvalStatus: user.approvalStatus,
+          id: user.id, email: user.email, name: user.name, role: user.role,
+          avatar: user.avatar, phone: user.phone, isActive: user.isActive,
+          emailVerified: user.emailVerified, phoneVerified: user.phoneVerified,
+          twoFactorEnabled: user.twoFactorEnabled, approvalStatus: user.approvalStatus,
           createdAt: user.createdAt,
         },
         token: jwtToken,
@@ -179,7 +279,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get user from DB to get the secret
     const dbUser = await db.user.findUnique({
       where: { id: user.id },
     });
@@ -191,7 +290,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the TOTP code
     if (!verifyTOTP(dbUser.twoFactorSecret, code)) {
       return NextResponse.json(
         { error: 'Invalid verification code' },
@@ -199,7 +297,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // If enable flag, enable 2FA on the account
     if (enable) {
       await db.user.update({
         where: { id: user.id },
