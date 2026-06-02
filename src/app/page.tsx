@@ -18,6 +18,7 @@ import { UserDashboard } from '@/components/user-dashboard';
 import { AgentDashboard } from '@/components/agent-dashboard';
 import { TeamDashboard } from '@/components/team-dashboard';
 import { CorporateDashboard } from '@/components/corporate-dashboard';
+import { SecurityPolicy } from '@/components/security-policy';
 import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
 import { AppDownloadSection } from '@/components/app-download-section';
@@ -61,6 +62,8 @@ function AppContent() {
         return <TeamDashboard />;
       case 'corporate-dashboard':
         return <CorporateDashboard />;
+      case 'security-policy':
+        return <SecurityPolicy />;
       default:
         return (
           <>
@@ -75,7 +78,7 @@ function AppContent() {
 
   return (
     <div
-      className={`min-h-screen flex flex-col ${appTheme === 'light' ? 'bg-amber-50/30' : 'bg-stone-950'}`}
+      className={`min-h-screen flex flex-col ${appTheme === 'light' ? 'bg-white' : 'bg-stone-950'}`}
       data-theme={appTheme}
     >
       <Header />

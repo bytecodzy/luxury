@@ -98,20 +98,32 @@
     "gstNumber": "GST Number"
   },
   "footer": {
+    "description": "3 Boxes Luxury Curations — Luxury thinking applied to modern growth. Curated gifting, staffing, consulting, and technology solutions since 2023.",
     "shop": "Shop",
     "company": "Company",
     "support": "Support",
+    "policies": "Policies",
     "aboutUs": "About Us",
+    "ourDivisions": "Our Divisions",
     "careers": "Careers",
+    "press": "Press",
+    "sustainability": "Sustainability",
     "contactUs": "Contact Us",
     "shippingReturns": "Shipping & Returns",
     "faq": "FAQ",
+    "sizeGuide": "Size Guide",
+    "trackOrder": "Track Order",
     "privacyPolicy": "Privacy Policy",
     "termsOfService": "Terms of Service",
+    "securityPolicy": "Security Policy",
+    "cookiePolicy": "Cookie Policy",
+    "refundPolicy": "Refund Policy",
     "newsletter": "Newsletter",
     "newsletterDescription": "Subscribe to receive updates on our latest collections and exclusive offers",
     "subscribe": "Subscribe",
-    "allRightsReserved": "All rights reserved"
+    "allRightsReserved": "All rights reserved",
+    "rights": "All rights reserved.",
+    "crafted": "Designed with premium experience in mind."
   },
   "currency": {
     "label": "Currency",

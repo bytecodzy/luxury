@@ -13,19 +13,15 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp'
 import { Separator } from '@/components/ui/separator'
-import { Mail, Lock, User, Shield, Loader2, Eye, EyeOff, Building2, ChevronRight, ArrowLeft } from 'lucide-react'
+import { Mail, Lock, User, Shield, Loader2, Eye, EyeOff, Building2, ChevronRight, ArrowLeft, Phone, Globe, Hash, Briefcase } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { showToast } from '@/hooks/use-toast-notification'
+
+type RoleType = 'corporate' | 'user' | 'team'
 
 export function AuthDialog() {
   const authView = useStore((s) => s.authView)
@@ -41,12 +37,13 @@ export function AuthDialog() {
   const [loginPassword, setLoginPassword] = useState('')
   const [loginShowPassword, setLoginShowPassword] = useState(false)
 
-  // Register form
+  // Register form - common
   const [regEmail, setRegEmail] = useState('')
   const [regName, setRegName] = useState('')
   const [regPassword, setRegPassword] = useState('')
+  const [regConfirmPassword, setRegConfirmPassword] = useState('')
   const [regShowPassword, setRegShowPassword] = useState(false)
-  const [regRole, setRegRole] = useState('user')
+  const [regEnable2FA, setRegEnable2FA] = useState(false)
 
   // Corporate registration fields
   const [regCompanyName, setRegCompanyName] = useState('')
@@ -54,6 +51,11 @@ export function AuthDialog() {
   const [regContactPhone, setRegContactPhone] = useState('')
   const [regIndustry, setRegIndustry] = useState('')
   const [regWebsite, setRegWebsite] = useState('')
+  const [regGstNumber, setRegGstNumber] = useState('')
+
+  // Team/Agent registration fields
+  const [regEmployeeId, setRegEmployeeId] = useState('')
+  const [regDepartment, setRegDepartment] = useState('')
 
   // 2FA
   const [twoFACode, setTwoFACode] = useState('')
@@ -63,9 +65,26 @@ export function AuthDialog() {
   const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login')
-  const [selectedLoginRole, setSelectedLoginRole] = useState<'corporate' | 'user' | 'team' | null>(null)
+  const [selectedLoginRole, setSelectedLoginRole] = useState<RoleType | null>(null)
 
   const isOpen = authView === 'login' || authView === 'register'
+
+  // Get placeholder data based on role
+  const getLoginPlaceholder = () => {
+    switch (selectedLoginRole) {
+      case 'corporate': return { email: 'corporate@3boxes.com', password: 'Enter your password' }
+      case 'team': return { email: 'team@3boxes.com', password: 'Enter your password' }
+      default: return { email: 'customer@3boxes.com', password: 'Enter your password' }
+    }
+  }
+
+  const getRegPlaceholder = () => {
+    switch (selectedLoginRole) {
+      case 'corporate': return { email: 'rajesh@techcorp.in', name: 'Rajesh Kumar' }
+      case 'team': return { email: 'agent@3boxes.in', name: 'Amit Singh' }
+      default: return { email: 'priya.sharma@email.com', name: 'Priya Sharma' }
+    }
+  }
 
   const resetForm = useCallback(() => {
     setLoginEmail('')
@@ -74,13 +93,17 @@ export function AuthDialog() {
     setRegEmail('')
     setRegName('')
     setRegPassword('')
+    setRegConfirmPassword('')
     setRegShowPassword(false)
-    setRegRole('user')
+    setRegEnable2FA(false)
     setRegCompanyName('')
     setRegContactName('')
     setRegContactPhone('')
     setRegIndustry('')
     setRegWebsite('')
+    setRegGstNumber('')
+    setRegEmployeeId('')
+    setRegDepartment('')
     setTwoFACode('')
     setError(null)
     setSuccess(null)
@@ -142,7 +165,7 @@ export function AuthDialog() {
           return
         }
 
-        // Check if 2FA is required
+        // Check if 2FA is required by the server
         if (data.requiresTwoFactor) {
           setAuthPendingUserId(data.userId)
           setAuthTwoFAStep(true)
@@ -154,6 +177,16 @@ export function AuthDialog() {
         if (data.emailVerified === false) {
           setError('Please verify your email address before logging in.')
           return
+        }
+
+        // Mandatory 2FA for corporate and team accounts
+        if ((selectedLoginRole === 'corporate' || selectedLoginRole === 'team') && !data.requiresTwoFactor) {
+          if (data.user && data.user.id) {
+            setAuthPendingUserId(data.user.id)
+            setAuthTwoFAStep(true)
+            setSuccess('Two-factor verification is required for your account type. A verification code has been sent to your registered email/phone.')
+            return
+          }
         }
 
         // Successful login
@@ -179,7 +212,7 @@ export function AuthDialog() {
         setLoading(false)
       }
     },
-    [loginEmail, loginPassword, setAuth, setAuthPendingUserId, setAuthTwoFAStep]
+    [loginEmail, loginPassword, selectedLoginRole, setAuth, setAuthPendingUserId, setAuthTwoFAStep]
   )
 
   const handleRegister = useCallback(
@@ -189,7 +222,7 @@ export function AuthDialog() {
       setSuccess(null)
 
       if (!regEmail.trim() || !regName.trim() || !regPassword.trim()) {
-        setError('Please fill in all fields.')
+        setError('Please fill in all required fields.')
         return
       }
 
@@ -198,10 +231,23 @@ export function AuthDialog() {
         return
       }
 
+      if (regPassword !== regConfirmPassword) {
+        setError('Passwords do not match.')
+        return
+      }
+
       // Corporate registration validation
-      if (regRole === 'corporate') {
+      if (selectedLoginRole === 'corporate') {
         if (!regCompanyName.trim() || !regContactName.trim()) {
           setError('Company name and contact name are required for corporate accounts.')
+          return
+        }
+      }
+
+      // Team/Agent registration validation
+      if (selectedLoginRole === 'team') {
+        if (!regEmployeeId.trim()) {
+          setError('Employee/Agent ID is required for team accounts.')
           return
         }
       }
@@ -210,7 +256,7 @@ export function AuthDialog() {
       try {
         let res: Response
 
-        if (regRole === 'corporate') {
+        if (selectedLoginRole === 'corporate') {
           // Use corporate registration endpoint
           res = await fetch('/api/corporate/register', {
             method: 'POST',
@@ -224,9 +270,11 @@ export function AuthDialog() {
               contactPhone: regContactPhone.trim() || undefined,
               industry: regIndustry.trim() || undefined,
               website: regWebsite.trim() || undefined,
+              gstNumber: regGstNumber.trim() || undefined,
             }),
           })
-        } else {
+        } else if (selectedLoginRole === 'team') {
+          // Use team/agent registration endpoint
           res = await fetch('/api/auth/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -234,7 +282,23 @@ export function AuthDialog() {
               email: regEmail.trim(),
               name: regName.trim(),
               password: regPassword,
-              role: regRole,
+              role: 'team',
+              employeeId: regEmployeeId.trim(),
+              department: regDepartment.trim() || undefined,
+              enable2FA: true, // 2FA is always enabled for team accounts
+            }),
+          })
+        } else {
+          // Customer registration
+          res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: regEmail.trim(),
+              name: regName.trim(),
+              password: regPassword,
+              role: 'user',
+              enable2FA: regEnable2FA,
             }),
           })
         }
@@ -248,12 +312,16 @@ export function AuthDialog() {
 
         // Check if registration requires approval
         if (data.approvalStatus === 'pending') {
-          setSuccess(
-            regRole === 'corporate'
-              ? 'Your corporate registration is pending admin approval. You will be notified once your account is approved.'
-              : 'Your registration is pending approval. You will be notified once your account is approved.'
-          )
-          // Don't log in - just show the message
+          if (selectedLoginRole === 'corporate' || selectedLoginRole === 'team') {
+            showToast('info', 'Registration submitted. Awaiting admin approval.')
+            setSuccess(
+              selectedLoginRole === 'corporate'
+                ? 'Your corporate registration is pending admin approval. You will be notified once your account is approved.'
+                : 'Your team registration is pending admin approval. You will be notified once approved.'
+            )
+          } else {
+            setSuccess('Your registration is pending approval. You will be notified once your account is approved.')
+          }
           return
         }
 
@@ -266,9 +334,10 @@ export function AuthDialog() {
             role: data.user.role || 'user',
           }
           setAuth(user, data.token)
-          showToast('success', 'Account created successfully!')
+          showToast('success', 'Account created successfully! Welcome to 3 Boxes Luxury.')
         } else if (data.user && !data.token) {
           // Account created but no token (needs verification/approval)
+          showToast('info', 'Registration submitted. Awaiting admin approval.')
           setSuccess(
             'Account created successfully! Please check your email to verify your account.'
           )
@@ -279,7 +348,7 @@ export function AuthDialog() {
         setLoading(false)
       }
     },
-    [regEmail, regName, regPassword, regRole, regCompanyName, regContactName, regContactPhone, regIndustry, regWebsite, setAuth]
+    [regEmail, regName, regPassword, regConfirmPassword, selectedLoginRole, regCompanyName, regContactName, regContactPhone, regIndustry, regWebsite, regGstNumber, regEmployeeId, regDepartment, regEnable2FA, setAuth]
   )
 
   const handle2FAVerify = useCallback(
@@ -324,7 +393,7 @@ export function AuthDialog() {
             role: data.user.role || 'USER',
           }
           setAuth(user, data.token)
-          showToast('success', 'Verification successful!')
+          showToast('success', 'Verification successful! Welcome back.')
 
           // Show role-specific message for admin users
           if (user.role === 'admin' || user.role === 'team') {
@@ -379,6 +448,7 @@ export function AuthDialog() {
             role: data.user.role || 'USER',
           }
           setAuth(user, data.token)
+          showToast('success', `Welcome, ${user.name}! Successfully signed in.`)
         }
       } catch {
         setError('Social login failed. Please try again later.')
@@ -389,10 +459,29 @@ export function AuthDialog() {
     [setAuth]
   )
 
+  // Determine if we need a wider dialog (for corporate/team registration)
+  const needsWideDialog = selectedLoginRole !== null && activeTab === 'register'
+
+  // Role selection cards config for registration descriptions
+  const roleCardConfig: Record<RoleType, { login: { title: string; desc: string }; register: { title: string; desc: string } }> = {
+    user: {
+      login: { title: 'Customer / User', desc: 'Personal shopping account' },
+      register: { title: 'Customer Account', desc: 'Create your personal shopping account' },
+    },
+    corporate: {
+      login: { title: 'Corporate Account', desc: 'Business gifting & bulk orders' },
+      register: { title: 'Corporate Account', desc: 'Register your business for gifting & bulk orders' },
+    },
+    team: {
+      login: { title: '3 Boxes Team / Agent', desc: 'Internal team portal & support' },
+      register: { title: 'Team / Agent Account', desc: 'Join the 3 Boxes team (requires approval)' },
+    },
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="border-amber-900/30 bg-stone-950 text-amber-50 sm:max-w-md [&>button]:text-amber-200/60 [&>button]:hover:text-amber-200"
+        className={`border-amber-900/30 bg-stone-950 text-amber-50 ${needsWideDialog ? 'sm:max-w-lg' : 'sm:max-w-md'} [&>button]:text-amber-200/60 [&>button]:hover:text-amber-200`}
         onOpenAutoFocus={handleDialogMount}
       >
         {/* 2FA Verification Step */}
@@ -410,7 +499,9 @@ export function AuthDialog() {
                   Two-Factor Authentication
                 </DialogTitle>
                 <DialogDescription className="text-amber-200/50">
-                  Enter the 6-digit code sent to your device
+                  {(selectedLoginRole === 'corporate' || selectedLoginRole === 'team')
+                    ? 'Two-factor verification is required for your account type'
+                    : 'Enter the 6-digit code sent to your device'}
                 </DialogDescription>
               </DialogHeader>
 
@@ -420,7 +511,9 @@ export function AuthDialog() {
                     <Shield className="h-8 w-8 text-amber-500" />
                   </div>
                   <p className="text-center text-sm text-amber-200/60">
-                    Please enter the verification code to continue
+                    {(selectedLoginRole === 'corporate' || selectedLoginRole === 'team')
+                      ? 'A verification code has been sent to your registered email/phone'
+                      : 'Please enter the verification code to continue'}
                   </p>
 
                   <InputOTP
@@ -523,7 +616,11 @@ export function AuthDialog() {
                   3 BOXES LUXURY
                 </DialogTitle>
                 <DialogDescription className="text-amber-200/50 text-center">
-                  {selectedLoginRole ? 'Sign in to your exclusive account' : 'Choose Your Account Type'}
+                  {selectedLoginRole
+                    ? activeTab === 'register'
+                      ? 'Create your exclusive account'
+                      : 'Sign in to your exclusive account'
+                    : 'Choose Your Account Type'}
                 </DialogDescription>
               </DialogHeader>
 
@@ -532,14 +629,13 @@ export function AuthDialog() {
                 <div className="space-y-4">
                   <div className="text-center mb-4">
                     <h3 className="text-lg font-semibold text-amber-100">Choose Your Account Type</h3>
-                    <p className="text-xs text-amber-200/40">Select how you'd like to sign in</p>
+                    <p className="text-xs text-amber-200/40">Select how you'd like to continue</p>
                   </div>
                   <div className="space-y-3">
                     {/* Customer/User */}
                     <button
                       onClick={() => {
                         setSelectedLoginRole('user')
-                        setRegRole('user')
                       }}
                       className="w-full flex items-center gap-4 rounded-xl border border-amber-600/30 bg-stone-900/60 p-4 transition-all hover:border-amber-500/50 hover:bg-stone-900/80 hover:shadow-lg hover:shadow-amber-900/20 text-left"
                     >
@@ -557,7 +653,6 @@ export function AuthDialog() {
                     <button
                       onClick={() => {
                         setSelectedLoginRole('corporate')
-                        setRegRole('corporate')
                       }}
                       className="w-full flex items-center gap-4 rounded-xl border border-amber-500/40 bg-stone-900/60 p-4 transition-all hover:border-amber-400/60 hover:bg-stone-900/80 hover:shadow-lg hover:shadow-amber-900/30 text-left"
                     >
@@ -575,7 +670,6 @@ export function AuthDialog() {
                     <button
                       onClick={() => {
                         setSelectedLoginRole('team')
-                        setRegRole('team')
                       }}
                       className="w-full flex items-center gap-4 rounded-xl border border-purple-500/30 bg-stone-900/60 p-4 transition-all hover:border-purple-400/50 hover:bg-stone-900/80 hover:shadow-lg hover:shadow-purple-900/20 text-left"
                     >
@@ -627,9 +721,37 @@ export function AuthDialog() {
                   </TabsTrigger>
                 </TabsList>
 
-                {/* Login Form */}
+                {/* ============ Login Form ============ */}
                 <TabsContent value="login">
                   <form onSubmit={handleLogin} className="space-y-4">
+                    {/* Role badge */}
+                    <div className="flex items-center gap-2 mb-2">
+                      {selectedLoginRole === 'user' && (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-600/20 px-2.5 py-1 text-xs font-medium text-amber-300 border border-amber-600/30">
+                          <User className="h-3 w-3" />
+                          {roleCardConfig.user.login.title}
+                        </span>
+                      )}
+                      {selectedLoginRole === 'corporate' && (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-300 border border-amber-500/30">
+                          <Building2 className="h-3 w-3" />
+                          {roleCardConfig.corporate.login.title}
+                        </span>
+                      )}
+                      {selectedLoginRole === 'team' && (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-purple-600/20 px-2.5 py-1 text-xs font-medium text-purple-300 border border-purple-500/30">
+                          <Shield className="h-3 w-3" />
+                          {roleCardConfig.team.login.title}
+                        </span>
+                      )}
+                      {(selectedLoginRole === 'corporate' || selectedLoginRole === 'team') && (
+                        <span className="inline-flex items-center gap-1 text-xs text-amber-500/60">
+                          <Lock className="h-3 w-3" />
+                          2FA Required
+                        </span>
+                      )}
+                    </div>
+
                     <div className="space-y-2">
                       <Label htmlFor="login-email" className="text-amber-200/70 text-xs uppercase tracking-wider">
                         Email Address
@@ -639,7 +761,7 @@ export function AuthDialog() {
                         <Input
                           id="login-email"
                           type="email"
-                          placeholder="demo@3boxes.com"
+                          placeholder={getLoginPlaceholder().email}
                           value={loginEmail}
                           onChange={(e) => setLoginEmail(e.target.value)}
                           className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
@@ -658,7 +780,7 @@ export function AuthDialog() {
                         <Input
                           id="login-password"
                           type={loginShowPassword ? 'text' : 'password'}
-                          placeholder="Enter your password"
+                          placeholder={getLoginPlaceholder().password}
                           value={loginPassword}
                           onChange={(e) => setLoginPassword(e.target.value)}
                           className="border-amber-900/40 bg-stone-900/50 pl-10 pr-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
@@ -725,63 +847,96 @@ export function AuthDialog() {
                     </Button>
                   </form>
 
-                  {/* Social Login Divider */}
-                  <div className="relative my-6">
-                    <Separator className="bg-amber-900/30" />
-                    <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-stone-950 px-3 text-xs text-amber-200/40 uppercase tracking-wider">
-                      or continue with
-                    </span>
-                  </div>
+                  {/* Social Login Divider - only for customer */}
+                  {selectedLoginRole === 'user' && (
+                    <>
+                      <div className="relative my-6">
+                        <Separator className="bg-amber-900/30" />
+                        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-stone-950 px-3 text-xs text-amber-200/40 uppercase tracking-wider">
+                          or continue with
+                        </span>
+                      </div>
 
-                  {/* Social Login Buttons */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() => handleSocialLogin('Google')}
-                      className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
-                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                      </svg>
-                      <span className="sr-only sm:not-sr-only sm:text-xs">Google</span>
-                    </Button>
+                      {/* Social Login Buttons */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading}
+                          onClick={() => handleSocialLogin('Google')}
+                          className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                          </svg>
+                          <span className="sr-only sm:not-sr-only sm:text-xs">Google</span>
+                        </Button>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() => handleSocialLogin('Facebook')}
-                      className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#1877F2">
-                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-                      </svg>
-                      <span className="sr-only sm:not-sr-only sm:text-xs">Facebook</span>
-                    </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading}
+                          onClick={() => handleSocialLogin('Facebook')}
+                          className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#1877F2">
+                            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                          </svg>
+                          <span className="sr-only sm:not-sr-only sm:text-xs">Facebook</span>
+                        </Button>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() => handleSocialLogin('LinkedIn')}
-                      className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#0A66C2">
-                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-                      </svg>
-                      <span className="sr-only sm:not-sr-only sm:text-xs">LinkedIn</span>
-                    </Button>
-                  </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading}
+                          onClick={() => handleSocialLogin('LinkedIn')}
+                          className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#0A66C2">
+                            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                          </svg>
+                          <span className="sr-only sm:not-sr-only sm:text-xs">LinkedIn</span>
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </TabsContent>
 
-                {/* Register Form */}
+                {/* ============ Register Form ============ */}
                 <TabsContent value="register">
                   <form onSubmit={handleRegister} className="space-y-4">
+                    {/* Role badge */}
+                    <div className="flex items-center gap-2 mb-2">
+                      {selectedLoginRole === 'user' && (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-600/20 px-2.5 py-1 text-xs font-medium text-amber-300 border border-amber-600/30">
+                          <User className="h-3 w-3" />
+                          {roleCardConfig.user.register.title}
+                        </span>
+                      )}
+                      {selectedLoginRole === 'corporate' && (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-300 border border-amber-500/30">
+                          <Building2 className="h-3 w-3" />
+                          {roleCardConfig.corporate.register.title}
+                        </span>
+                      )}
+                      {selectedLoginRole === 'team' && (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-purple-600/20 px-2.5 py-1 text-xs font-medium text-purple-300 border border-purple-500/30">
+                          <Shield className="h-3 w-3" />
+                          {roleCardConfig.team.register.title}
+                        </span>
+                      )}
+                      {(selectedLoginRole === 'corporate' || selectedLoginRole === 'team') && (
+                        <span className="inline-flex items-center gap-1 text-xs text-amber-500/60">
+                          <Lock className="h-3 w-3" />
+                          2FA Enabled
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Common fields: Email, Name, Password, Confirm Password */}
                     <div className="space-y-2">
                       <Label htmlFor="reg-email" className="text-amber-200/70 text-xs uppercase tracking-wider">
                         Email Address
@@ -791,7 +946,7 @@ export function AuthDialog() {
                         <Input
                           id="reg-email"
                           type="email"
-                          placeholder="you@example.com"
+                          placeholder={getRegPlaceholder().email}
                           value={regEmail}
                           onChange={(e) => setRegEmail(e.target.value)}
                           className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
@@ -810,7 +965,7 @@ export function AuthDialog() {
                         <Input
                           id="reg-name"
                           type="text"
-                          placeholder="e.g., Priya Sharma"
+                          placeholder={getRegPlaceholder().name}
                           value={regName}
                           onChange={(e) => setRegName(e.target.value)}
                           className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
@@ -852,72 +1007,165 @@ export function AuthDialog() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
-                        Account Type
+                      <Label htmlFor="reg-confirm-password" className="text-amber-200/70 text-xs uppercase tracking-wider">
+                        Confirm Password
                       </Label>
-                      <Select value={regRole} onValueChange={setRegRole}>
-                        <SelectTrigger className="w-full border-amber-900/40 bg-stone-900/50 text-amber-50 focus:ring-amber-600/30">
-                          <SelectValue placeholder="Select account type" />
-                        </SelectTrigger>
-                        <SelectContent className="border-amber-900/40 bg-stone-950 text-amber-50">
-                          <SelectItem value="user" className="text-amber-200/80 focus:bg-amber-900/30 focus:text-amber-100">
-                            <div className="flex items-center gap-2">
-                              <User className="h-3.5 w-3.5" />
-                              User
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="agent" className="text-amber-200/80 focus:bg-amber-900/30 focus:text-amber-100">
-                            <div className="flex items-center gap-2">
-                              <Shield className="h-3.5 w-3.5" />
-                              Agent
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="team" className="text-amber-200/80 focus:bg-amber-900/30 focus:text-amber-100">
-                            <div className="flex items-center gap-2">
-                              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                              </svg>
-                              3Boxes Team
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="corporate" className="text-amber-200/80 focus:bg-amber-900/30 focus:text-amber-100">
-                            <div className="flex items-center gap-2">
-                              <Building2 className="h-3.5 w-3.5" />
-                              Corporate
-                            </div>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {regRole === 'team' && (
-                        <p className="text-xs text-amber-500/60">
-                          Team accounts require approval before access is granted.
-                        </p>
-                      )}
-                      {regRole === 'agent' && (
-                        <p className="text-xs text-amber-500/60">
-                          Agent accounts may require verification.
-                        </p>
-                      )}
-                      {regRole === 'corporate' && (
-                        <p className="text-xs text-amber-500/60">
-                          Corporate accounts require admin approval. You will be notified once approved.
-                        </p>
-                      )}
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
+                        <Input
+                          id="reg-confirm-password"
+                          type={regShowPassword ? 'text' : 'password'}
+                          placeholder="Re-enter your password"
+                          value={regConfirmPassword}
+                          onChange={(e) => setRegConfirmPassword(e.target.value)}
+                          className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                          autoComplete="new-password"
+                          required
+                        />
+                      </div>
+                    </div>
 
-                      {/* Corporate Registration Fields */}
-                      {regRole === 'corporate' && (
-                        <>
-                          <div className="space-y-2 mt-2">
+                    {/* ===== Corporate-specific fields ===== */}
+                    {selectedLoginRole === 'corporate' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="space-y-4 border-t border-amber-900/30 pt-4"
+                      >
+                        <p className="text-xs text-amber-500/60 font-medium uppercase tracking-wider">
+                          Corporate Details
+                        </p>
+
+                        <div className="space-y-2">
+                          <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                            Company Name *
+                          </Label>
+                          <div className="relative">
+                            <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
+                            <Input
+                              type="text"
+                              placeholder="TechCorp India Pvt. Ltd."
+                              value={regCompanyName}
+                              onChange={(e) => setRegCompanyName(e.target.value)}
+                              className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                            Contact Person Name *
+                          </Label>
+                          <div className="relative">
+                            <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
+                            <Input
+                              type="text"
+                              placeholder="Rajesh Kumar"
+                              value={regContactName}
+                              onChange={(e) => setRegContactName(e.target.value)}
+                              className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-2">
                             <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
-                              Company Name *
+                              Phone
                             </Label>
                             <div className="relative">
-                              <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
+                              <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
+                              <Input
+                                type="tel"
+                                placeholder="+91-9876543210"
+                                value={regContactPhone}
+                                onChange={(e) => setRegContactPhone(e.target.value)}
+                                className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                              Industry
+                            </Label>
+                            <Input
+                              type="text"
+                              placeholder="Technology"
+                              value={regIndustry}
+                              onChange={(e) => setRegIndustry(e.target.value)}
+                              className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                              Website
+                            </Label>
+                            <div className="relative">
+                              <Globe className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
+                              <Input
+                                type="url"
+                                placeholder="https://techcorp.in"
+                                value={regWebsite}
+                                onChange={(e) => setRegWebsite(e.target.value)}
+                                className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                              GST Number
+                            </Label>
+                            <div className="relative">
+                              <Hash className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
                               <Input
                                 type="text"
-                                placeholder="e.g., TechCorp India Pvt. Ltd."
-                                value={regCompanyName}
-                                onChange={(e) => setRegCompanyName(e.target.value)}
+                                placeholder="29AABCT1234F1ZH"
+                                value={regGstNumber}
+                                onChange={(e) => setRegGstNumber(e.target.value)}
+                                className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-md border border-amber-700/30 bg-amber-950/20 px-3 py-2.5 text-xs text-amber-300/70">
+                          Corporate accounts require admin approval. You will be notified once approved. Two-factor authentication is mandatory.
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* ===== Team/Agent-specific fields ===== */}
+                    {selectedLoginRole === 'team' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="space-y-4 border-t border-purple-900/30 pt-4"
+                      >
+                        <p className="text-xs text-purple-400/60 font-medium uppercase tracking-wider">
+                          Team / Agent Details
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
+                              Employee/Agent ID *
+                            </Label>
+                            <div className="relative">
+                              <Hash className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-purple-600/50" />
+                              <Input
+                                type="text"
+                                placeholder="3B-2024-0142"
+                                value={regEmployeeId}
+                                onChange={(e) => setRegEmployeeId(e.target.value)}
                                 className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
                                 required
                               />
@@ -925,58 +1173,52 @@ export function AuthDialog() {
                           </div>
                           <div className="space-y-2">
                             <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
-                              Contact Person Name *
+                              Department
                             </Label>
-                            <Input
-                              type="text"
-                              placeholder="e.g., Rajesh Kumar"
-                              value={regContactName}
-                              onChange={(e) => setRegContactName(e.target.value)}
-                              className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
-                              required
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-2">
-                              <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
-                                Phone
-                              </Label>
-                              <Input
-                                type="tel"
-                                placeholder="+91-9876543210"
-                                value={regContactPhone}
-                                onChange={(e) => setRegContactPhone(e.target.value)}
-                                className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
-                                Industry
-                              </Label>
+                            <div className="relative">
+                              <Briefcase className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-purple-600/50" />
                               <Input
                                 type="text"
-                                placeholder="e.g. Technology"
-                                value={regIndustry}
-                                onChange={(e) => setRegIndustry(e.target.value)}
-                                className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
+                                placeholder="Customer Success"
+                                value={regDepartment}
+                                onChange={(e) => setRegDepartment(e.target.value)}
+                                className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
                               />
                             </div>
                           </div>
-                          <div className="space-y-2">
-                            <Label className="text-amber-200/70 text-xs uppercase tracking-wider">
-                              Website
-                            </Label>
-                            <Input
-                              type="url"
-                              placeholder="https://yourcompany.com"
-                              value={regWebsite}
-                              onChange={(e) => setRegWebsite(e.target.value)}
-                              className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
+                        </div>
+
+                        <div className="rounded-md border border-purple-700/30 bg-purple-950/20 px-3 py-2.5 text-xs text-purple-300/70">
+                          Team/Agent accounts require admin approval before access is granted. Two-factor authentication is mandatory for all team accounts.
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* ===== Customer-specific: 2FA option ===== */}
+                    {selectedLoginRole === 'user' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="flex items-start gap-3 rounded-md border border-amber-900/20 bg-stone-900/30 p-3"
+                      >
+                        <Checkbox
+                          id="reg-2fa"
+                          checked={regEnable2FA}
+                          onCheckedChange={(checked) => setRegEnable2FA(checked === true)}
+                          className="mt-0.5 border-amber-700/50 data-[state=checked]:bg-amber-600 data-[state=checked]:border-amber-600"
+                        />
+                        <div>
+                          <Label htmlFor="reg-2fa" className="text-amber-200/80 text-xs font-medium cursor-pointer">
+                            Enable two-factor authentication
+                          </Label>
+                          <p className="text-xs text-amber-200/40 mt-0.5">
+                            Add an extra layer of security to your account with 2FA verification.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
 
                     {error && (
                       <motion.div
@@ -1009,7 +1251,9 @@ export function AuthDialog() {
                           Creating Account...
                         </>
                       ) : (
-                        'Create Account'
+                        selectedLoginRole === 'corporate' || selectedLoginRole === 'team'
+                          ? 'Submit for Approval'
+                          : 'Create Account'
                       )}
                     </Button>
 
@@ -1025,58 +1269,61 @@ export function AuthDialog() {
                     </p>
                   </form>
 
-                  {/* Social Login Divider */}
-                  <div className="relative my-6">
-                    <Separator className="bg-amber-900/30" />
-                    <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-stone-950 px-3 text-xs text-amber-200/40 uppercase tracking-wider">
-                      or sign up with
-                    </span>
-                  </div>
+                  {/* Social Registration - only for customer */}
+                  {selectedLoginRole === 'user' && (
+                    <>
+                      <div className="relative my-6">
+                        <Separator className="bg-amber-900/30" />
+                        <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-stone-950 px-3 text-xs text-amber-200/40 uppercase tracking-wider">
+                          or sign up with
+                        </span>
+                      </div>
 
-                  {/* Social Login Buttons */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() => handleSocialLogin('Google')}
-                      className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
-                        <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
-                        <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                        <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                        <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                      </svg>
-                      <span className="sr-only sm:not-sr-only sm:text-xs">Google</span>
-                    </Button>
+                      <div className="grid grid-cols-3 gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading}
+                          onClick={() => handleSocialLogin('Google')}
+                          className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                          </svg>
+                          <span className="sr-only sm:not-sr-only sm:text-xs">Google</span>
+                        </Button>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() => handleSocialLogin('Facebook')}
-                      className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#1877F2">
-                        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-                      </svg>
-                      <span className="sr-only sm:not-sr-only sm:text-xs">Facebook</span>
-                    </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading}
+                          onClick={() => handleSocialLogin('Facebook')}
+                          className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#1877F2">
+                            <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                          </svg>
+                          <span className="sr-only sm:not-sr-only sm:text-xs">Facebook</span>
+                        </Button>
 
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={loading}
-                      onClick={() => handleSocialLogin('LinkedIn')}
-                      className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
-                    >
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#0A66C2">
-                        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
-                      </svg>
-                      <span className="sr-only sm:not-sr-only sm:text-xs">LinkedIn</span>
-                    </Button>
-                  </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={loading}
+                          onClick={() => handleSocialLogin('LinkedIn')}
+                          className="border-amber-900/40 bg-stone-900/30 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-200 hover:border-amber-700/50 transition-all"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="#0A66C2">
+                            <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                          </svg>
+                          <span className="sr-only sm:not-sr-only sm:text-xs">LinkedIn</span>
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </TabsContent>
               </Tabs>
               </>

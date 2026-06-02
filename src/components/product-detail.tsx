@@ -23,7 +23,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send, AlertTriangle, Clock, Share2 } from 'lucide-react';
+import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send, AlertTriangle, Clock, Share2, ShieldCheck, Video, X } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useAffiliateClick } from '@/hooks/useAffiliateClick';
 import { AIInfluencerSection } from '@/components/ai-influencer-section';
 
@@ -442,6 +443,15 @@ function TryOnDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const eduScrollRef = useRef<HTMLDivElement>(null);
 
+  // Disclaimer & camera & moderation state
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [showDisclaimer, setShowDisclaimer] = useState(false);
+  const [disclaimerChecked, setDisclaimerChecked] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [isModerating, setIsModerating] = useState(false);
+  const cameraVideoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+
   // Elapsed time tracker during generation
   useEffect(() => {
     if (step !== 'generating') return;
@@ -498,15 +508,141 @@ function TryOnDialog({
       setError(null);
       try {
         const compressed = await compressImage(file, 1536, 0.92);
+        // Moderate the image
+        setIsModerating(true);
+        try {
+          const modRes = await fetch('/api/moderate-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageBase64: compressed }),
+          });
+          const modData = await modRes.json();
+          if (!modData.appropriate) {
+            setError(modData.reason || 'Image does not meet our guidelines. Please upload a clean, clear selfie.');
+            setSelfiePreview(null);
+            setSelfieData(null);
+            setStep('upload');
+            setIsModerating(false);
+            return;
+          }
+        } catch {
+          // Allow on moderation failure
+        }
+        setIsModerating(false);
         setSelfiePreview(compressed);
         setSelfieData(compressed);
         setStep('preview');
       } catch {
+        setIsModerating(false);
         setError('Failed to process image. Please try another photo.');
       }
     },
     []
   );
+
+  // ── Camera capture functions ──────────────────────────────────────
+  const openCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } }
+      });
+      cameraStreamRef.current = stream;
+      setCameraOpen(true);
+      // Wait for next frame to set srcObject
+      setTimeout(() => {
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+        }
+      }, 100);
+    } catch {
+      setError('Camera access denied. Please allow camera access or upload a photo instead.');
+    }
+  }, []);
+
+  const capturePhoto = useCallback(async () => {
+    if (!cameraVideoRef.current) return;
+    const video = cameraVideoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+
+    // Stop camera
+    cameraStreamRef.current?.getTracks().forEach(t => t.stop());
+    cameraStreamRef.current = null;
+    setCameraOpen(false);
+
+    // Moderate the captured photo
+    setIsModerating(true);
+    try {
+      const modRes = await fetch('/api/moderate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: dataUrl }),
+      });
+      const modData = await modRes.json();
+      if (!modData.appropriate) {
+        setError(modData.reason || 'Image does not meet our guidelines. Please upload a clean, clear selfie.');
+        setSelfiePreview(null);
+        setSelfieData(null);
+        setStep('upload');
+        setIsModerating(false);
+        return;
+      }
+    } catch {
+      // Allow on moderation failure
+    }
+    setIsModerating(false);
+
+    setSelfiePreview(dataUrl);
+    setSelfieData(dataUrl);
+    setStep('preview');
+  }, []);
+
+  const closeCamera = useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach(t => t.stop());
+    cameraStreamRef.current = null;
+    setCameraOpen(false);
+  }, []);
+
+  // Cleanup camera on unmount
+  useEffect(() => {
+    return () => {
+      cameraStreamRef.current?.getTracks().forEach(t => t.stop());
+      cameraStreamRef.current = null;
+    };
+  }, []);
+
+  // ── Disclaimer handlers ──────────────────────────────────────────
+  const handleUploadClick = useCallback(() => {
+    if (!disclaimerAccepted) {
+      setShowDisclaimer(true);
+      return;
+    }
+    fileInputRef.current?.click();
+  }, [disclaimerAccepted]);
+
+  const handleTakePhotoClick = useCallback(() => {
+    if (!disclaimerAccepted) {
+      setShowDisclaimer(true);
+      return;
+    }
+    openCamera();
+  }, [disclaimerAccepted, openCamera]);
+
+  const handleDisclaimerAccept = useCallback(() => {
+    setDisclaimerAccepted(true);
+    setShowDisclaimer(false);
+    setDisclaimerChecked(false);
+  }, []);
+
+  const handleDisclaimerCancel = useCallback(() => {
+    setShowDisclaimer(false);
+    setDisclaimerChecked(false);
+  }, []);
 
   const handleAddToCartSuggestion = useCallback((s: SuggestionItem) => {
     const store = useStore.getState();
@@ -836,9 +972,93 @@ function TryOnDialog({
         </div>
 
         <div className="px-6 pb-6">
+          {/* ── Disclaimer Dialog ──────────────────────────────────────── */}
+          {showDisclaimer && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="w-full max-w-md rounded-2xl border border-amber-900/30 bg-stone-950 p-6 shadow-2xl"
+              >
+                <div className="mb-4 flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-teal-400" />
+                  <h3 className="text-lg font-bold text-amber-100">Selfie Upload Guidelines</h3>
+                </div>
+
+                <div className="mb-5 space-y-3 text-sm">
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-400/70">Accepted</p>
+                    <ul className="space-y-1.5">
+                      <li className="flex items-start gap-2 text-amber-200/70">
+                        <span className="mt-0.5 text-emerald-500">✅</span>
+                        Only clean, clear, well-lit selfies will be accepted
+                      </li>
+                      <li className="flex items-start gap-2 text-amber-200/70">
+                        <span className="mt-0.5 text-emerald-500">✅</span>
+                        Face must be clearly visible and facing the camera
+                      </li>
+                      <li className="flex items-start gap-2 text-amber-200/70">
+                        <span className="mt-0.5 text-emerald-500">✅</span>
+                        Only your own selfie is permitted — uploading someone else&apos;s photo is not allowed
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-red-400/70">Not Accepted</p>
+                    <ul className="space-y-1.5">
+                      <li className="flex items-start gap-2 text-amber-200/70">
+                        <span className="mt-0.5 text-red-500">❌</span>
+                        Obscene, explicit, or inappropriate images will be rejected
+                      </li>
+                      <li className="flex items-start gap-2 text-amber-200/70">
+                        <span className="mt-0.5 text-red-500">❌</span>
+                        Blurry, dark, or heavily filtered photos will not be accepted
+                      </li>
+                      <li className="flex items-start gap-2 text-amber-200/70">
+                        <span className="mt-0.5 text-red-500">❌</span>
+                        Group photos or photos with face coverings are not accepted
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                <label className="mb-5 flex cursor-pointer items-start gap-3 rounded-lg border border-amber-900/20 bg-stone-900/40 p-3 transition-colors hover:border-amber-700/30">
+                  <Checkbox
+                    checked={disclaimerChecked}
+                    onCheckedChange={(checked) => setDisclaimerChecked(checked === true)}
+                    className="mt-0.5 data-[state=checked]:bg-teal-600 data-[state=checked]:border-teal-600"
+                  />
+                  <span className="text-xs leading-relaxed text-amber-200/60">
+                    I confirm this is my own selfie and it meets the above guidelines
+                  </span>
+                </label>
+
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={handleDisclaimerCancel}
+                    className="flex-1 border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleDisclaimerAccept}
+                    disabled={!disclaimerChecked}
+                    className="flex-1 bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    I Understand &amp; Agree
+                  </Button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+
           {/* Upload Step */}
           {step === 'upload' && (
             <div className="space-y-4">
+              {/* Product info card */}
               <div className="flex items-center gap-3 rounded-lg border border-amber-900/20 bg-stone-900/60 p-3">
                 <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md">
                   <img
@@ -853,8 +1073,9 @@ function TryOnDialog({
                 </div>
               </div>
 
+              {/* Upload area */}
               <div
-                onClick={() => fileInputRef.current?.click()}
+                onClick={handleUploadClick}
                 className="group flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-amber-900/30 bg-stone-900/30 px-6 py-8 transition-all hover:border-amber-600/40 hover:bg-stone-900/50"
               >
                 <div className="mb-3 rounded-full bg-amber-900/20 p-4 transition-colors group-hover:bg-amber-900/30">
@@ -896,6 +1117,64 @@ function TryOnDialog({
                 className="hidden"
               />
 
+              {/* Or take a photo divider */}
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-amber-900/20" />
+                <span className="text-xs text-amber-200/30">or</span>
+                <div className="h-px flex-1 bg-amber-900/20" />
+              </div>
+
+              {/* Take Photo button */}
+              {!cameraOpen && (
+                <button
+                  onClick={handleTakePhotoClick}
+                  className="flex w-full items-center gap-3 rounded-xl border-2 border-teal-700/30 bg-teal-950/20 px-5 py-4 text-left transition-all hover:border-teal-600/40 hover:bg-teal-950/30"
+                >
+                  <div className="rounded-full bg-teal-900/30 p-2.5">
+                    <Video className="h-5 w-5 text-teal-400" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-teal-300/80">📸 Take a live selfie</p>
+                    <p className="text-xs text-teal-400/40">We&apos;ll verify it&apos;s really you!</p>
+                  </div>
+                </button>
+              )}
+
+              {/* Camera view */}
+              {cameraOpen && (
+                <div className="space-y-3 rounded-xl border border-teal-900/30 bg-stone-900/60 p-3">
+                  <div className="relative aspect-[3/4] overflow-hidden rounded-lg bg-stone-800">
+                    <video
+                      ref={cameraVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="h-full w-full object-cover"
+                    />
+                    <div className="absolute bottom-2 left-2 rounded-full bg-black/60 px-2 py-1 text-[10px] text-teal-300">
+                      📷 Camera active
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={closeCamera}
+                      className="flex-1 border-stone-700 text-stone-300 hover:border-stone-600 hover:text-stone-200"
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={capturePhoto}
+                      className="flex-1 bg-teal-600 text-white hover:bg-teal-500"
+                    >
+                      <Camera className="mr-2 h-4 w-4" />
+                      Capture
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               {error && (
                 <div className="flex items-center gap-2 rounded-lg border border-red-900/30 bg-red-950/30 p-3">
                   <AlertCircle className="h-4 w-4 flex-shrink-0 text-red-400" />
@@ -903,8 +1182,10 @@ function TryOnDialog({
                 </div>
               )}
 
-              <p className="text-center text-[10px] text-amber-200/20">
-                Your photo is processed securely and not stored permanently
+              {/* Security notice */}
+              <p className="flex items-center justify-center gap-1.5 text-center text-[10px] text-amber-200/20">
+                <ShieldCheck className="h-3 w-3" />
+                Your photo is verified for content safety and processed securely
               </p>
             </div>
           )}
@@ -912,6 +1193,17 @@ function TryOnDialog({
           {/* Preview Step */}
           {step === 'preview' && selfiePreview && (
             <div className="space-y-4">
+              {/* Moderation spinner overlay */}
+              {isModerating && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-stone-950/80 rounded-xl">
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="h-8 w-8 animate-spin text-teal-400" />
+                    <p className="text-sm font-medium text-teal-300">Verifying image...</p>
+                    <p className="text-xs text-amber-200/40">Checking content safety</p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-start gap-4">
                 <div className="relative flex-1">
                   <div className="relative aspect-[3/4] overflow-hidden rounded-xl border border-amber-900/20 bg-stone-900/60">
