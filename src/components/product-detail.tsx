@@ -1,6 +1,6 @@
 'use client';
 
-/* TryOnDialog v1.2 — format via prop */
+/* TryOnDialog v1.3 — Progress bar, educational facts, enhanced disclaimer */
 
 import { useStore } from '@/lib/store';
 import { useCurrency } from '@/lib/currency';
@@ -8,8 +8,9 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle, Truck, Heart, MessageSquare } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { getProxiedImageUrl } from '@/lib/image-utils';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,8 +23,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send } from 'lucide-react';
+import { Camera, Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send, AlertTriangle, Clock, Share2 } from 'lucide-react';
 import { useAffiliateClick } from '@/hooks/useAffiliateClick';
+import { AIInfluencerSection } from '@/components/ai-influencer-section';
 
 interface ProductDetail {
   id: string;
@@ -372,6 +374,22 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
 // ── Try-On Dialog ──────────────────────────────────────────────
 type Step = 'upload' | 'preview' | 'generating' | 'result';
 
+/**
+ * Educational facts shown during AI generation to keep users informed.
+ */
+const AI_EDUCATION_FACTS = [
+  "📸 AI analyzes your facial features to create a personalized try-on experience",
+  "🎨 Our AI preserves your skin tone and facial features while adding the product",
+  "⚡ The AI processes over 1 million pixels to generate your style preview",
+  "🔍 Each try-on goes through a multi-step quality verification process",
+  "👤 Face preservation is our top priority — your features stay authentic",
+  "🌈 Color accuracy is verified against the original product image",
+  "✨ The AI uses dual-image technology for maximum product accuracy",
+  "🛡️ Your photos are processed securely and never stored permanently",
+  "🎯 Our AI considers product type, material, and fit for natural results",
+  "💡 Try-on works best with clear, well-lit selfies facing the camera",
+];
+
 interface SuggestionItem {
   id: string;
   name: string;
@@ -392,6 +410,7 @@ function TryOnDialog({
   productImages,
   onBackgroundJob,
   onResetBackground,
+  onShareToInfluencer,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -403,6 +422,7 @@ function TryOnDialog({
   productImages: string[];
   onBackgroundJob: (step: 'generating' | 'result') => void;
   onResetBackground: () => void;
+  onShareToInfluencer?: (imageDataUrl: string) => void;
 }) {
   const [step, setStep] = useState<Step>('upload');
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
@@ -415,7 +435,34 @@ function TryOnDialog({
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
   const [colorAccuracy, setColorAccuracy] = useState<number | null>(null);
   const [faceAccuracy, setFaceAccuracy] = useState<number | null>(null);
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [currentFactIndex, setCurrentFactIndex] = useState(0);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const generatingStartRef = useRef<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const eduScrollRef = useRef<HTMLDivElement>(null);
+
+  // Elapsed time tracker during generation
+  useEffect(() => {
+    if (step !== 'generating') return;
+    generatingStartRef.current = Date.now();
+    setElapsedTime(0);
+    const interval = setInterval(() => {
+      if (generatingStartRef.current) {
+        setElapsedTime(Math.floor((Date.now() - generatingStartRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [step]);
+
+  // Auto-rotate educational facts every 3 seconds during generation
+  useEffect(() => {
+    if (step !== 'generating') return;
+    const interval = setInterval(() => {
+      setCurrentFactIndex(prev => (prev + 1) % AI_EDUCATION_FACTS.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [step]);
 
   const reset = useCallback(() => {
     setStep('upload');
@@ -430,6 +477,9 @@ function TryOnDialog({
     setColorAccuracy(null);
     setFaceAccuracy(null);
     setProgressMessage('');
+    setGenerationProgress(0);
+    setCurrentFactIndex(0);
+    setElapsedTime(0);
     onResetBackground();
   }, [onResetBackground]);
 
@@ -472,6 +522,7 @@ function TryOnDialog({
     setStep('generating');
     setError(null);
     setProgressMessage('Starting AI style preview...');
+    setGenerationProgress(10);
     onBackgroundJob('generating');
 
     try {
@@ -479,6 +530,7 @@ function TryOnDialog({
       let productImageBase64: string | undefined;
       try {
         setProgressMessage('Preparing product image...');
+        setGenerationProgress(10);
         const imgToFetch = rawProductImage || productImage;
         if (imgToFetch) {
           productImageBase64 = await fetchImageAsBase64(imgToFetch) || undefined;
@@ -486,6 +538,7 @@ function TryOnDialog({
       } catch {}
 
       // Step 1: POST to create a job
+      setGenerationProgress(30);
       const postRes = await fetch('/api/try-on', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -523,6 +576,7 @@ function TryOnDialog({
         if (proxyUrl) {
           try {
             setProgressMessage('Connecting to AI service...');
+            setGenerationProgress(30);
             // The .space-z.ai gateway routes to sandbox's Next.js (port 3000)
             // which handles /api/try-on directly — no XTransformPort needed.
             const proxyFetchUrl = `${proxyUrl}/api/try-on`;
@@ -562,6 +616,12 @@ function TryOnDialog({
                   const pollData = await pollRes.json();
 
                   if (pollData.progress) setProgressMessage(pollData.progress);
+                  if (pollData.pipelinePhase === 'product-analysis') setGenerationProgress(30);
+                  else if (pollData.pipelinePhase === 'generation') setGenerationProgress(50);
+                  else if (pollData.pipelinePhase === 'verification') setGenerationProgress(70);
+                  else if (pollData.pipelinePhase === 'refinement') setGenerationProgress(80);
+                  else if (pollData.pipelinePhase === 'composite') setGenerationProgress(85);
+                  else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
 
                   if (pollData.status === 'completed' && pollData.imageUrl) {
                     setResultImage(pollData.imageUrl);
@@ -669,7 +729,17 @@ function TryOnDialog({
           setProgressMessage(pollData.progress);
         }
 
+        // Track progress based on pipeline phase
+        if (pollData.pipelinePhase === 'product-analysis') setGenerationProgress(30);
+        else if (pollData.pipelinePhase === 'generation') setGenerationProgress(50);
+        else if (pollData.pipelinePhase === 'verification') setGenerationProgress(70);
+        else if (pollData.pipelinePhase === 'refinement') setGenerationProgress(80);
+        else if (pollData.pipelinePhase === 'composite') setGenerationProgress(85);
+        else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
+        else if (pollCount > 1) setGenerationProgress(Math.min(90, 10 + pollCount * 3));
+
         if (pollData.status === 'completed' && pollData.imageUrl) {
+          setGenerationProgress(100);
           setResultImage(pollData.imageUrl);
           setWatermarkedResult(pollData.imageUrl);
           setStrategy(pollData.strategy || 'ai-generation');
@@ -903,26 +973,112 @@ function TryOnDialog({
 
           {/* Generating Step */}
           {step === 'generating' && (
-            <div className="space-y-5">
+            <div className="space-y-4 relative rounded-xl border border-amber-500/20 bg-gradient-to-b from-stone-950 via-stone-950 to-amber-950/10 p-4 overflow-hidden" style={{ animation: 'pulseGlow 2s ease-in-out infinite' }}>
+              {/* Animated background gradient shift */}
+              <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ background: 'linear-gradient(135deg, rgba(217,119,6,0.05) 0%, rgba(120,53,15,0.08) 25%, rgba(217,119,6,0.03) 50%, rgba(146,64,14,0.06) 75%, rgba(217,119,6,0.05) 100%)', backgroundSize: '200% 200%', animation: 'gradientShift 8s ease infinite' }} />
+
               {/* Progress indicator */}
-              <div className="flex flex-col items-center py-4">
+              <div className="flex flex-col items-center py-2 relative z-10">
                 <div className="relative">
                   <div className="absolute inset-0 animate-ping rounded-full bg-amber-400/20" />
                   <div className="relative rounded-full bg-amber-900/20 p-5">
                     <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
                   </div>
                 </div>
-                <h3 className="mt-4 text-base font-semibold text-amber-100">
+                <h3 className="mt-3 text-base font-semibold text-amber-100">
                   {progressMessage || 'Analyzing your photo...'}
                 </h3>
                 <p className="mt-1 text-center text-xs text-amber-200/40">
                   Creating your AI style preview with {productName}
                 </p>
+                {/* Elapsed time */}
+                <div className="mt-2 flex items-center gap-1.5 rounded-full bg-stone-800/60 px-3 py-1 border border-amber-900/20">
+                  <Clock className="h-3 w-3 text-amber-400/60" />
+                  <span className="text-xs font-medium text-amber-300/70">{elapsedTime}s elapsed</span>
+                </div>
+              </div>
+
+              {/* Progress Bar — shadcn/ui Progress component */}
+              <div className="space-y-2 relative z-10">
+                {/* Current phase label */}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-amber-300/80">
+                    {generationProgress < 30 ? '🔍 Analyzing' : generationProgress < 50 ? '🤖 Generating' : generationProgress < 70 ? '✅ Verifying' : generationProgress < 80 ? '🎨 Refining' : generationProgress < 90 ? '✨ Polishing' : '📦 Delivering'}
+                  </span>
+                  <span className="text-sm font-bold text-amber-400">{generationProgress}%</span>
+                </div>
+                <Progress
+                  value={generationProgress}
+                  className="h-3 bg-stone-800/80 border border-amber-900/20 [&>[data-slot=progress-indicator]]:bg-gradient-to-r [&>[data-slot=progress-indicator]]:from-amber-600 [&>[data-slot=progress-indicator]]:via-amber-400 [&>[data-slot=progress-indicator]]:to-amber-300 [&>[data-slot=progress-indicator]]:transition-all [&>[data-slot=progress-indicator]]:duration-700"
+                />
+                <div className="flex justify-between">
+                  <span className="text-[10px] text-amber-200/30">Processing...</span>
+                  <span className="text-[10px] text-amber-200/30">Complete</span>
+                </div>
+              </div>
+
+              {/* Phase indicator */}
+              <div className="flex items-center justify-between relative z-10 px-1">
+                {['Analyze', 'Generate', 'Verify', 'Refine', 'Deliver'].map((phase, i) => {
+                  const thresholds = [30, 50, 70, 80, 90];
+                  const isActive = generationProgress >= thresholds[i];
+                  const isCurrent = generationProgress >= thresholds[i] && (i === 4 || generationProgress < thresholds[i + 1]);
+                  return (
+                    <div key={phase} className="flex flex-col items-center gap-1">
+                      <div className={`h-2.5 w-2.5 rounded-full transition-all duration-500 ${isCurrent ? 'bg-amber-400 scale-150 shadow-lg shadow-amber-400/50' : isActive ? 'bg-amber-600' : 'bg-stone-700'}`} />
+                      <span className={`text-[9px] transition-colors whitespace-nowrap ${isCurrent ? 'text-amber-300 font-bold' : isActive ? 'text-amber-500/60 font-medium' : 'text-stone-600'}`}>{phase}</span>
+                      {i < 4 && (
+                        <div className="absolute top-[5px]" style={{ left: `${(i + 0.5) * 20}%`, width: '18%' }}>
+                          <div className={`h-px w-full ${isActive && generationProgress >= thresholds[i + 1] ? 'bg-amber-600/50' : 'bg-stone-700/50'}`} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Educational scrolling content — AI_EDUCATION_FACTS with AnimatePresence */}
+              <div className="rounded-lg border border-amber-900/25 bg-stone-900/60 overflow-hidden relative z-10">
+                <div className="px-3 py-2 border-b border-amber-900/15 bg-amber-950/25">
+                  <p className="text-[10px] font-semibold text-amber-400/80 flex items-center gap-1.5">
+                    <Sparkles className="h-3 w-3" />
+                    How AI Style Preview Works
+                  </p>
+                </div>
+                <div className="px-3 py-3 min-h-[72px] flex items-center">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={currentFactIndex}
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -12 }}
+                      transition={{ duration: 0.3 }}
+                      className="flex items-start gap-2"
+                    >
+                      <span className="text-sm leading-relaxed text-amber-200/60">
+                        {AI_EDUCATION_FACTS[currentFactIndex]}
+                      </span>
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
+                {/* Fact indicator dots */}
+                <div className="flex items-center justify-center gap-1 pb-2">
+                  {AI_EDUCATION_FACTS.map((_, i) => (
+                    <div
+                      key={i}
+                      className={`h-1 rounded-full transition-all duration-300 ${
+                        i === currentFactIndex
+                          ? 'w-4 bg-amber-400'
+                          : 'w-1 bg-amber-900/40'
+                      }`}
+                    />
+                  ))}
+                </div>
               </div>
 
               {/* Product Gallery - shown while waiting */}
               {productImages.length > 0 && (
-                <div className="space-y-2">
+                <div className="space-y-2 relative z-10">
                   <div className="flex items-center gap-2">
                     <ImageIcon className="h-3.5 w-3.5 text-amber-400/70" />
                     <p className="text-[11px] font-semibold text-amber-200/60">
@@ -945,6 +1101,19 @@ function TryOnDialog({
                   </div>
                 </div>
               )}
+
+              {/* Inline keyframes for animations */}
+              <style dangerouslySetInnerHTML={{ __html: `
+                @keyframes gradientShift {
+                  0% { background-position: 0% 50%; }
+                  50% { background-position: 100% 50%; }
+                  100% { background-position: 0% 50%; }
+                }
+                @keyframes pulseGlow {
+                  0%, 100% { box-shadow: 0 0 8px 1px rgba(217,119,6,0.08); }
+                  50% { box-shadow: 0 0 20px 4px rgba(217,119,6,0.18); }
+                }
+              `}} />
             </div>
           )}
 
@@ -968,8 +1137,31 @@ function TryOnDialog({
                   <div className="absolute right-1.5 top-1.5 rounded-full bg-amber-600/90 px-2 py-0.5 shadow-lg">
                     <span className="text-[8px] font-bold text-stone-950">Style Preview</span>
                   </div>
+                  {/* AI GENERATED overlay badge at bottom */}
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-stone-950/80 via-stone-950/50 to-transparent px-3 py-4">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle className="h-3 w-3 text-amber-400 flex-shrink-0" />
+                      <span className="text-[10px] font-bold text-amber-300 tracking-wide uppercase">AI Generated Preview</span>
+                    </div>
+                    <p className="text-[8px] text-amber-200/50 mt-0.5">Not an actual photo — may differ from real product</p>
+                  </div>
                 </div>
                 <p className="text-center text-[10px] font-medium text-amber-400">Style Preview</p>
+              </div>
+
+              {/* AI Generated Disclaimer — Enhanced with specified format */}
+              <div className="rounded-lg border border-amber-600/20 bg-amber-900/10 p-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium text-amber-300">AI-Generated Image</p>
+                    <p className="text-[11px] text-amber-200/50 mt-0.5">
+                      This is an AI-generated style preview. Actual product appearance may vary slightly. 
+                      Colors and details are approximated and there might be minor mismatches that can be 
+                      rectified by consulting our style experts.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* AI Match Scores */}
@@ -1085,6 +1277,18 @@ function TryOnDialog({
                   Save
                 </a>
               </div>
+
+              {/* Share to AI Style Gallery */}
+              {onShareToInfluencer && watermarkedResult && (
+                <Button
+                  onClick={() => onShareToInfluencer(watermarkedResult)}
+                  className="w-full border border-amber-500/30 bg-amber-900/20 text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 gap-2"
+                  variant="outline"
+                >
+                  <Share2 className="h-4 w-4" />
+                  Share to Style Gallery
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -1110,6 +1314,8 @@ export function ProductDetail() {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [reviewForm, setReviewForm] = useState({ rating: 5, title: '', comment: '', name: '' });
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [influencerShareImage, setInfluencerShareImage] = useState<string | null>(null);
+  const influencerSectionRef = useRef<{ handleShareFromTryOn: (imageDataUrl: string) => void } | null>(null);
 
   const { data, isLoading } = useQuery<{ product: ProductDetail }>({
     queryKey: ['product', selectedProductId],
@@ -1302,39 +1508,44 @@ export function ProductDetail() {
                 <Badge className="bg-emerald-600 text-white">-{discount}%</Badge>
               )}
             </div>
+
+            {/* Image counter */}
+            {product.images.length > 1 && (
+              <div className="absolute bottom-3 right-3 rounded-full bg-stone-950/70 px-2.5 py-1 text-[10px] font-medium text-amber-200/70 backdrop-blur-sm">
+                {selectedImage + 1} / {product.images.length}
+              </div>
+            )}
           </div>
 
           {/* Thumbnails */}
-          {product.images.length > 1 && (
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {product.images.map((img, i) => (
-                <button
-                  key={i}
-                  onClick={() => setSelectedImage(i)}
-                  className={`relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-md border transition-all ${
-                    i === selectedImage
-                      ? 'border-amber-500 ring-1 ring-amber-500'
-                      : 'border-amber-900/20 opacity-60 hover:opacity-100'
-                  }`}
-                >
-                  {!imageErrors.has(i) ? (
-                    <img
-                      src={getProxiedImageUrl(img, product.platform)}
-                      alt={`${product.name} ${i + 1}`}
-                      className="absolute inset-0 h-full w-full object-cover"
-                      onError={() => {
-                        setImageErrors((prev) => new Set(prev).add(i));
-                      }}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-stone-800">
-                      <span className="text-lg text-amber-600/40">&#x1F48E;</span>
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {product.images.map((img, i) => (
+              <button
+                key={i}
+                onClick={() => setSelectedImage(i)}
+                className={`relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-md border transition-all ${
+                  i === selectedImage
+                    ? 'border-amber-500 ring-1 ring-amber-500 scale-105'
+                    : 'border-amber-900/20 opacity-60 hover:opacity-100 hover:border-amber-700/40'
+                }`}
+              >
+                {!imageErrors.has(i) ? (
+                  <img
+                    src={getProxiedImageUrl(img, product.platform)}
+                    alt={`${product.name} ${i + 1}`}
+                    className="absolute inset-0 h-full w-full object-cover"
+                    onError={() => {
+                      setImageErrors((prev) => new Set(prev).add(i));
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-stone-800">
+                    <span className="text-lg text-amber-600/40">&#x1F48E;</span>
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Product Info */}
@@ -1650,6 +1861,18 @@ export function ProductDetail() {
         )}
       </div>
 
+      {/* AI Style Gallery (Influencer Section) */}
+      {product && (
+        <div id="ai-influencer-section">
+          <AIInfluencerSection
+            productId={product.id}
+            productName={product.name}
+            initialShareImage={influencerShareImage}
+            onShareComplete={() => setInfluencerShareImage(null)}
+          />
+        </div>
+      )}
+
       {/* Review Dialog */}
       <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
         <DialogContent className="border-amber-900/30 bg-stone-950 sm:max-w-md">
@@ -1738,6 +1961,15 @@ export function ProductDetail() {
           productImages={product.images.map(img => getProxiedImageUrl(img, product.platform))}
           onBackgroundJob={handleBackgroundJob}
           onResetBackground={handleResetBackground}
+          onShareToInfluencer={(imageDataUrl) => {
+            setInfluencerShareImage(imageDataUrl);
+            // Close the try-on dialog and scroll to influencer section
+            setTryOnOpen(false);
+            setTimeout(() => {
+              const section = document.getElementById('ai-influencer-section');
+              if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 300);
+          }}
 />
       )}
 

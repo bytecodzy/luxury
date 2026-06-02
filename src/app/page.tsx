@@ -27,6 +27,7 @@ import React from 'react';
 
 function AppContent() {
   const view = useStore((s) => s.view);
+  const appTheme = useStore((s) => s.appTheme);
 
   const renderView = () => {
     switch (view) {
@@ -72,7 +73,10 @@ function AppContent() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-stone-950">
+    <div
+      className={`min-h-screen flex flex-col ${appTheme === 'light' ? 'bg-amber-50/30' : 'bg-stone-950'}`}
+      data-theme={appTheme}
+    >
       <Header />
       <main className="flex-1">
         <div className="container mx-auto px-4">

@@ -1,33 +1,57 @@
 ---
 Task ID: 1
-Agent: Main Agent
-Task: Fix products display on Vercel for Office/New Arrivals, fix header dropdown sub-menus, add category slug aliases
+Agent: main
+Task: Fix AI image generation feature
 
 Work Log:
-- Analyzed the root cause: On Vercel, when Shopify API call fails or returns 0 products for Office/New Arrivals, the catch block returns a 500 error before static products can be injected
-- Fixed products API route (src/app/api/products/route.ts):
-  - Added EARLY RETURN for Office and New Arrivals categories BEFORE any Shopify API call
-  - This ensures static products always work on Vercel regardless of Shopify availability
-  - Added comprehensive category slug aliases for ALL header sub-menu items (men-accessories, women-jewelry, etc.)
-  - Updated PARENT_CATEGORY_CHILDREN to include both header sub-menu slugs AND Shopify/DB slugs
-  - Changed error handling: API returns empty results instead of 500 error when Shopify fails
-- Fixed header dropdown menus (src/components/header.tsx):
-  - Replaced Tailwind `group-hover:visible/opacity` CSS with inline style manipulation via onMouseEnter/onMouseLeave
-  - This is more reliable across environments (preview, Vercel) since it doesn't depend on Tailwind CSS class generation
-- Updated Shopify category hierarchy (src/lib/shopify.ts):
-  - Added header sub-menu slugs to the category hierarchy for proper subcategory display
-- Pushed all changes to GitHub (3 commits)
-- Tested all APIs locally - all working:
-  - Office: 12 static products ✓
-  - New Arrivals: 6 static products ✓
-  - Men Accessories: 3 DB products ✓
-  - Women Jewelry: 11 DB products ✓
-  - Home Decor: 2 DB products ✓
-  - Kids Toys: 3 DB products ✓
+- Discovered ZAI SDK works via `ZAI.create()` auto-discovery but `isZAIAvailable()` returned unavailable because it only checked explicit config files and env vars
+- Fixed `isZAIAvailable()` in `/src/lib/zai.ts` to add SDK auto-discovery (`ZAI.create()`) as Strategy 2, between explicit config and proxy
+- Fixed `createZAI()` to also prioritize `ZAI.create()` fallback properly
+- Added new `sdk-auto` mode to the availability check
+- Tested: `curl /api/try-on/status` now returns `{"available":true,"mode":"ai"}`
 
 Stage Summary:
-- All category navigation now works - clicking any sub-menu item returns products
-- Office and New Arrivals always serve static products without Shopify dependency
-- Header dropdown menus use JavaScript-based hover instead of CSS-only group-hover
-- Vercel deployment pending - code is pushed to GitHub but Vercel hasn't auto-deployed yet
-- User may need to manually trigger Vercel deployment or verify auto-deploy is enabled
+- AI service is now available and working
+- The try-on pipeline can now use the ZAI SDK auto-discovery when no explicit config exists
+- Key file modified: `/src/lib/zai.ts`
+
+---
+Task ID: 2
+Agent: main
+Task: Wire up AI Influencer section with try-on results
+
+Work Log:
+- Added `onShareToInfluencer` callback prop to TryOnDialog component
+- Added "Share to Style Gallery" button in the try-on result step
+- Added `Share2` import to product-detail.tsx
+- Added `influencerShareImage` state and `influencerSectionRef` in ProductDetail component
+- Updated AIInfluencerSection to accept `initialShareImage` and `onShareComplete` props
+- Added useEffect in AIInfluencerSection to auto-open share dialog when initialShareImage is provided
+- Added `useEffect` import to ai-influencer-section.tsx
+- Updated handleSubmitShare to call onShareComplete callback
+- Wrapped AIInfluencerSection in a div with id="ai-influencer-section" for scroll-to behavior
+- Key files: `/src/components/product-detail.tsx`, `/src/components/ai-influencer-section.tsx`
+
+Stage Summary:
+- Users can now click "Share to Style Gallery" after generating an AI try-on image
+- The share dialog auto-opens with the generated image pre-filled
+- User can give consent and share their AI-generated look to the gallery
+- Flow: Generate → Share to Gallery → Consent Dialog → Gallery update
+
+---
+Task ID: 3
+Agent: main
+Task: Move gift builder next/back buttons up near images section
+
+Work Log:
+- Moved navigation buttons (Back, Next, Skip, Done) from the fixed bottom footer into the step content area
+- Added rounded border container with subtle background for the navigation bar
+- Added pb-4 padding to the scroll container so navigation doesn't clip at bottom
+- Removed the fixed footer that was colliding with the chatbot widget
+- Navigation buttons now appear right below the step content, within the scrollable area
+- Key file: `/src/components/gift-builder.tsx`
+
+Stage Summary:
+- Gift builder navigation buttons are now inside the content area, not in a fixed footer
+- This prevents collision with the chatbot widget at the bottom-right
+- The navigation bar has a nice bordered container with consistent styling

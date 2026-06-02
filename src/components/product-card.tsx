@@ -86,14 +86,30 @@ export function ProductCard({ product }: { product: Product }) {
   const [isAdding, setIsAdding] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
-  const mainImage = product.images.length > 0
+  const totalImages = product.images.length;
+  const currentImage = totalImages > 0
+    ? getProxiedImageUrl(product.images[currentImageIndex], product.platform)
+    : '/images/placeholder.jpg';
+  const mainImage = totalImages > 0
     ? getProxiedImageUrl(product.images[0], product.platform)
     : '/images/placeholder.jpg';
   const isExternal = product.isExternal && product.platform;
   const platformSlug = product.platform?.toLowerCase() || '';
   const platformName = PLATFORM_DISPLAY_NAMES[platformSlug] || product.platform || '';
   const shopUrl = product.affiliateUrl || product.sourceUrl || '#';
+
+  const handleDotClick = (e: React.MouseEvent, index: number) => {
+    e.stopPropagation();
+    setCurrentImageIndex(index);
+  };
+
+  // Reset to first image when unhovering
+  const handleMouseLeave = () => {
+    setIsHovered(false);
+    setCurrentImageIndex(0);
+  };
 
   const handleAddToCart = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -129,13 +145,14 @@ export function ProductCard({ product }: { product: Product }) {
       className="group cursor-pointer overflow-hidden rounded-xl border border-amber-900/15 bg-stone-900/40 backdrop-blur-sm transition-all duration-300 hover:border-amber-700/30 hover:shadow-lg hover:shadow-amber-900/10"
       onClick={() => selectProduct(product.id)}
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onMouseLeave={handleMouseLeave}
     >
-      {/* Image */}
+      {/* Image Carousel */}
       <div className="relative aspect-square overflow-hidden bg-stone-800/60">
         {!imageError ? (
           <img
-            src={mainImage}
+            key={currentImageIndex}
+            src={currentImage}
             alt={product.name}
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
             onError={() => setImageError(true)}
@@ -144,6 +161,24 @@ export function ProductCard({ product }: { product: Product }) {
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-stone-800 to-stone-900">
             <span className="text-3xl text-amber-600/40">💎</span>
+          </div>
+        )}
+
+        {/* Carousel Dots */}
+        {totalImages > 1 && (
+          <div className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5">
+            {product.images.map((_, i) => (
+              <button
+                key={i}
+                onClick={(e) => handleDotClick(e, i)}
+                className={`h-1.5 w-1.5 rounded-full transition-all duration-200 ${
+                  i === currentImageIndex
+                    ? 'bg-amber-500 scale-125'
+                    : 'bg-amber-500/20 hover:bg-amber-500/40'
+                }`}
+                aria-label={`View image ${i + 1}`}
+              />
+            ))}
           </div>
         )}
 

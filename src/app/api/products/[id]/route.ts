@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { fetchShopifyProducts } from '@/lib/shopify'
+import { getStaticProductById } from '@/lib/static-products'
 
 // Platform slug to logo URL mapping
 const PLATFORM_LOGO_MAP: Record<string, string> = {
@@ -110,6 +111,33 @@ export async function GET(
         }
       } catch (shopifyError) {
         console.error('[Product API] Shopify fallback also failed:', shopifyError)
+      }
+    }
+
+    // If not in DB or Shopify, try static products (Corporate Gifts, Office, New Arrivals)
+    if (!product) {
+      const staticProduct = getStaticProductById(id)
+      if (staticProduct) {
+        product = {
+          id: staticProduct.id,
+          name: staticProduct.name,
+          slug: staticProduct.slug,
+          description: staticProduct.description,
+          price: staticProduct.price,
+          compareAtPrice: staticProduct.compareAtPrice,
+          images: JSON.stringify(staticProduct.images),
+          category: { name: staticProduct.category, slug: staticProduct.categorySlug },
+          stock: staticProduct.stock,
+          rating: staticProduct.rating,
+          reviewCount: staticProduct.reviewCount,
+          featured: staticProduct.featured,
+          tags: JSON.stringify(staticProduct.tags),
+          deliveryEstimate: staticProduct.deliveryEstimate || '3-5 business days',
+          platform: staticProduct.platform,
+          isExternal: staticProduct.isExternal,
+          sourceUrl: staticProduct.sourceUrl,
+          affiliateUrl: staticProduct.affiliateUrl,
+        }
       }
     }
 

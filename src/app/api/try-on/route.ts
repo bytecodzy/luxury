@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { isZAIAvailable, getZAIConfig } from '@/lib/zai'
 import { createJob, getJob, runPipeline } from '@/lib/try-on-pipeline'
+import { getStaticProductById } from '@/lib/static-products'
 
 // ── Product image helpers ──────────────────────────────────────────
 
@@ -374,6 +375,19 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
       }
     } catch (shopifyError) {
       console.error('[try-on] Shopify fallback also failed:', shopifyError)
+    }
+  }
+
+  if (!product) {
+    // Try static products (Corporate Gifts, Office, New Arrivals)
+    const staticProduct = getStaticProductById(productId)
+    if (staticProduct) {
+      product = {
+        id: staticProduct.id,
+        name: staticProduct.name,
+        images: JSON.stringify(staticProduct.images),
+        category: { name: staticProduct.category, slug: staticProduct.categorySlug },
+      }
     }
   }
 

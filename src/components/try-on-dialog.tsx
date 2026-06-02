@@ -13,7 +13,7 @@
  * If you need TryOnDialog, use the one in product-detail.tsx instead.
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -22,6 +22,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Camera,
@@ -94,6 +95,22 @@ function compressImage(file: File, maxSize = 1024, quality = 0.8): Promise<strin
   });
 }
 
+/**
+ * Educational facts shown during AI generation to keep users informed.
+ */
+const AI_EDUCATION_FACTS = [
+  "📸 AI analyzes your facial features to create a personalized try-on experience",
+  "🎨 Our AI preserves your skin tone and facial features while adding the product",
+  "⚡ The AI processes over 1 million pixels to generate your style preview",
+  "🔍 Each try-on goes through a multi-step quality verification process",
+  "👤 Face preservation is our top priority — your features stay authentic",
+  "🌈 Color accuracy is verified against the original product image",
+  "✨ The AI uses dual-image technology for maximum product accuracy",
+  "🛡️ Your photos are processed securely and never stored permanently",
+  "🎯 Our AI considers product type, material, and fit for natural results",
+  "💡 Try-on works best with clear, well-lit selfies facing the camera",
+];
+
 export function TryOnDialog({
   open,
   onOpenChange,
@@ -109,7 +126,18 @@ export function TryOnDialog({
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string>('');
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [currentFactIndex, setCurrentFactIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-rotate educational facts every 3 seconds during generation
+  useEffect(() => {
+    if (step !== 'generating') return;
+    const interval = setInterval(() => {
+      setCurrentFactIndex((prev) => (prev + 1) % AI_EDUCATION_FACTS.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [step]);
 
   const reset = useCallback(() => {
     setStep('upload');
@@ -118,6 +146,8 @@ export function TryOnDialog({
     setResultImage(null);
     setError(null);
     setProgress('');
+    setProgressPercent(0);
+    setCurrentFactIndex(0);
   }, []);
 
   const handleFileSelect = useCallback(
@@ -339,6 +369,7 @@ export function TryOnDialog({
     onFailed: (error: string) => void,
   ) => {
     setProgress('Generating your try-on look...');
+    setProgressPercent(50);
 
     const pollInterval = setInterval(async () => {
       try {
@@ -356,8 +387,16 @@ export function TryOnDialog({
           setProgress(statusData.progress);
         }
 
+        // Update progress percentage based on pipeline phase
+        if (statusData.pipelinePhase === 'product-analysis') setProgressPercent(30);
+        else if (statusData.pipelinePhase === 'generation') setProgressPercent(50);
+        else if (statusData.pipelinePhase === 'verification') setProgressPercent(70);
+        else if (statusData.pipelinePhase === 'refinement') setProgressPercent(80);
+        else if (statusData.pipelinePhase === 'watermark') setProgressPercent(90);
+
         if (statusData.status === 'completed') {
           clearInterval(pollInterval);
+          setProgressPercent(100);
           if (!statusData.imageUrl || statusData.strategy === 'canvas-fallback') {
             onFailed('AI generation unavailable');
             return;
@@ -382,6 +421,7 @@ export function TryOnDialog({
     setStep('generating');
     setError(null);
     setProgress('Uploading your photo...');
+    setProgressPercent(10);
 
     const requestPayload = {
       productId,
@@ -393,6 +433,9 @@ export function TryOnDialog({
 
     try {
       // ── Strategy 1: Try the server API (works locally, may return canvas mode on Vercel) ──
+      setProgress('Connecting to AI service...');
+      setProgressPercent(30);
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120000);
 
@@ -425,7 +468,6 @@ export function TryOnDialog({
         console.log('[try-on] Server returned canvas mode, trying direct proxy from client...');
 
         // ── Strategy 2: Try direct client-side proxy call to sandbox AI service ──
-        // Get proxy URL from config API (runtime, not build-time)
         let proxyUrl = '';
         try {
           const configRes = await fetch('/api/config', { signal: AbortSignal.timeout(3000) });
@@ -434,13 +476,13 @@ export function TryOnDialog({
             proxyUrl = configData.aiProxyUrl || '';
           }
         } catch {}
-        // Also check NEXT_PUBLIC_ env var as fallback
         if (!proxyUrl) {
           proxyUrl = process.env.NEXT_PUBLIC_AI_PROXY_URL || '';
         }
         if (proxyUrl) {
           try {
             setProgress('Connecting to AI service...');
+            setProgressPercent(30);
             let proxyFetchUrl: string;
             if (proxyUrl.includes('.space-z.ai')) {
               proxyFetchUrl = `${proxyUrl}/api/try-on?XTransformPort=3030`;
@@ -466,6 +508,7 @@ export function TryOnDialog({
                     pollBaseUrl,
                     (imageUrl) => {
                       setResultImage(imageUrl);
+                      setProgressPercent(100);
                       setStep('result');
                       resolve();
                     },
@@ -477,6 +520,7 @@ export function TryOnDialog({
                 return;
               }
               if (proxyData.imageUrl) {
+                setProgressPercent(100);
                 setResultImage(proxyData.imageUrl);
                 setStep('result');
                 return;
@@ -490,8 +534,10 @@ export function TryOnDialog({
 
         // ── Strategy 3: Canvas fallback ──
         setProgress('Creating style preview overlay...');
+        setProgressPercent(70);
         const canvasResult = await generateCanvasFallback();
         if (canvasResult) {
+          setProgressPercent(100);
           setResultImage(canvasResult);
           setStep('result');
           return;
@@ -504,8 +550,10 @@ export function TryOnDialog({
       if (!response.ok) {
         if (response.status === 503 || data.code === 'AI_SERVICE_UNAVAILABLE') {
           setProgress('AI service unavailable. Creating style preview overlay...');
+          setProgressPercent(70);
           const canvasResult = await generateCanvasFallback();
           if (canvasResult) {
+            setProgressPercent(100);
             setResultImage(canvasResult);
             setStep('result');
             return;
@@ -516,7 +564,8 @@ export function TryOnDialog({
 
       // If server returned a jobId, poll for completion
       if (data.jobId) {
-        setProgress('Generating your try-on look...');
+        setProgress('AI is analyzing your photo...');
+        setProgressPercent(50);
         const pollInterval = setInterval(async () => {
           try {
             const statusRes = await fetch(`/api/try-on?jobId=${data.jobId}`);
@@ -526,10 +575,19 @@ export function TryOnDialog({
               setProgress(statusData.progress);
             }
 
+            // Update progress percentage based on pipeline phase
+            if (statusData.pipelinePhase === 'product-analysis') setProgressPercent(30);
+            else if (statusData.pipelinePhase === 'generation') setProgressPercent(50);
+            else if (statusData.pipelinePhase === 'verification') setProgressPercent(70);
+            else if (statusData.pipelinePhase === 'refinement') setProgressPercent(80);
+            else if (statusData.pipelinePhase === 'watermark') setProgressPercent(90);
+
             if (statusData.status === 'completed') {
               clearInterval(pollInterval);
+              setProgressPercent(100);
               if (!statusData.imageUrl || statusData.strategy === 'canvas-fallback') {
                 setProgress('Creating style preview overlay...');
+                setProgressPercent(70);
                 const canvasResult = await generateCanvasFallback();
                 if (canvasResult) {
                   setResultImage(canvasResult);
@@ -545,8 +603,10 @@ export function TryOnDialog({
             } else if (statusData.status === 'failed') {
               clearInterval(pollInterval);
               setProgress('AI generation failed. Trying style preview...');
+              setProgressPercent(70);
               const canvasResult = await generateCanvasFallback();
               if (canvasResult) {
+                setProgressPercent(100);
                 setResultImage(canvasResult);
                 setStep('result');
               } else {
@@ -565,6 +625,7 @@ export function TryOnDialog({
 
       // Direct imageUrl returned (immediate result)
       if (data.imageUrl) {
+        setProgressPercent(100);
         setResultImage(data.imageUrl);
         setStep('result');
         return;
@@ -577,8 +638,10 @@ export function TryOnDialog({
         setStep('preview');
       } else {
         setProgress('Trying style preview fallback...');
+        setProgressPercent(70);
         const canvasResult = await generateCanvasFallback();
         if (canvasResult) {
+          setProgressPercent(100);
           setResultImage(canvasResult);
           setStep('result');
         } else {
@@ -775,30 +838,92 @@ export function TryOnDialog({
               </motion.div>
             )}
 
-            {/* Step 3: Generating */}
+            {/* Step 3: Generating — Enhanced with Progress Bar + Educational Content */}
             {step === 'generating' && (
               <motion.div
                 key="generating"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="flex flex-col items-center justify-center py-12"
+                className="space-y-5 py-4"
               >
-                <div className="relative">
-                  <div className="absolute inset-0 animate-ping rounded-full bg-amber-400/20" />
-                  <div className="relative rounded-full bg-amber-900/20 p-6">
-                    <Sparkles className="h-10 w-10 animate-pulse text-amber-400" />
+                {/* Spinner + title */}
+                <div className="flex flex-col items-center">
+                  <div className="relative">
+                    <div className="absolute inset-0 animate-ping rounded-full bg-amber-400/20" />
+                    <div className="relative rounded-full bg-amber-900/20 p-6">
+                      <Sparkles className="h-10 w-10 animate-pulse text-amber-400" />
+                    </div>
+                  </div>
+                  <h3 className="mt-4 text-lg font-semibold text-amber-100">
+                    Creating Your Look
+                  </h3>
+                  <p className="mt-1 text-center text-sm text-amber-200/50">
+                    This may take 30–60 seconds...
+                  </p>
+                </div>
+
+                {/* Progress Bar using shadcn/ui */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-amber-300/80">
+                      {progress || 'Processing with AI...'}
+                    </span>
+                    <span className="text-sm font-bold text-amber-400">
+                      {progressPercent}%
+                    </span>
+                  </div>
+                  <Progress
+                    value={progressPercent}
+                    className="h-3 bg-stone-800/80 border border-amber-900/20 [&>[data-slot=progress-indicator]]:bg-gradient-to-r [&>[data-slot=progress-indicator]]:from-amber-600 [&>[data-slot=progress-indicator]]:via-amber-400 [&>[data-slot=progress-indicator]]:to-amber-300"
+                  />
+                  <div className="flex justify-between">
+                    <span className="text-[10px] text-amber-200/30">Starting</span>
+                    <span className="text-[10px] text-amber-200/30">Complete</span>
                   </div>
                 </div>
-                <h3 className="mt-6 text-lg font-semibold text-amber-100">
-                  Creating Your Look
-                </h3>
-                <p className="mt-2 text-center text-sm text-amber-200/40">
-                  {progress || 'Our AI is analyzing your photo and generating a virtual try-on.'}
-                  <br />
-                  This may take 30–60 seconds...
-                </p>
-                <div className="mt-6 flex items-center gap-1">
+
+                {/* Scrolling Educational Content with AnimatePresence */}
+                <div className="rounded-lg border border-amber-900/25 bg-stone-900/60 overflow-hidden">
+                  <div className="px-3 py-2 border-b border-amber-900/15 bg-amber-950/25">
+                    <p className="text-[10px] font-semibold text-amber-400/80 flex items-center gap-1.5">
+                      <Sparkles className="h-3 w-3" />
+                      How AI Style Preview Works
+                    </p>
+                  </div>
+                  <div className="px-3 py-3 min-h-[72px] flex items-center">
+                    <AnimatePresence mode="wait">
+                      <motion.div
+                        key={currentFactIndex}
+                        initial={{ opacity: 0, y: 12 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -12 }}
+                        transition={{ duration: 0.3 }}
+                        className="flex items-start gap-2"
+                      >
+                        <span className="text-sm leading-relaxed text-amber-200/60">
+                          {AI_EDUCATION_FACTS[currentFactIndex]}
+                        </span>
+                      </motion.div>
+                    </AnimatePresence>
+                  </div>
+                  {/* Fact indicator dots */}
+                  <div className="flex items-center justify-center gap-1 pb-2">
+                    {AI_EDUCATION_FACTS.map((_, i) => (
+                      <div
+                        key={i}
+                        className={`h-1 rounded-full transition-all duration-300 ${
+                          i === currentFactIndex
+                            ? 'w-4 bg-amber-400'
+                            : 'w-1 bg-amber-900/40'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Loader indicator */}
+                <div className="flex items-center justify-center gap-1.5">
                   <Loader2 className="h-4 w-4 animate-spin text-amber-400/60" />
                   <span className="text-xs text-amber-200/30">
                     {progress || 'Processing with AI...'}
@@ -807,7 +932,7 @@ export function TryOnDialog({
               </motion.div>
             )}
 
-            {/* Step 4: Result */}
+            {/* Step 4: Result — Enhanced with AI-Generated Disclaimer */}
             {step === 'result' && resultImage && (
               <motion.div
                 key="result"
@@ -829,10 +954,20 @@ export function TryOnDialog({
                   </div>
                 </div>
 
-                <p className="text-center text-xs text-amber-200/30">
-                  This is an AI-generated visualization. Actual appearance may
-                  vary.
-                </p>
+                {/* AI-Generated Disclaimer — Enhanced */}
+                <div className="rounded-lg border border-amber-600/20 bg-amber-900/10 p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-amber-300">AI-Generated Image</p>
+                      <p className="text-[11px] text-amber-200/50 mt-0.5">
+                        This is an AI-generated style preview. Actual product appearance may vary slightly. 
+                        Colors and details are approximated and there might be minor mismatches that can be 
+                        rectified by consulting our style experts.
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
                 <div className="flex gap-3">
                   <Button

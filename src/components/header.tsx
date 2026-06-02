@@ -5,7 +5,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2 } from 'lucide-react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2, Sun, Moon } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
@@ -97,7 +97,7 @@ const CATEGORY_NAV: CategoryNavItem[] = [
 ];
 
 export function Header() {
-  const { searchQuery, setSearch, setView, cartItems, setCategory, selectedCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder } = useStore();
+  const { searchQuery, setSearch, setView, cartItems, setCategory, selectedCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder, appTheme, setAppTheme } = useStore();
   const { t } = useTranslation();
   const { canInstall, promptInstall } = usePWAInstall();
   const [localSearch, setLocalSearch] = useState(searchQuery);
@@ -138,7 +138,7 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-amber-900/30 bg-stone-950/95 backdrop-blur-md">
+    <header className={`sticky top-0 z-50 w-full backdrop-blur-md ${appTheme === 'light' ? 'border-b border-amber-200/50 bg-white/95' : 'border-b border-amber-900/30 bg-stone-950/95'}`}>
       <div className="container mx-auto px-4">
         <div className="flex h-24 items-center justify-between gap-4">
           {/* Logo */}
@@ -151,13 +151,13 @@ export function Header() {
             }}
             className="flex-shrink-0 flex items-center gap-3 group"
           >
-            <div className="relative flex h-16 w-16 items-center justify-center sm:h-20 sm:w-20">
+            <div className="relative flex h-20 w-20 items-center justify-center sm:h-24 sm:w-24">
               <Image
                 src="/images/logo-uploaded.png"
                 alt="3 Boxes Luxury Logo"
-                width={80}
-                height={80}
-                className="h-16 w-16 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)] sm:h-20 sm:w-20"
+                width={96}
+                height={96}
+                className="h-20 w-20 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)] sm:h-24 sm:w-24"
                 priority
               />
             </div>
@@ -209,6 +209,17 @@ export function Header() {
             >
               <Download className="h-4 w-4" />
               <span className="text-xs font-medium">Install App</span>
+            </Button>
+
+            {/* Theme Toggle (Desktop) */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setAppTheme(appTheme === 'dark' ? 'light' : 'dark')}
+              className={`hidden md:flex ${appTheme === 'light' ? 'text-stone-600 hover:bg-amber-100/50 hover:text-amber-700' : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400'}`}
+              aria-label={appTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {appTheme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </Button>
 
             {/* Locale Switcher (Desktop) */}

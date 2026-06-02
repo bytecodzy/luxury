@@ -54,6 +54,10 @@ interface AppState {
   geoInfo: GeoInfo | null
   geoDetected: boolean
 
+  // Theme
+  appTheme: 'dark' | 'light'
+  setAppTheme: (theme: 'dark' | 'light') => void
+
   setView: (view: View) => void
   selectProduct: (productId: string) => void
   setSearch: (query: string) => void
@@ -107,6 +111,17 @@ function loadCurrencyFromStorage(): string {
   }
 }
 
+function loadThemeFromStorage(): 'dark' | 'light' {
+  if (typeof window === 'undefined') return 'dark'
+  try {
+    const stored = localStorage.getItem('3boxes_theme')
+    if (stored === 'light' || stored === 'dark') return stored
+    return 'dark'
+  } catch {
+    return 'dark'
+  }
+}
+
 const initialAuth = loadAuthFromStorage()
 
 export const useStore = create<AppState>((set, get) => ({
@@ -130,6 +145,9 @@ export const useStore = create<AppState>((set, get) => ({
   currencyRates: {},
   geoInfo: null,
   geoDetected: false,
+
+  // Theme
+  appTheme: typeof window !== 'undefined' ? loadThemeFromStorage() : 'dark',
 
   setView: (view) => set({ view }),
   selectProduct: (productId) => set({ selectedProductId: productId, view: 'product' }),
@@ -184,6 +202,14 @@ export const useStore = create<AppState>((set, get) => ({
   setAuthTwoFAStep: (step) => set({ authTwoFAStep: step }),
   setAuthPendingUserId: (id) => set({ authPendingUserId: id }),
   toggleGiftBuilder: () => set((state) => ({ giftBuilderView: !state.giftBuilderView })),
+  setAppTheme: (theme) => {
+    try {
+      localStorage.setItem('3boxes_theme', theme)
+    } catch {
+      // ignore storage errors
+    }
+    set({ appTheme: theme })
+  },
   setLocale: (locale) => {
     try {
       localStorage.setItem('3boxes_locale', locale)

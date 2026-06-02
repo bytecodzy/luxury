@@ -28,9 +28,13 @@ import {
   UsersRound,
   Crown,
   Package,
+  Info,
+  HelpCircle,
+  SkipForward,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { useStore } from '@/lib/store';
 import { getProxiedImageUrl } from '@/lib/image-utils';
 import { useQuery } from '@tanstack/react-query';
@@ -72,14 +76,24 @@ const RELATIONSHIPS = [
 ];
 
 const BUDGETS = [
-  { value: 'under-50', label: 'Under $50', range: '$0 – $50', emoji: '💵' },
-  { value: '50-100', label: '$50 – $100', range: '$50 – $100', emoji: '💰' },
-  { value: '100-250', label: '$100 – $250', range: '$100 – $250', emoji: '💎' },
-  { value: '250-500', label: '$250 – $500', range: '$250 – $500', emoji: '👑' },
-  { value: '500-plus', label: '$500+', range: '$500+', emoji: '🏆' },
+  { value: 'under-2000', label: 'Under ₹2,000', range: '₹0 – ₹2,000', emoji: '💵' },
+  { value: '2000-5000', label: '₹2,000 – ₹5,000', range: '₹2,000 – ₹5,000', emoji: '💰' },
+  { value: '5000-10000', label: '₹5,000 – ₹10,000', range: '₹5,000 – ₹10,000', emoji: '💎' },
+  { value: '10000-25000', label: '₹10,000 – ₹25,000', range: '₹10,000 – ₹25,000', emoji: '👑' },
+  { value: '25000-plus', label: '₹25,000+', range: '₹25,000+', emoji: '🏆' },
 ];
 
 const STEPS = ['Occasion', 'Recipient', 'Relationship', 'Budget', 'Products', 'Review'];
+
+// Step-by-step instructional text
+const STEP_INFO: Record<number, string> = {
+  0: 'Select the occasion for your gift. This helps us understand the context and recommend appropriate gifts.',
+  1: 'Choose who will receive this gift. Different recipients may prefer different types of gifts.',
+  2: 'Your relationship with the recipient helps us personalize the gift suggestions.',
+  3: 'Set your budget range so we can show you gifts within your price range.',
+  4: 'Browse and select one or more gifts. Click on a product to add it to your gift box. Click again to remove it.',
+  5: 'Review your selections below. You can add items to your cart individually or all at once.',
+};
 
 interface WizardSelection {
   occasion: string | null;
@@ -109,13 +123,13 @@ export function GiftBuilder() {
       params.set('limit', '20');
       params.set('sort', 'featured');
 
-      // Budget filter
+      // Budget filter (INR ranges)
       const budgetMap: Record<string, { min: string; max: string }> = {
-        'under-50': { min: '0', max: '50' },
-        '50-100': { min: '50', max: '100' },
-        '100-250': { min: '100', max: '250' },
-        '250-500': { min: '250', max: '500' },
-        '500-plus': { min: '500', max: '999999' },
+        'under-2000': { min: '0', max: '2000' },
+        '2000-5000': { min: '2000', max: '5000' },
+        '5000-10000': { min: '5000', max: '10000' },
+        '10000-25000': { min: '10000', max: '25000' },
+        '25000-plus': { min: '25000', max: '999999' },
       };
       const budgetRange = budgetMap[selection.budget || ''];
       if (budgetRange) {
@@ -160,6 +174,15 @@ export function GiftBuilder() {
     if (currentStep > 0) {
       setCurrentStep((prev) => prev - 1);
     }
+  };
+
+  const handleSkip = () => {
+    if (currentStep === 1) {
+      handleSelect('recipient', 'any');
+    } else if (currentStep === 2) {
+      handleSelect('relationship', 'any');
+    }
+    handleNext();
   };
 
   const handleAddToCart = (product: (typeof filteredProducts)[0]) => {
@@ -214,6 +237,27 @@ export function GiftBuilder() {
     return filteredProducts.filter((p) => selection.selectedProducts.includes(p.id));
   };
 
+  // Helper to display labels for "any" skipped values
+  const getRecipientLabel = () => {
+    if (selection.recipient === 'any') return 'Any';
+    return RECIPIENTS.find((r) => r.value === selection.recipient)?.label || '';
+  };
+
+  const getRecipientEmoji = () => {
+    if (selection.recipient === 'any') return '✨';
+    return RECIPIENTS.find((r) => r.value === selection.recipient)?.emoji || '';
+  };
+
+  const getRelationshipLabel = () => {
+    if (selection.relationship === 'any') return 'Any';
+    return RELATIONSHIPS.find((r) => r.value === selection.relationship)?.label || '';
+  };
+
+  const getRelationshipEmoji = () => {
+    if (selection.relationship === 'any') return '✨';
+    return RELATIONSHIPS.find((r) => r.value === selection.relationship)?.emoji || '';
+  };
+
   if (!giftBuilderView) return null;
 
   return (
@@ -231,7 +275,32 @@ export function GiftBuilder() {
               <Gift className="h-5 w-5 text-stone-950" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-amber-100">Gift Builder</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-amber-100">Gift Builder</h2>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      className="flex h-5 w-5 items-center justify-center rounded-full border border-amber-700/50 text-amber-400/60 transition-colors hover:border-amber-500 hover:text-amber-400 hover:bg-amber-900/30"
+                      aria-label="How Gift Builder works"
+                    >
+                      <HelpCircle className="h-3 w-3" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="border-amber-900/40 bg-stone-900 text-amber-100 w-72" side="bottom" align="start">
+                    <div className="space-y-2">
+                      <h4 className="text-sm font-semibold text-amber-400">How Gift Builder Works</h4>
+                      <ol className="space-y-1.5 text-xs text-amber-200/70">
+                        <li className="flex gap-2"><span className="text-amber-500 font-bold">1.</span> Choose the occasion for gifting</li>
+                        <li className="flex gap-2"><span className="text-amber-500 font-bold">2.</span> Select who the gift is for</li>
+                        <li className="flex gap-2"><span className="text-amber-500 font-bold">3.</span> Tell us your relationship</li>
+                        <li className="flex gap-2"><span className="text-amber-500 font-bold">4.</span> Set your budget range</li>
+                        <li className="flex gap-2"><span className="text-amber-500 font-bold">5.</span> Pick products you like</li>
+                        <li className="flex gap-2"><span className="text-amber-500 font-bold">6.</span> Review and add to cart</li>
+                      </ol>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
               <p className="text-xs text-amber-400/60">Build the perfect gift in 6 steps</p>
             </div>
           </div>
@@ -268,7 +337,7 @@ export function GiftBuilder() {
                       i <= currentStep ? 'text-amber-400/80' : 'text-amber-200/30'
                     }`}
                   >
-                    {step}
+                    {step}{i === 4 && selection.selectedProducts.length > 0 ? ` (${selection.selectedProducts.length})` : ''}
                   </span>
                 </div>
                 {i < STEPS.length - 1 && (
@@ -285,7 +354,7 @@ export function GiftBuilder() {
       </div>
 
       {/* Step Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-4">
         <div className="container mx-auto max-w-4xl px-4 py-8">
           <AnimatePresence mode="wait">
             <motion.div
@@ -300,6 +369,7 @@ export function GiftBuilder() {
                 <StepLayout
                   title="What's the occasion?"
                   subtitle="Select the occasion for your gift"
+                  info={STEP_INFO[0]}
                 >
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
                     {OCCASIONS.map((occ) => (
@@ -320,6 +390,7 @@ export function GiftBuilder() {
                 <StepLayout
                   title="Who is this gift for?"
                   subtitle="Select the recipient type"
+                  info={STEP_INFO[1]}
                 >
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
                     {RECIPIENTS.map((rec) => (
@@ -340,6 +411,7 @@ export function GiftBuilder() {
                 <StepLayout
                   title="What's your relationship?"
                   subtitle="This helps us personalize recommendations"
+                  info={STEP_INFO[2]}
                 >
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
                     {RELATIONSHIPS.map((rel) => (
@@ -360,6 +432,7 @@ export function GiftBuilder() {
                 <StepLayout
                   title="What's your budget?"
                   subtitle="Select your preferred price range"
+                  info={STEP_INFO[3]}
                 >
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
                     {BUDGETS.map((bud) => (
@@ -394,6 +467,7 @@ export function GiftBuilder() {
                 <StepLayout
                   title="Pick your gifts"
                   subtitle="Select products to include in your gift"
+                  info={STEP_INFO[4]}
                 >
                   {productsLoading ? (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
@@ -449,10 +523,11 @@ export function GiftBuilder() {
                               }));
                             }}
                           >
-                            {/* Selected checkmark */}
+                            {/* Selected badge overlay */}
                             {isSelected && (
-                              <div className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-stone-950">
-                                <Check className="h-3.5 w-3.5" />
+                              <div className="absolute right-2 top-2 z-10 flex items-center gap-1 rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-stone-950 shadow-lg">
+                                <Check className="h-3 w-3" />
+                                Added ✓
                               </div>
                             )}
 
@@ -473,11 +548,11 @@ export function GiftBuilder() {
                               </h3>
                               <div className="mt-1.5 flex items-baseline gap-2">
                                 <span className="text-base font-bold text-amber-400">
-                                  ${product.price.toLocaleString()}
+                                  ₹{product.price.toLocaleString()}
                                 </span>
                                 {product.compareAtPrice && (
                                   <span className="text-xs text-amber-200/30 line-through">
-                                    ${product.compareAtPrice.toLocaleString()}
+                                    ₹{product.compareAtPrice.toLocaleString()}
                                   </span>
                                 )}
                               </div>
@@ -492,7 +567,11 @@ export function GiftBuilder() {
 
               {/* Step 6: Review */}
               {currentStep === 5 && (
-                <StepLayout title="Review your gift" subtitle="Confirm your selections">
+                <StepLayout
+                  title="Review your gift"
+                  subtitle="Confirm your selections"
+                  info={STEP_INFO[5]}
+                >
                   <div className="space-y-6">
                     {/* Selections Summary */}
                     <div className="rounded-xl border border-amber-900/30 bg-stone-900/40 p-5">
@@ -511,23 +590,13 @@ export function GiftBuilder() {
                         />
                         <SummaryItem
                           label="Recipient"
-                          value={
-                            RECIPIENTS.find((r) => r.value === selection.recipient)?.label || ''
-                          }
-                          emoji={
-                            RECIPIENTS.find((r) => r.value === selection.recipient)?.emoji || ''
-                          }
+                          value={getRecipientLabel()}
+                          emoji={getRecipientEmoji()}
                         />
                         <SummaryItem
                           label="Relationship"
-                          value={
-                            RELATIONSHIPS.find((r) => r.value === selection.relationship)?.label ||
-                            ''
-                          }
-                          emoji={
-                            RELATIONSHIPS.find((r) => r.value === selection.relationship)?.emoji ||
-                            ''
-                          }
+                          value={getRelationshipLabel()}
+                          emoji={getRelationshipEmoji()}
                         />
                         <SummaryItem
                           label="Budget"
@@ -568,7 +637,7 @@ export function GiftBuilder() {
                                 </p>
                                 <p className="text-xs text-amber-200/40">{product.category}</p>
                                 <span className="text-sm font-bold text-amber-400">
-                                  ${product.price.toLocaleString()}
+                                  ₹{product.price.toLocaleString()}
                                 </span>
                               </div>
                               <Button
@@ -600,7 +669,7 @@ export function GiftBuilder() {
                       <div className="mt-4 flex items-center justify-between border-t border-amber-900/20 pt-4">
                         <span className="text-sm text-amber-200/60">Estimated Total</span>
                         <span className="text-xl font-bold text-amber-400">
-                          $
+                          ₹
                           {getSelectedProducts()
                             .reduce((sum, p) => sum + p.price, 0)
                             .toLocaleString()}
@@ -624,46 +693,58 @@ export function GiftBuilder() {
                   </div>
                 </StepLayout>
               )}
+
+              {/* Navigation Buttons — Inside content area, not at bottom */}
+              <div className="mt-8 flex items-center justify-between rounded-xl border border-amber-900/20 bg-stone-900/30 p-3">
+                <Button
+                  variant="outline"
+                  onClick={handleBack}
+                  disabled={currentStep === 0}
+                  className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 disabled:opacity-30"
+                >
+                  <ArrowLeft className="mr-1.5 h-4 w-4" />
+                  Back
+                </Button>
+
+                <span className="text-xs text-amber-200/40">
+                  Step {currentStep + 1} of {STEPS.length}
+                </span>
+
+                <div className="flex items-center gap-2">
+                  {/* Skip button for optional steps */}
+                  {(currentStep === 1 || currentStep === 2) && (
+                    <Button
+                      variant="ghost"
+                      onClick={handleSkip}
+                      className="text-amber-200/50 hover:text-amber-400 hover:bg-amber-900/20 text-xs"
+                    >
+                      <SkipForward className="mr-1 h-3.5 w-3.5" />
+                      Skip
+                    </Button>
+                  )}
+
+                  {currentStep < STEPS.length - 1 ? (
+                    <Button
+                      onClick={handleNext}
+                      disabled={!canProceed()}
+                      className="bg-amber-600 text-stone-950 hover:bg-amber-500 disabled:opacity-40 disabled:hover:bg-amber-600"
+                    >
+                      Next
+                      <ArrowRight className="ml-1.5 h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleClose}
+                      className="bg-amber-600 text-stone-950 hover:bg-amber-500"
+                    >
+                      <Check className="mr-1.5 h-4 w-4" />
+                      Done
+                    </Button>
+                  )}
+                </div>
+              </div>
             </motion.div>
           </AnimatePresence>
-        </div>
-      </div>
-
-      {/* Footer Navigation */}
-      <div className="border-t border-amber-900/30 bg-stone-950/95 backdrop-blur-md">
-        <div className="container mx-auto flex items-center justify-between px-4 py-3">
-          <Button
-            variant="outline"
-            onClick={handleBack}
-            disabled={currentStep === 0}
-            className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 disabled:opacity-30"
-          >
-            <ArrowLeft className="mr-1.5 h-4 w-4" />
-            Back
-          </Button>
-
-          <span className="text-xs text-amber-200/40">
-            Step {currentStep + 1} of {STEPS.length}
-          </span>
-
-          {currentStep < STEPS.length - 1 ? (
-            <Button
-              onClick={handleNext}
-              disabled={!canProceed()}
-              className="bg-amber-600 text-stone-950 hover:bg-amber-500 disabled:opacity-40 disabled:hover:bg-amber-600"
-            >
-              Next
-              <ArrowRight className="ml-1.5 h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              onClick={handleClose}
-              className="bg-amber-600 text-stone-950 hover:bg-amber-500"
-            >
-              <Check className="mr-1.5 h-4 w-4" />
-              Done
-            </Button>
-          )}
         </div>
       </div>
     </motion.div>
@@ -675,10 +756,12 @@ export function GiftBuilder() {
 function StepLayout({
   title,
   subtitle,
+  info,
   children,
 }: {
   title: string;
   subtitle: string;
+  info?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -687,6 +770,12 @@ function StepLayout({
         <h2 className="text-2xl font-bold text-amber-100 sm:text-3xl">{title}</h2>
         <p className="mt-1 text-sm text-amber-200/50">{subtitle}</p>
       </div>
+      {info && (
+        <div className="mb-5 flex items-start gap-2.5 rounded-lg bg-amber-900/20 p-3">
+          <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-200/60" />
+          <p className="text-xs text-amber-200/60 leading-relaxed">{info}</p>
+        </div>
+      )}
       {children}
     </div>
   );

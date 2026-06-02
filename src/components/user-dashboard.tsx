@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   User, ShoppingBag, Heart, CreditCard, Ticket, ArrowLeft, Mail, Shield, Loader2, Package, Clock, Truck, XCircle, ShoppingCart, MessageSquare, Plus,
+  Sun, Moon, Sparkles, Gift, Headphones, TrendingUp, Star, Zap, ChevronRight, Calendar, Award, BarChart3, Crown, Target,
 } from 'lucide-react'
 
 /* ─── style constants ─── */
@@ -56,9 +57,29 @@ const statusColor = (s: string) => {
 const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n)
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 
+/* ─── Helper: time-of-day greeting ─── */
+function getGreeting(): string {
+  const h = new Date().getHours()
+  if (h < 12) return 'Good Morning'
+  if (h < 17) return 'Good Afternoon'
+  return 'Good Evening'
+}
+
+function formatDateFull(): string {
+  return new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+/* ─── Mock product data for recommendations ─── */
+const MOCK_RECOMMENDATIONS = [
+  { id: 'rec-1', name: 'Elegant Silk Saree', price: 3499, image: '/images/hero.png', rating: 4.5, category: 'sarees' },
+  { id: 'rec-2', name: 'Diamond Pendant Set', price: 12999, image: '/images/hero.png', rating: 4.8, category: 'jewelry' },
+  { id: 'rec-3', name: 'Premium Watch', price: 8999, image: '/images/hero.png', rating: 4.3, category: 'watches' },
+  { id: 'rec-4', name: 'Designer Clutch Bag', price: 2499, image: '/images/hero.png', rating: 4.6, category: 'leather-goods' },
+]
+
 /* ─── Main Component ─── */
 export function UserDashboard() {
-  const { authUser, authToken, setView, clearAuth, setAuthView } = useStore()
+  const { authUser, authToken, setView, clearAuth, setAuthView, selectProduct, cartItems, toggleGiftBuilder } = useStore()
 
   // 401 auto-logout
   React.useEffect(() => {
@@ -84,44 +105,152 @@ export function UserDashboard() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="py-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600/20">
-            <User className="h-5 w-5 text-amber-400" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-amber-100">My Account</h1>
-            <p className="text-xs text-amber-200/50">Welcome back, {authUser.name}</p>
-          </div>
-        </div>
-        <Button variant="outline" className={btnOutline} onClick={() => setView('home')}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back to Store
-        </Button>
-      </div>
+      {/* Welcome Banner */}
+      <WelcomeBanner userName={authUser.name} token={authToken} email={authUser.email} cartItems={cartItems} />
+
+      {/* Quick Actions Grid */}
+      <QuickActionsGrid setView={setView} selectProduct={selectProduct} toggleGiftBuilder={toggleGiftBuilder} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Profile Card */}
-        <ProfileCard user={authUser} />
+        <div className="space-y-6">
+          <ProfileCard user={authUser} />
+          <LoyaltyPointsCard />
+        </div>
 
-        {/* Recent Orders */}
+        {/* Recent Activity */}
         <div className="lg:col-span-2">
-          <RecentOrders token={authToken} email={authUser.email} />
+          <ActivityFeed token={authToken} email={authUser.email} userId={authUser.id} />
         </div>
       </div>
 
       {/* Order Tracking Section */}
       <OrderTrackingSection token={authToken} email={authUser.email} />
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        {/* Wishlist */}
-        <WishlistSection token={authToken} />
+      {/* Personalized Recommendations */}
+      <RecommendationsSection setView={setView} selectProduct={selectProduct} />
 
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {/* Payment Methods */}
         <PaymentMethodsSection />
 
         {/* Support Tickets */}
         <SupportTicketsSection token={authToken} userId={authUser.id} />
+      </div>
+    </motion.div>
+  )
+}
+
+/* ─── Welcome Banner ─── */
+function WelcomeBanner({ userName, token, email, cartItems }: { userName: string; token: string | null; email: string; cartItems: any[] }) {
+  // Fetch orders count
+  const { data: ordersData } = useQuery({
+    queryKey: ['user-orders-banner', email],
+    queryFn: async () => {
+      const res = await fetch(`/api/orders?email=${encodeURIComponent(email)}`, { headers: authH(token) })
+      if (!res.ok) throw new Error('Failed')
+      return res.json()
+    },
+  })
+
+  const { data: wishlistData } = useQuery({
+    queryKey: ['user-wishlist-banner'],
+    queryFn: async () => {
+      const res = await fetch('/api/wishlist', { headers: authH(token) })
+      if (!res.ok) throw new Error('Failed')
+      return res.json()
+    },
+    enabled: !!token,
+  })
+
+  const totalOrders = ordersData?.orders?.length || 0
+  const wishlistItems = wishlistData?.wishlist?.length || 0
+  const cartCount = cartItems.length
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
+      <div className="relative overflow-hidden rounded-xl border border-amber-900/30 bg-gradient-to-r from-amber-900/30 via-stone-900/80 to-rose-900/20 p-6">
+        {/* Decorative elements */}
+        <div className="absolute top-0 right-0 w-48 h-48 bg-amber-600/5 rounded-full -translate-y-1/2 translate-x-1/4" />
+        <div className="absolute bottom-0 left-1/3 w-32 h-32 bg-rose-600/5 rounded-full translate-y-1/2" />
+
+        <div className="relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Sun className="h-5 w-5 text-amber-400" />
+                <span className="text-sm font-medium text-amber-300">{getGreeting()},</span>
+              </div>
+              <h1 className="text-2xl font-bold text-amber-100">{userName}</h1>
+              <div className="flex items-center gap-2 mt-1">
+                <Calendar className="h-3.5 w-3.5 text-amber-200/40" />
+                <p className="text-xs text-amber-200/50">{formatDateFull()}</p>
+              </div>
+            </div>
+
+            {/* Quick Stats */}
+            <div className="flex gap-3">
+              <div className="flex flex-col items-center rounded-lg border border-amber-900/20 bg-stone-800/50 px-4 py-3 min-w-[80px]">
+                <ShoppingBag className="h-4 w-4 text-amber-400 mb-1" />
+                <span className="text-lg font-bold text-amber-100">{totalOrders}</span>
+                <span className="text-[9px] text-amber-200/40">Orders</span>
+              </div>
+              <div className="flex flex-col items-center rounded-lg border border-amber-900/20 bg-stone-800/50 px-4 py-3 min-w-[80px]">
+                <Heart className="h-4 w-4 text-rose-400 mb-1" />
+                <span className="text-lg font-bold text-amber-100">{wishlistItems}</span>
+                <span className="text-[9px] text-amber-200/40">Wishlist</span>
+              </div>
+              <div className="flex flex-col items-center rounded-lg border border-amber-900/20 bg-stone-800/50 px-4 py-3 min-w-[80px]">
+                <Zap className="h-4 w-4 text-amber-400 mb-1" />
+                <span className="text-lg font-bold text-amber-100">2,450</span>
+                <span className="text-[9px] text-amber-200/40">Points</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+/* ─── Quick Actions Grid ─── */
+function QuickActionsGrid({ setView, selectProduct, toggleGiftBuilder }: { setView: (v: any) => void; selectProduct: (id: string) => void; toggleGiftBuilder: () => void }) {
+  const actions = [
+    { icon: ShoppingBag, label: 'Continue Shopping', desc: 'Browse products', color: 'text-amber-400', bg: 'bg-amber-600/15', action: () => setView('home') },
+    { icon: Truck, label: 'Track My Order', desc: 'View order status', color: 'text-purple-400', bg: 'bg-purple-600/15', action: () => {
+      const el = document.getElementById('order-tracking-section')
+      el?.scrollIntoView({ behavior: 'smooth' })
+    }},
+    { icon: Gift, label: 'Build a Gift', desc: 'Create gift combos', color: 'text-rose-400', bg: 'bg-rose-600/15', action: () => toggleGiftBuilder() },
+    { icon: Sparkles, label: 'AI Try-On History', desc: 'View past previews', color: 'text-cyan-400', bg: 'bg-cyan-600/15', action: () => {} },
+    { icon: Heart, label: 'My Wishlist', desc: 'Saved items', color: 'text-red-400', bg: 'bg-red-600/15', action: () => {
+      const el = document.getElementById('wishlist-section')
+      el?.scrollIntoView({ behavior: 'smooth' })
+    }},
+    { icon: Headphones, label: 'Support', desc: 'Get help', color: 'text-emerald-400', bg: 'bg-emerald-600/15', action: () => {
+      const el = document.getElementById('support-section')
+      el?.scrollIntoView({ behavior: 'smooth' })
+    }},
+  ]
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }}>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {actions.map((action, idx) => (
+          <button
+            key={action.label}
+            onClick={action.action}
+            className="group flex flex-col items-center gap-2 rounded-xl border border-amber-900/20 bg-stone-900/60 p-4 transition-all hover:border-amber-600/30 hover:bg-stone-800/60 hover:shadow-md hover:shadow-amber-900/10"
+          >
+            <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${action.bg} transition-transform group-hover:scale-110`}>
+              <action.icon className={`h-5 w-5 ${action.color}`} />
+            </div>
+            <div className="text-center">
+              <p className="text-xs font-medium text-amber-100">{action.label}</p>
+              <p className="text-[9px] text-amber-200/30">{action.desc}</p>
+            </div>
+          </button>
+        ))}
       </div>
     </motion.div>
   )
@@ -162,70 +291,188 @@ function ProfileCard({ user }: { user: { name: string; email: string; role: stri
               </div>
             </div>
           </div>
+          <Button variant="outline" className={`w-full ${btnOutline}`} onClick={() => {/* could open edit profile */}}>
+            <User className="mr-2 h-4 w-4" /> Edit Profile
+          </Button>
         </CardContent>
       </Card>
     </motion.div>
   )
 }
 
-/* ─── Recent Orders ─── */
-function RecentOrders({ token, email }: { token: string | null; email: string }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['user-orders', email],
+/* ─── Loyalty Points Card ─── */
+function LoyaltyPointsCard() {
+  const points = 2450
+  const tier = 'Gold'
+  const nextTier = 'Platinum'
+  const nextTierPoints = 5000
+  const progress = Math.min((points / nextTierPoints) * 100, 100)
+
+  const recentPoints = [
+    { action: 'Order #3847', points: 150, date: '2 days ago' },
+    { action: 'Review bonus', points: 50, date: '5 days ago' },
+    { action: 'Referral reward', points: 200, date: '1 week ago' },
+  ]
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
+      <Card className={cardCls}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Award className="h-4 w-4 text-amber-400" />
+            <CardTitle className="text-sm font-semibold text-amber-100">Loyalty Points</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Points Balance */}
+          <div className="text-center">
+            <p className="text-3xl font-bold text-amber-100">{points.toLocaleString()}</p>
+            <p className="text-xs text-amber-200/50">points balance</p>
+          </div>
+
+          {/* Tier Badge */}
+          <div className="flex items-center justify-center gap-2">
+            <div className="flex items-center gap-1.5 rounded-full bg-amber-600/20 px-3 py-1 border border-amber-600/30">
+              <Crown className="h-3.5 w-3.5 text-amber-400" />
+              <span className="text-xs font-bold text-amber-300">{tier} Member</span>
+            </div>
+          </div>
+
+          {/* Next Tier Progress */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="text-amber-200/40">Progress to {nextTier}</span>
+              <span className="text-amber-400">{points.toLocaleString()} / {nextTierPoints.toLocaleString()}</span>
+            </div>
+            <div className="h-2 rounded-full bg-stone-800/80 overflow-hidden">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                transition={{ delay: 0.5, duration: 1, ease: 'easeOut' }}
+                className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400"
+              />
+            </div>
+            <p className="text-[9px] text-amber-200/30 text-center">{(nextTierPoints - points).toLocaleString()} points to {nextTier}</p>
+          </div>
+
+          <Separator className="bg-amber-900/20" />
+
+          {/* Recent Points */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-200/40">Recent Points</p>
+            {recentPoints.map((p, i) => (
+              <div key={i} className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                  <span className="text-xs text-amber-200/60">{p.action}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-emerald-400">+{p.points}</span>
+                  <span className="text-[9px] text-amber-200/30">{p.date}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  )
+}
+
+/* ─── Activity Feed ─── */
+function ActivityFeed({ token, email, userId }: { token: string | null; email: string; userId: string }) {
+  const { data: ordersData, isLoading: ordersLoading } = useQuery({
+    queryKey: ['user-orders-activity', email],
     queryFn: async () => {
       const res = await fetch(`/api/orders?email=${encodeURIComponent(email)}`, { headers: authH(token) })
-      if (!res.ok) throw new Error('Failed to fetch orders')
+      if (!res.ok) throw new Error('Failed')
       return res.json()
     },
   })
 
-  const orders = data?.orders || []
+  const { data: wishlistData, isLoading: wishlistLoading } = useQuery({
+    queryKey: ['user-wishlist-activity'],
+    queryFn: async () => {
+      const res = await fetch('/api/wishlist', { headers: authH(token) })
+      if (!res.ok) throw new Error('Failed')
+      return res.json()
+    },
+    enabled: !!token,
+  })
+
+  const orders = ordersData?.orders || []
+  const wishlist = wishlistData?.wishlist || []
+
+  // Build activity items from different sources
+  const activities: { type: string; icon: any; text: string; time: string; color: string }[] = []
+
+  // Recent orders
+  orders.slice(0, 3).forEach((o: any) => {
+    activities.push({
+      type: 'order',
+      icon: ShoppingBag,
+      text: `Order ${o.orderNumber} — ${fmt(o.total)}`,
+      time: fmtDate(o.createdAt),
+      color: 'text-amber-400',
+    })
+  })
+
+  // Recent wishlist
+  wishlist.slice(0, 2).forEach((w: any) => {
+    activities.push({
+      type: 'wishlist',
+      icon: Heart,
+      text: `Added "${w.product?.name?.substring(0, 30) || 'Item'}" to wishlist`,
+      time: fmtDate(w.createdAt),
+      color: 'text-rose-400',
+    })
+  })
+
+  // Mock AI try-on activity
+  activities.push({
+    type: 'ai-tryon',
+    icon: Sparkles,
+    text: 'AI Virtual Try-On completed',
+    time: 'Today',
+    color: 'text-cyan-400',
+  })
+
+  // Sort by recency (just use insertion order for now)
+  const isLoading = ordersLoading || wishlistLoading
 
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
       <Card className={cardCls}>
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
-            <ShoppingBag className="h-4 w-4 text-amber-400" />
-            <CardTitle className="text-sm font-semibold text-amber-100">Recent Orders</CardTitle>
+            <BarChart3 className="h-4 w-4 text-amber-400" />
+            <CardTitle className="text-sm font-semibold text-amber-100">Recent Activity</CardTitle>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent>
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-5 w-5 animate-spin text-amber-400" />
             </div>
-          ) : orders.length === 0 ? (
+          ) : activities.length === 0 ? (
             <div className="py-8 text-center">
               <Package className="mx-auto mb-2 h-8 w-8 text-amber-200/20" />
-              <p className="text-sm text-amber-200/40">No orders yet</p>
+              <p className="text-sm text-amber-200/40">No recent activity</p>
             </div>
           ) : (
-            <div className="overflow-x-auto max-h-96 overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-amber-900/20 hover:bg-transparent">
-                    <TableHead className="text-amber-200/50">Order #</TableHead>
-                    <TableHead className="text-amber-200/50">Items</TableHead>
-                    <TableHead className="text-amber-200/50">Total</TableHead>
-                    <TableHead className="text-amber-200/50">Status</TableHead>
-                    <TableHead className="text-amber-200/50">Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {orders.slice(0, 10).map((o: any) => (
-                    <TableRow key={o.id} className="border-amber-900/10 hover:bg-amber-900/5">
-                      <TableCell className="text-sm font-medium text-amber-100">{o.orderNumber}</TableCell>
-                      <TableCell className="text-sm text-amber-200/60">{o.itemCount || o.items?.length || 0}</TableCell>
-                      <TableCell className="text-sm font-medium text-amber-100">{fmt(o.total)}</TableCell>
-                      <TableCell>
-                        <Badge className={statusColor(o.status)}>{o.status}</Badge>
-                      </TableCell>
-                      <TableCell className="text-xs text-amber-200/60">{fmtDate(o.createdAt)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {activities.map((activity, idx) => (
+                <div key={idx} className="flex items-center gap-3 rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-stone-700/50">
+                    <activity.icon className={`h-4 w-4 ${activity.color}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-amber-100 truncate">{activity.text}</p>
+                    <p className="text-[10px] text-amber-200/40">{activity.time}</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-amber-200/20 flex-shrink-0" />
+                </div>
+              ))}
             </div>
           )}
         </CardContent>
@@ -277,7 +524,7 @@ function OrderTrackingSection({ token, email }: { token: string | null; email: s
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
+    <motion.div id="order-tracking-section" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}>
       <Card className={cardCls}>
         <CardHeader className="pb-3">
           <div className="flex items-center gap-2">
@@ -397,117 +644,48 @@ function OrderTrackingSection({ token, email }: { token: string | null; email: s
   )
 }
 
-/* ─── Wishlist Section ─── */
-function WishlistSection({ token }: { token: string | null }) {
-  const queryClient = useQueryClient()
-  const { addItem } = useStore()
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['user-wishlist'],
-    queryFn: async () => {
-      const res = await fetch('/api/wishlist', { headers: authH(token) })
-      if (!res.ok) throw new Error('Failed to fetch')
-      return res.json()
-    },
-    enabled: !!token,
-  })
-
-  const wishlist = data?.wishlist || []
-
-  const handleRemoveFromWishlist = async (productId: string) => {
-    try {
-      const res = await fetch('/api/wishlist', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', ...authH(token) },
-        body: JSON.stringify({ productId }),
-      })
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ['user-wishlist'] })
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const handleAddToCart = (item: any) => {
-    const product = item.product
-    const images = product?.images ? JSON.parse(typeof product.images === 'string' ? product.images : '[]') : []
-    addItem({
-      productId: product.id,
-      name: product.name,
-      price: product.price,
-      image: images[0] || '/images/placeholder.jpg',
-    })
-  }
-
+/* ─── Recommendations Section ─── */
+function RecommendationsSection({ setView, selectProduct }: { setView: (v: any) => void; selectProduct: (id: string) => void }) {
   return (
-    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}>
       <Card className={cardCls}>
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Heart className="h-4 w-4 text-amber-400" />
-            <CardTitle className="text-sm font-semibold text-amber-100">Wishlist</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-amber-400" />
+              <CardTitle className="text-sm font-semibold text-amber-100">Recommended for You</CardTitle>
+            </div>
+            <Button variant="ghost" size="sm" className="text-amber-200/40 hover:text-amber-400 text-xs" onClick={() => setView('home')}>
+              View All <ChevronRight className="h-3 w-3 ml-0.5" />
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {!token ? (
-            <div className="py-6 text-center">
-              <Heart className="mx-auto mb-2 h-8 w-8 text-amber-200/20" />
-              <p className="text-sm text-amber-200/40">Sign in to view your wishlist</p>
-            </div>
-          ) : isLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 className="h-5 w-5 animate-spin text-amber-400" />
-            </div>
-          ) : wishlist.length === 0 ? (
-            <div className="py-6 text-center">
-              <Heart className="mx-auto mb-2 h-8 w-8 text-amber-200/20" />
-              <p className="text-sm text-amber-200/40">Your wishlist is empty</p>
-              <p className="mt-1 text-xs text-amber-200/30">Save items you love for later</p>
-            </div>
-          ) : (
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {wishlist.map((w: any) => {
-                const product = w.product
-                const images = product?.images ? JSON.parse(typeof product.images === 'string' ? product.images : '[]') : []
-                return (
-                  <div key={w.id} className="flex items-center gap-3 rounded-lg border border-amber-900/20 bg-stone-800/30 p-3">
-                    {images[0] ? (
-                      <img src={images[0]} alt={product.name} className="h-10 w-10 rounded object-cover" />
-                    ) : (
-                      <div className="flex h-10 w-10 items-center justify-center rounded bg-stone-700/50">
-                        <Package className="h-4 w-4 text-amber-200/30" />
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-sm text-amber-100">{product.name}</p>
-                      <p className="text-xs text-amber-200/50">{fmt(product.price)}</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleAddToCart(w)}
-                        className="h-8 w-8 p-0 text-amber-200/40 hover:text-amber-400"
-                        title="Add to Cart"
-                      >
-                        <ShoppingCart className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveFromWishlist(w.productId)}
-                        className="h-8 w-8 p-0 text-red-400/40 hover:text-red-400"
-                        title="Remove from Wishlist"
-                      >
-                        <XCircle className="h-4 w-4" />
-                      </Button>
-                    </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {MOCK_RECOMMENDATIONS.map((product, idx) => (
+              <button
+                key={product.id}
+                onClick={() => {
+                  selectProduct(product.id)
+                }}
+                className="group flex flex-col rounded-lg border border-amber-900/20 bg-stone-800/30 overflow-hidden transition-all hover:border-amber-600/30 hover:shadow-md hover:shadow-amber-900/10 text-left"
+              >
+                <div className="relative aspect-square bg-stone-800 overflow-hidden">
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Package className="h-8 w-8 text-amber-200/15" />
                   </div>
-                )
-              })}
-            </div>
-          )}
+                  <div className="absolute bottom-1 right-1 flex items-center gap-0.5 rounded bg-stone-900/80 px-1.5 py-0.5">
+                    <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+                    <span className="text-[9px] text-amber-200/70">{product.rating}</span>
+                  </div>
+                </div>
+                <div className="p-2.5">
+                  <p className="text-xs font-medium text-amber-100 truncate">{product.name}</p>
+                  <p className="text-xs font-semibold text-amber-400 mt-0.5">{fmt(product.price)}</p>
+                </div>
+              </button>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </motion.div>
@@ -602,7 +780,7 @@ function SupportTicketsSection({ token, userId }: { token: string | null; userId
   }
 
   return (
-    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
+    <motion.div id="support-section" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
       <Card className={cardCls}>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
