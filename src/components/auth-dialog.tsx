@@ -23,8 +23,9 @@ import {
 } from '@/components/ui/select'
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp'
 import { Separator } from '@/components/ui/separator'
-import { Mail, Lock, User, Shield, Loader2, Eye, EyeOff, Building2 } from 'lucide-react'
+import { Mail, Lock, User, Shield, Loader2, Eye, EyeOff, Building2, ChevronRight, ArrowLeft } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { showToast } from '@/hooks/use-toast-notification'
 
 export function AuthDialog() {
   const authView = useStore((s) => s.authView)
@@ -62,6 +63,7 @@ export function AuthDialog() {
   const [success, setSuccess] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login')
+  const [selectedLoginRole, setSelectedLoginRole] = useState<'corporate' | 'user' | 'team' | null>(null)
 
   const isOpen = authView === 'login' || authView === 'register'
 
@@ -83,6 +85,7 @@ export function AuthDialog() {
     setError(null)
     setSuccess(null)
     setLoading(false)
+    setSelectedLoginRole(null)
   }, [])
 
   const handleOpenChange = useCallback(
@@ -162,6 +165,7 @@ export function AuthDialog() {
             role: data.user.role || 'USER',
           }
           setAuth(user, data.token)
+          showToast('success', `Welcome back, ${user.name}! Successfully signed in.`)
 
           // Show role-specific message for admin users
           if (user.role === 'admin' || user.role === 'team') {
@@ -170,6 +174,7 @@ export function AuthDialog() {
         }
       } catch {
         setError('Network error. Please check your connection and try again.')
+        showToast('error', 'Login failed. Please check your credentials.')
       } finally {
         setLoading(false)
       }
@@ -261,6 +266,7 @@ export function AuthDialog() {
             role: data.user.role || 'user',
           }
           setAuth(user, data.token)
+          showToast('success', 'Account created successfully!')
         } else if (data.user && !data.token) {
           // Account created but no token (needs verification/approval)
           setSuccess(
@@ -318,6 +324,7 @@ export function AuthDialog() {
             role: data.user.role || 'USER',
           }
           setAuth(user, data.token)
+          showToast('success', 'Verification successful!')
 
           // Show role-specific message for admin users
           if (user.role === 'admin' || user.role === 'team') {
@@ -516,10 +523,90 @@ export function AuthDialog() {
                   3 BOXES LUXURY
                 </DialogTitle>
                 <DialogDescription className="text-amber-200/50 text-center">
-                  Sign in to your exclusive account
+                  {selectedLoginRole ? 'Sign in to your exclusive account' : 'Choose Your Account Type'}
                 </DialogDescription>
               </DialogHeader>
 
+              {/* Step 0: Role Selection */}
+              {!selectedLoginRole && (
+                <div className="space-y-4">
+                  <div className="text-center mb-4">
+                    <h3 className="text-lg font-semibold text-amber-100">Choose Your Account Type</h3>
+                    <p className="text-xs text-amber-200/40">Select how you'd like to sign in</p>
+                  </div>
+                  <div className="space-y-3">
+                    {/* Customer/User */}
+                    <button
+                      onClick={() => {
+                        setSelectedLoginRole('user')
+                        setRegRole('user')
+                      }}
+                      className="w-full flex items-center gap-4 rounded-xl border border-amber-600/30 bg-stone-900/60 p-4 transition-all hover:border-amber-500/50 hover:bg-stone-900/80 hover:shadow-lg hover:shadow-amber-900/20 text-left"
+                    >
+                      <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-amber-600/20">
+                        <User className="h-6 w-6 text-amber-400" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-amber-100">Customer / User</p>
+                        <p className="text-xs text-amber-200/50">Personal shopping account</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-amber-400/40" />
+                    </button>
+
+                    {/* Corporate */}
+                    <button
+                      onClick={() => {
+                        setSelectedLoginRole('corporate')
+                        setRegRole('corporate')
+                      }}
+                      className="w-full flex items-center gap-4 rounded-xl border border-amber-500/40 bg-stone-900/60 p-4 transition-all hover:border-amber-400/60 hover:bg-stone-900/80 hover:shadow-lg hover:shadow-amber-900/30 text-left"
+                    >
+                      <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-amber-500/20">
+                        <Building2 className="h-6 w-6 text-amber-300" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-amber-100">Corporate Account</p>
+                        <p className="text-xs text-amber-200/50">Business gifting & bulk orders</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-amber-400/40" />
+                    </button>
+
+                    {/* Team / Agent */}
+                    <button
+                      onClick={() => {
+                        setSelectedLoginRole('team')
+                        setRegRole('team')
+                      }}
+                      className="w-full flex items-center gap-4 rounded-xl border border-purple-500/30 bg-stone-900/60 p-4 transition-all hover:border-purple-400/50 hover:bg-stone-900/80 hover:shadow-lg hover:shadow-purple-900/20 text-left"
+                    >
+                      <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-600/20">
+                        <Shield className="h-6 w-6 text-purple-400" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-amber-100">3 Boxes Team / Agent</p>
+                        <p className="text-xs text-amber-200/50">Internal team portal & support</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-amber-400/40" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step 1: Login/Register Form */}
+              {selectedLoginRole && (
+              <>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedLoginRole(null)
+                  setError(null)
+                  setSuccess(null)
+                }}
+                className="flex items-center gap-1.5 text-sm text-amber-200/50 hover:text-amber-200 transition-colors mb-3"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to role selection
+              </button>
               <Tabs
                 value={activeTab}
                 onValueChange={handleTabChange}
@@ -552,7 +639,7 @@ export function AuthDialog() {
                         <Input
                           id="login-email"
                           type="email"
-                          placeholder="you@example.com"
+                          placeholder="demo@3boxes.com"
                           value={loginEmail}
                           onChange={(e) => setLoginEmail(e.target.value)}
                           className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
@@ -723,7 +810,7 @@ export function AuthDialog() {
                         <Input
                           id="reg-name"
                           type="text"
-                          placeholder="Your full name"
+                          placeholder="e.g., Priya Sharma"
                           value={regName}
                           onChange={(e) => setRegName(e.target.value)}
                           className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
@@ -828,7 +915,7 @@ export function AuthDialog() {
                               <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/50" />
                               <Input
                                 type="text"
-                                placeholder="Your company name"
+                                placeholder="e.g., TechCorp India Pvt. Ltd."
                                 value={regCompanyName}
                                 onChange={(e) => setRegCompanyName(e.target.value)}
                                 className="border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
@@ -842,7 +929,7 @@ export function AuthDialog() {
                             </Label>
                             <Input
                               type="text"
-                              placeholder="Primary contact person"
+                              placeholder="e.g., Rajesh Kumar"
                               value={regContactName}
                               onChange={(e) => setRegContactName(e.target.value)}
                               className="border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
@@ -992,6 +1079,8 @@ export function AuthDialog() {
                   </div>
                 </TabsContent>
               </Tabs>
+              </>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

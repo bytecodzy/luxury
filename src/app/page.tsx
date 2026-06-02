@@ -22,6 +22,7 @@ import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
 import { AppDownloadSection } from '@/components/app-download-section';
 import { AppDownloadBanner } from '@/components/app-download-banner';
+import { ToastContainer } from '@/hooks/use-toast-notification';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
 
@@ -98,6 +99,7 @@ function AppContent() {
       <GiftBuilder />
       <GiftAssistant />
       <AppDownloadBanner />
+      <ToastContainer />
     </div>
   );
 }

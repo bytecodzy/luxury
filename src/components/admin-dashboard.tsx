@@ -942,11 +942,11 @@ function ProductForm({ token, product, onClose, onSaved }: { token: string | nul
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-        <div><Label className={lblCls}>SKU</Label><Input className={`${inputCls} mt-1`} value={form.sku} onChange={e => setForm(f => ({ ...f, sku: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Price *</Label><Input type="number" className={`${inputCls} mt-1`} value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Compare At Price</Label><Input type="number" className={`${inputCls} mt-1`} value={form.compareAtPrice} onChange={e => setForm(f => ({ ...f, compareAtPrice: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Cost Price</Label><Input type="number" className={`${inputCls} mt-1`} value={form.costPrice} onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Premium Gold Necklace" /></div>
+        <div><Label className={lblCls}>SKU</Label><Input className={`${inputCls} mt-1`} value={form.sku} onChange={e => setForm(f => ({ ...f, sku: e.target.value }))} placeholder="e.g., SKU-GN-001" /></div>
+        <div><Label className={lblCls}>Price *</Label><Input type="number" className={`${inputCls} mt-1`} value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} placeholder="e.g., 5999" /></div>
+        <div><Label className={lblCls}>Compare At Price</Label><Input type="number" className={`${inputCls} mt-1`} value={form.compareAtPrice} onChange={e => setForm(f => ({ ...f, compareAtPrice: e.target.value }))} placeholder="e.g., 7999" /></div>
+        <div><Label className={lblCls}>Cost Price</Label><Input type="number" className={`${inputCls} mt-1`} value={form.costPrice} onChange={e => setForm(f => ({ ...f, costPrice: e.target.value }))} placeholder="e.g., 3500" /></div>
         <div>
           <Label className={lblCls}>Category *</Label>
           <Select value={form.categoryId} onValueChange={v => setForm(f => ({ ...f, categoryId: v }))}>
@@ -968,11 +968,11 @@ function ProductForm({ token, product, onClose, onSaved }: { token: string | nul
             </SelectContent>
           </Select>
         </div>
-        <div><Label className={lblCls}>Tags (comma separated)</Label><Input className={`${inputCls} mt-1`} value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Tags (comma separated)</Label><Input className={`${inputCls} mt-1`} value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} placeholder="e.g., gold, luxury, necklace" /></div>
       </div>
       <div>
         <Label className={lblCls}>Description</Label>
-        <Textarea className={`${inputCls} mt-1`} rows={3} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+        <Textarea className={`${inputCls} mt-1`} rows={3} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g., Exquisite 22K gold necklace with traditional design..." />
       </div>
       <div className="flex items-center gap-2">
         <Switch checked={form.featured} onCheckedChange={v => setForm(f => ({ ...f, featured: v }))} />
@@ -1862,13 +1862,13 @@ function VendorForm({ token, vendor, onClose, onSaved }: { token: string | null;
     <div className="space-y-3">
       {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
       <div className="grid grid-cols-2 gap-3">
-        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Contact Name</Label><Input className={`${inputCls} mt-1`} value={form.contactName} onChange={e => setForm(f => ({ ...f, contactName: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Email</Label><Input type="email" className={`${inputCls} mt-1`} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Phone</Label><Input className={`${inputCls} mt-1`} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Royal Jewellers Pvt. Ltd." /></div>
+        <div><Label className={lblCls}>Contact Name</Label><Input className={`${inputCls} mt-1`} value={form.contactName} onChange={e => setForm(f => ({ ...f, contactName: e.target.value }))} placeholder="e.g., Rajesh Kumar" /></div>
+        <div><Label className={lblCls}>Email</Label><Input type="email" className={`${inputCls} mt-1`} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="e.g., contact@royaljewellers.com" /></div>
+        <div><Label className={lblCls}>Phone</Label><Input className={`${inputCls} mt-1`} value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="e.g., +91-9876543210" /></div>
       </div>
-      <div><Label className={lblCls}>Address</Label><Textarea className={`${inputCls} mt-1`} rows={2} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} /></div>
-      <div><Label className={lblCls}>GST Number</Label><Input className={`${inputCls} mt-1`} value={form.gstNumber} onChange={e => setForm(f => ({ ...f, gstNumber: e.target.value }))} /></div>
+      <div><Label className={lblCls}>Address</Label><Textarea className={`${inputCls} mt-1`} rows={2} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="e.g., 123 Business Park, Mumbai, MH 400001" /></div>
+      <div><Label className={lblCls}>GST Number</Label><Input className={`${inputCls} mt-1`} value={form.gstNumber} onChange={e => setForm(f => ({ ...f, gstNumber: e.target.value }))} placeholder="e.g., 27AABCU9603R1ZM" /></div>
       <div className="flex items-center gap-2">
         <Switch checked={form.isActive} onCheckedChange={v => setForm(f => ({ ...f, isActive: v }))} />
         <Label className={lblCls}>Active</Label>
@@ -2078,9 +2078,9 @@ function AddUserForm({ token, onClose, onSaved }: { token: string | null; onClos
   return (
     <div className="space-y-3">
       {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
-      <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-      <div><Label className={lblCls}>Email *</Label><Input type="email" className={`${inputCls} mt-1`} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} /></div>
-      <div><Label className={lblCls}>Password *</Label><Input type="password" className={`${inputCls} mt-1`} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} /></div>
+      <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., John Smith" /></div>
+      <div><Label className={lblCls}>Email *</Label><Input type="email" className={`${inputCls} mt-1`} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="e.g., admin@3boxes.com" /></div>
+      <div><Label className={lblCls}>Password *</Label><Input type="password" className={`${inputCls} mt-1`} value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Min. 8 characters" /></div>
       <div>
         <Label className={lblCls}>Role</Label>
         <Select value={form.role} onValueChange={v => setForm(f => ({ ...f, role: v }))}>
@@ -2554,9 +2554,9 @@ function CategoriesTab({ token, onMutate }: { token: string | null; onMutate: ()
           <DialogHeader><DialogTitle className="text-amber-100">{editCategory ? 'Edit Category' : 'Add Category'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
-            <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Category name" /></div>
-            <div><Label className={lblCls}>Description</Label><Textarea className={`${inputCls} mt-1`} rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Category description" /></div>
-            <div><Label className={lblCls}>Image URL</Label><Input className={`${inputCls} mt-1`} value={form.image} onChange={e => setForm(f => ({ ...f, image: e.target.value }))} placeholder="https://..." /></div>
+            <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Gold Necklaces" /></div>
+            <div><Label className={lblCls}>Description</Label><Textarea className={`${inputCls} mt-1`} rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g., Handcrafted gold necklaces for special occasions" /></div>
+            <div><Label className={lblCls}>Image URL</Label><Input className={`${inputCls} mt-1`} value={form.image} onChange={e => setForm(f => ({ ...f, image: e.target.value }))} placeholder="e.g., https://example.com/category-image.jpg" /></div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" className={btnOutline} onClick={() => { setShowForm(false); resetForm() }}>Cancel</Button>
               <Button className={btnPrimary} onClick={handleSave} disabled={isPending}>{isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}{editCategory ? 'Update' : 'Create'}</Button>
@@ -3531,15 +3531,15 @@ function IntegrationForm({ token, integration, onClose, onSaved }: {
     <div className="space-y-4">
       {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Slug *</Label><Input className={`${inputCls} mt-1`} value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} placeholder="e.g. myntra" /></div>
-        <div><Label className={lblCls}>Base URL</Label><Input className={`${inputCls} mt-1`} value={form.baseUrl} onChange={e => setForm(f => ({ ...f, baseUrl: e.target.value }))} placeholder="https://www.myntra.com" /></div>
-        <div><Label className={lblCls}>Logo URL</Label><Input className={`${inputCls} mt-1`} value={form.logo} onChange={e => setForm(f => ({ ...f, logo: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Myntra" /></div>
+        <div><Label className={lblCls}>Slug *</Label><Input className={`${inputCls} mt-1`} value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} placeholder="e.g., myntra" /></div>
+        <div><Label className={lblCls}>Base URL</Label><Input className={`${inputCls} mt-1`} value={form.baseUrl} onChange={e => setForm(f => ({ ...f, baseUrl: e.target.value }))} placeholder="e.g., https://www.myntra.com" /></div>
+        <div><Label className={lblCls}>Logo URL</Label><Input className={`${inputCls} mt-1`} value={form.logo} onChange={e => setForm(f => ({ ...f, logo: e.target.value }))} placeholder="e.g., https://example.com/logo.png" /></div>
         <div className="sm:col-span-2"><Label className={lblCls}>Categories (comma separated)</Label><Input className={`${inputCls} mt-1`} value={form.categories} onChange={e => setForm(f => ({ ...f, categories: e.target.value }))} placeholder="sarees, jewelry, watches" /></div>
-        <div><Label className={lblCls}>Affiliate Tag</Label><Input className={`${inputCls} mt-1`} value={form.affiliateTag} onChange={e => setForm(f => ({ ...f, affiliateTag: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Commission %</Label><Input type="number" className={`${inputCls} mt-1`} value={form.commission} onChange={e => setForm(f => ({ ...f, commission: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Max Products</Label><Input type="number" className={`${inputCls} mt-1`} value={form.maxProducts} onChange={e => setForm(f => ({ ...f, maxProducts: e.target.value }))} /></div>
-        <div><Label className={lblCls}>Sync Interval (hrs)</Label><Input type="number" className={`${inputCls} mt-1`} value={form.syncInterval} onChange={e => setForm(f => ({ ...f, syncInterval: e.target.value }))} /></div>
+        <div><Label className={lblCls}>Affiliate Tag</Label><Input className={`${inputCls} mt-1`} value={form.affiliateTag} onChange={e => setForm(f => ({ ...f, affiliateTag: e.target.value }))} placeholder="e.g., 3boxaffil" /></div>
+        <div><Label className={lblCls}>Commission %</Label><Input type="number" className={`${inputCls} mt-1`} value={form.commission} onChange={e => setForm(f => ({ ...f, commission: e.target.value }))} placeholder="e.g., 5" /></div>
+        <div><Label className={lblCls}>Max Products</Label><Input type="number" className={`${inputCls} mt-1`} value={form.maxProducts} onChange={e => setForm(f => ({ ...f, maxProducts: e.target.value }))} placeholder="e.g., 1000" /></div>
+        <div><Label className={lblCls}>Sync Interval (hrs)</Label><Input type="number" className={`${inputCls} mt-1`} value={form.syncInterval} onChange={e => setForm(f => ({ ...f, syncInterval: e.target.value }))} placeholder="e.g., 24" /></div>
       </div>
       <div className="flex items-center gap-2">
         <Switch checked={form.autoSync} onCheckedChange={v => setForm(f => ({ ...f, autoSync: v }))} />

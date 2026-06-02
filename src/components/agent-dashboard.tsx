@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/table'
 import {
   Headphones, FileText, ArrowLeft, Shield, Loader2, CheckCircle2, Clock, AlertCircle,
-  TrendingUp, Users, BarChart3,
+  TrendingUp, Users, BarChart3, Zap, Award, Activity,
 } from 'lucide-react'
 
 /* ─── style constants ─── */
@@ -92,21 +92,81 @@ export function AgentDashboard() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="py-6 space-y-6">
-      {/* Header */}
+      {/* Header - Purple themed */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600/20">
-            <Headphones className="h-5 w-5 text-amber-400" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-purple-700/30 to-purple-600/20 border border-purple-600/20 shrink-0">
+            <Headphones className="h-6 w-6 text-purple-400" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-amber-100">Agent Dashboard</h1>
-            <p className="text-xs text-amber-200/50">Welcome, {authUser.name}</p>
+            <h1 className="text-xl font-bold text-purple-100">Agent Dashboard</h1>
+            <p className="text-xs text-purple-300/50">Welcome, {authUser.name}</p>
           </div>
           <Badge className="ml-2 bg-purple-600/20 text-purple-400 border-purple-600/30">Agent</Badge>
         </div>
         <Button variant="outline" className={btnOutline} onClick={() => setView('home')}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to Store
         </Button>
+      </div>
+
+      {/* Support Queue + Performance Score Row */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* Support Queue Counter */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+          <Card className="border-purple-700/30 bg-gradient-to-br from-purple-950/60 to-stone-900/80">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-600/20 animate-pulse">
+                  <Zap className="h-5 w-5 text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-xs text-purple-300/60">Support Queue</p>
+                  <p className="text-2xl font-bold text-purple-200">5</p>
+                </div>
+                <Badge className="ml-auto bg-yellow-600/20 text-yellow-400 border-yellow-600/30 text-xs">3 Urgent</Badge>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Performance Score */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+          <Card className="border-purple-700/30 bg-gradient-to-br from-purple-950/60 to-stone-900/80">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-10 w-10 items-center justify-center">
+                  <svg className="h-10 w-10 -rotate-90" viewBox="0 0 36 36">
+                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="rgba(147,51,234,0.2)" strokeWidth="3" />
+                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#a855f7" strokeWidth="3" strokeDasharray="85, 100" strokeLinecap="round" />
+                  </svg>
+                  <span className="absolute text-xs font-bold text-purple-300">85</span>
+                </div>
+                <div>
+                  <p className="text-xs text-purple-300/60">Performance Score</p>
+                  <p className="text-sm font-semibold text-purple-200">Excellent</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Avg Response Time */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+          <Card className="border-purple-700/30 bg-gradient-to-br from-purple-950/60 to-stone-900/80">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-600/20">
+                  <Activity className="h-5 w-5 text-purple-400" />
+                </div>
+                <div>
+                  <p className="text-xs text-purple-300/60">Avg. Response</p>
+                  <p className="text-2xl font-bold text-purple-200">2.4h</p>
+                </div>
+                <TrendingUp className="ml-auto h-4 w-4 text-green-400" />
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
       </div>
 
       {/* Quick Stats */}

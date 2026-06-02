@@ -196,6 +196,97 @@ const CATEGORY_CONFIG: Record<string, CategoryConfig> = {
     bodyType: 'Professional product-in-use photograph',
     useProductEdit: true,
   },
+  'women-sarees': {
+    placement: 'draped in the saree in traditional Indian style with pallu elegantly over the left shoulder, matching blouse, properly pleated at the waist',
+    size: '768x1344',
+    colorFocus: 'saree fabric color, border color, and zari/work color must match EXACTLY — a maroon saree must stay maroon, not become red or burgundy',
+    bodyType: 'Full-body professional fashion photograph',
+    useProductEdit: false,
+  },
+  'women-fashion': {
+    placement: 'wearing the outfit elegantly',
+    size: '768x1344',
+    colorFocus: 'outfit fabric color, print pattern, and accent colors must match EXACTLY',
+    bodyType: 'Full-body professional fashion photograph',
+    useProductEdit: false,
+  },
+  'women-jewelry': {
+    placement: 'wearing the jewelry piece',
+    size: '864x1152',
+    colorFocus: 'jewelry metal tone (gold/silver/rose-gold) and stone colors must match EXACTLY',
+    bodyType: 'Close-up beauty photograph from chest up',
+    useProductEdit: true,
+  },
+  'women-fragrances': {
+    placement: 'holding the fragrance bottle elegantly',
+    size: '864x1152',
+    colorFocus: 'bottle shape, cap color, and liquid color must match EXACTLY',
+    bodyType: 'Professional product-in-use photograph',
+    useProductEdit: true,
+  },
+  'women-accessories': {
+    placement: 'wearing the accessory',
+    size: '864x1152',
+    colorFocus: 'accessory color, material, and design must match EXACTLY',
+    bodyType: 'Professional fashion photograph',
+    useProductEdit: true,
+  },
+  'kids-fashion': {
+    placement: 'wearing the outfit',
+    size: '768x1344',
+    colorFocus: 'outfit fabric color, print pattern, and accent colors must match EXACTLY',
+    bodyType: 'Full-body professional fashion photograph of a child/teenager',
+    useProductEdit: false,
+  },
+  'kids-shirts': {
+    placement: 'wearing the shirt',
+    size: '768x1344',
+    colorFocus: 'shirt fabric color, pattern, and details must match EXACTLY',
+    bodyType: 'Full-body professional fashion photograph of a child/teenager',
+    useProductEdit: false,
+  },
+  'kids-dresses': {
+    placement: 'wearing the dress',
+    size: '768x1344',
+    colorFocus: 'dress fabric color, pattern, and accent colors must match EXACTLY',
+    bodyType: 'Full-body professional fashion photograph of a child/teenager',
+    useProductEdit: false,
+  },
+  'kids-toys': {
+    placement: 'holding the toy product',
+    size: '864x1152',
+    colorFocus: 'product colors, materials, and design must match EXACTLY',
+    bodyType: 'Professional product-in-use photograph',
+    useProductEdit: true,
+  },
+  'men-accessories': {
+    placement: 'wearing the accessory',
+    size: '864x1152',
+    colorFocus: 'accessory color, material, and design must match EXACTLY',
+    bodyType: 'Professional fashion photograph',
+    useProductEdit: true,
+  },
+  'men-watches': {
+    placement: 'wearing the watch on the left wrist',
+    size: '864x1152',
+    colorFocus: 'watch dial color, case metal color, and strap color must match EXACTLY',
+    bodyType: 'Close-up photograph from waist up',
+    useProductEdit: true,
+  },
+  'men-tshirts': {
+    placement: 'wearing the t-shirt',
+    size: '768x1344',
+    colorFocus: 't-shirt fabric color, pattern, and details must match EXACTLY',
+    bodyType: 'Full-body professional fashion photograph',
+    useProductEdit: false,
+  },
+  'men-fragrances': {
+    placement: 'holding the fragrance bottle',
+    size: '864x1152',
+    colorFocus: 'bottle shape, cap color, and liquid color must match EXACTLY',
+    bodyType: 'Professional product-in-use photograph',
+    useProductEdit: true,
+  },
 }
 
 function getCategoryConfig(categorySlug: string, productName: string): CategoryConfig {
@@ -212,6 +303,21 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
 
   // Override placement based on product name for jewelry
   if (categorySlug === 'jewelry') {
+    const n = productName.toLowerCase()
+    if (n.includes('earring') || n.includes('jhumka') || n.includes('stud'))
+      config.placement = 'wearing earrings on both earlobes'
+    else if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple') || n.includes('haar') || n.includes('mala'))
+      config.placement = 'wearing a necklace around the neck'
+    else if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle') || n.includes('kada'))
+      config.placement = 'wearing a bracelet on the wrist'
+    else if (n.includes('ring'))
+      config.placement = 'wearing a ring on the finger'
+    else if (n.includes('set') || n.includes('bridal'))
+      config.placement = 'wearing a matching jewelry set — necklace around the neck and earrings on both earlobes'
+  }
+
+  // Override placement based on product name for women-jewelry
+  if (categorySlug === 'women-jewelry') {
     const n = productName.toLowerCase()
     if (n.includes('earring') || n.includes('jhumka') || n.includes('stud'))
       config.placement = 'wearing earrings on both earlobes'

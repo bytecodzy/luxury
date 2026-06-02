@@ -132,17 +132,31 @@ export function CorporateDashboard() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="py-6">
+      {/* Corporate Discount Banner */}
+      <div className="mb-4 rounded-lg border border-blue-700/30 bg-gradient-to-r from-blue-950/60 via-blue-900/40 to-teal-900/30 p-3 flex items-center gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600/20 shrink-0">
+          <Percent className="h-4 w-4 text-blue-400" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-blue-200">Corporate Discount Active</p>
+          <p className="text-xs text-blue-300/60">Enjoy exclusive bulk pricing &amp; priority delivery for all corporate orders</p>
+        </div>
+        <Badge className="bg-blue-600/20 text-blue-300 border-blue-600/30 shrink-0">Up to 25% OFF</Badge>
+      </div>
+
+      {/* Header with Blue/Teal branding */}
       <div className="mb-6 flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600/20">
-          <Building2 className="h-5 w-5 text-amber-400" />
+        {/* Company Logo Placeholder */}
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-700/30 to-teal-700/20 border border-blue-600/20 shrink-0">
+          <Building2 className="h-6 w-6 text-blue-400" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-amber-100">Corporate Dashboard</h1>
-          <p className="text-xs text-amber-200/50">3 BOXES LUXURY &mdash; Corporate Gifting Portal</p>
+          <h1 className="text-xl font-bold text-blue-100">Corporate Dashboard</h1>
+          <p className="text-xs text-teal-300/50">3 BOXES LUXURY &mdash; Corporate Gifting Portal</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <Badge className={approvalStatusColor('corporate')}>Corporate</Badge>
-          <span className="text-xs text-amber-200/50">{authUser.email}</span>
+          <Badge className="bg-blue-600/20 text-blue-300 border-blue-600/30">Corporate</Badge>
+          <span className="text-xs text-blue-200/50">{authUser.email}</span>
         </div>
       </div>
 
@@ -193,9 +207,9 @@ function OverviewTab({ token, onNavigate }: { token: string | null; onNavigate: 
 
   const summaryCards = [
     { title: 'Active Campaigns', value: activeCampaigns.toString(), icon: Megaphone, color: 'text-blue-400', bg: 'bg-blue-600/10' },
-    { title: 'Total Recipients', value: totalRecipients.toString(), icon: Users, color: 'text-purple-400', bg: 'bg-purple-600/10' },
-    { title: 'Total Budget', value: fmt(totalBudget), icon: IndianRupee, color: 'text-amber-400', bg: 'bg-amber-600/10' },
-    { title: 'Corporate Discount', value: `${discountPercent}%`, icon: Percent, color: 'text-green-400', bg: 'bg-green-600/10' },
+    { title: 'Total Recipients', value: totalRecipients.toString(), icon: Users, color: 'text-teal-400', bg: 'bg-teal-600/10' },
+    { title: 'Total Budget', value: fmt(totalBudget), icon: IndianRupee, color: 'text-sky-400', bg: 'bg-sky-600/10' },
+    { title: 'Corporate Discount', value: `${discountPercent}%`, icon: Percent, color: 'text-cyan-400', bg: 'bg-cyan-600/10' },
   ]
 
   const recentCampaigns = campaigns.slice(0, 3)
@@ -506,7 +520,7 @@ function CreateCampaignForm({ token, onClose, onSaved }: { token: string | null;
     <div className="space-y-4">
       {error && <div className="rounded-md bg-red-600/10 p-3 text-sm text-red-400">{error}</div>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Campaign name" /></div>
+        <div><Label className={lblCls}>Name *</Label><Input className={`${inputCls} mt-1`} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g., Diwali 2025 Gift Campaign" /></div>
         <div>
           <Label className={lblCls}>Occasion</Label>
           <Select value={form.occasion} onValueChange={v => setForm(f => ({ ...f, occasion: v }))}>
@@ -523,8 +537,8 @@ function CreateCampaignForm({ token, onClose, onSaved }: { token: string | null;
             </SelectContent>
           </Select>
         </div>
-        <div><Label className={lblCls}>Budget per Recipient</Label><Input type="number" className={`${inputCls} mt-1`} value={form.budgetPerRecipient} onChange={e => setForm(f => ({ ...f, budgetPerRecipient: e.target.value }))} placeholder="0" /></div>
-        <div><Label className={lblCls}>Total Budget</Label><Input type="number" className={`${inputCls} mt-1`} value={form.totalBudget} onChange={e => setForm(f => ({ ...f, totalBudget: e.target.value }))} placeholder="0" /></div>
+        <div><Label className={lblCls}>Budget per Recipient</Label><Input type="number" className={`${inputCls} mt-1`} value={form.budgetPerRecipient} onChange={e => setForm(f => ({ ...f, budgetPerRecipient: e.target.value }))} placeholder="e.g., 5000" /></div>
+        <div><Label className={lblCls}>Total Budget</Label><Input type="number" className={`${inputCls} mt-1`} value={form.totalBudget} onChange={e => setForm(f => ({ ...f, totalBudget: e.target.value }))} placeholder="e.g., 50000" /></div>
         <div>
           <Label className={lblCls}>Delivery Type</Label>
           <Select value={form.deliveryType} onValueChange={v => setForm(f => ({ ...f, deliveryType: v }))}>
@@ -549,11 +563,11 @@ function CreateCampaignForm({ token, onClose, onSaved }: { token: string | null;
       </div>
       <div>
         <Label className={lblCls}>Description</Label>
-        <Textarea className={`${inputCls} mt-1`} rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Campaign description" />
+        <Textarea className={`${inputCls} mt-1`} rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g., Annual corporate gifting for Diwali celebrations..." />
       </div>
       <div>
         <Label className={lblCls}>Custom Message</Label>
-        <Textarea className={`${inputCls} mt-1`} rows={2} value={form.message} onChange={e => setForm(f => ({ ...f, message: e.target.value }))} placeholder="Greeting message for recipients" />
+        <Textarea className={`${inputCls} mt-1`} rows={2} value={form.message} onChange={e => setForm(f => ({ ...f, message: e.target.value }))} placeholder="e.g., Wishing you a prosperous Diwali from our team!" />
       </div>
       <div className="flex justify-end gap-2 pt-2">
         <Button variant="outline" className={btnOutline} onClick={onClose}>Cancel</Button>
@@ -1831,39 +1845,39 @@ function ProfileTab({ token }: { token: string | null }) {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <Label className={lblCls}>Industry</Label>
-              <Input className={`${inputCls} mt-1`} value={form.industry} onChange={e => setForm(f => ({ ...f, industry: e.target.value }))} placeholder="e.g. Technology, Finance" />
+              <Input className={`${inputCls} mt-1`} value={form.industry} onChange={e => setForm(f => ({ ...f, industry: e.target.value }))} placeholder="e.g., Technology, Finance" />
             </div>
             <div>
               <Label className={lblCls}>Website</Label>
-              <Input className={`${inputCls} mt-1`} value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} placeholder="https://example.com" />
+              <Input className={`${inputCls} mt-1`} value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} placeholder="e.g., https://techcorp.in" />
             </div>
             <div>
               <Label className={lblCls}>Contact Name</Label>
-              <Input className={`${inputCls} mt-1`} value={form.contactName} onChange={e => setForm(f => ({ ...f, contactName: e.target.value }))} placeholder="Primary contact person" />
+              <Input className={`${inputCls} mt-1`} value={form.contactName} onChange={e => setForm(f => ({ ...f, contactName: e.target.value }))} placeholder="e.g., Anil Mehta" />
             </div>
             <div>
               <Label className={lblCls}>Contact Phone</Label>
-              <Input className={`${inputCls} mt-1`} value={form.contactPhone} onChange={e => setForm(f => ({ ...f, contactPhone: e.target.value }))} placeholder="+91-9876543210" />
+              <Input className={`${inputCls} mt-1`} value={form.contactPhone} onChange={e => setForm(f => ({ ...f, contactPhone: e.target.value }))} placeholder="e.g., +91-9876543210" />
             </div>
           </div>
 
           <div>
             <Label className={lblCls}>Address</Label>
-            <Input className={`${inputCls} mt-1`} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="Street address" />
+            <Input className={`${inputCls} mt-1`} value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="e.g., 123 Business Park, Mumbai" />
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <Label className={lblCls}>City</Label>
-              <Input className={`${inputCls} mt-1`} value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} placeholder="City" />
+              <Input className={`${inputCls} mt-1`} value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} placeholder="e.g., Mumbai" />
             </div>
             <div>
               <Label className={lblCls}>State</Label>
-              <Input className={`${inputCls} mt-1`} value={form.state} onChange={e => setForm(f => ({ ...f, state: e.target.value }))} placeholder="State" />
+              <Input className={`${inputCls} mt-1`} value={form.state} onChange={e => setForm(f => ({ ...f, state: e.target.value }))} placeholder="e.g., Maharashtra" />
             </div>
             <div>
               <Label className={lblCls}>ZIP Code</Label>
-              <Input className={`${inputCls} mt-1`} value={form.zipCode} onChange={e => setForm(f => ({ ...f, zipCode: e.target.value }))} placeholder="400001" />
+              <Input className={`${inputCls} mt-1`} value={form.zipCode} onChange={e => setForm(f => ({ ...f, zipCode: e.target.value }))} placeholder="e.g., 400001" />
             </div>
           </div>
 

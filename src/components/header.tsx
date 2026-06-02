@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import { LocaleSwitcher, LocaleSwitcherMobile } from '@/components/locale-switcher';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
+import { showToast } from '@/hooks/use-toast-notification';
 import type { LucideIcon } from 'lucide-react';
 
 interface CategoryChild {
@@ -66,6 +67,8 @@ const CATEGORY_NAV: CategoryNavItem[] = [
     children: [
       { name: 'Toys & Games', slug: 'kids-toys' },
       { name: 'Kids Fashion', slug: 'kids-fashion' },
+      { name: 'Shirts (5-18 yrs)', slug: 'kids-shirts' },
+      { name: 'Dresses (5-18 yrs)', slug: 'kids-dresses' },
     ],
   },
   {
@@ -277,7 +280,7 @@ export function Header() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => { clearAuth(); setView('home') }}
+                  onClick={() => { clearAuth(); setView('home'); showToast('success', 'You have been signed out successfully.') }}
                   className="text-amber-200/40 hover:bg-red-900/20 hover:text-red-400"
                   aria-label={t('common.signOut')}
                 >
@@ -390,6 +393,7 @@ export function Header() {
                           clearAuth();
                           setView('home');
                           setMobileMenuOpen(false);
+                          showToast('success', 'You have been signed out successfully.')
                         }}
                         className="rounded-md px-4 py-2 text-left text-red-400/80 transition-colors hover:bg-red-900/20 hover:text-red-400"
                       >

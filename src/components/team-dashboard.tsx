@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/table'
 import {
   Users, Package, ShoppingBag, BookOpen, ArrowLeft, Shield, Loader2,
-  BarChart3, TrendingUp, FolderOpen, FileText,
+  BarChart3, TrendingUp, FolderOpen, FileText, PenTool, LayoutGrid,
 } from 'lucide-react'
 
 /* ─── style constants ─── */
@@ -65,21 +65,86 @@ export function TeamDashboard() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="py-6 space-y-6">
-      {/* Header */}
+      {/* Header - Green themed */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600/20">
-            <Users className="h-5 w-5 text-amber-400" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-700/30 to-emerald-600/20 border border-green-600/20 shrink-0">
+            <Users className="h-6 w-6 text-green-400" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-amber-100">3Boxes Team Dashboard</h1>
-            <p className="text-xs text-amber-200/50">Welcome, {authUser.name}</p>
+            <h1 className="text-xl font-bold text-green-100">3Boxes Team Dashboard</h1>
+            <p className="text-xs text-green-300/50">Welcome, {authUser.name}</p>
           </div>
           <Badge className="ml-2 bg-green-600/20 text-green-400 border-green-600/30">Team</Badge>
         </div>
         <Button variant="outline" className={btnOutline} onClick={() => setView('home')}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to Store
         </Button>
+      </div>
+
+      {/* Quick-Access: Content Editor & Product Manager */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* Content Editor Quick-Access */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+          <Card className="border-green-700/30 bg-gradient-to-br from-green-950/40 to-stone-900/80">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-600/20">
+                  <PenTool className="h-4 w-4 text-green-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-green-200">Content Editor</p>
+                  <p className="text-xs text-green-300/50">Quick access to content tools</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button className="rounded-md border border-green-700/20 bg-green-900/10 px-3 py-2 text-xs text-green-300/70 hover:bg-green-900/20 hover:text-green-200 transition-colors text-left">
+                  📝 Blog Posts
+                </button>
+                <button className="rounded-md border border-green-700/20 bg-green-900/10 px-3 py-2 text-xs text-green-300/70 hover:bg-green-900/20 hover:text-green-200 transition-colors text-left">
+                  🖼️ Media Library
+                </button>
+                <button className="rounded-md border border-green-700/20 bg-green-900/10 px-3 py-2 text-xs text-green-300/70 hover:bg-green-900/20 hover:text-green-200 transition-colors text-left">
+                  📋 Wiki Pages
+                </button>
+                <button className="rounded-md border border-green-700/20 bg-green-900/10 px-3 py-2 text-xs text-green-300/70 hover:bg-green-900/20 hover:text-green-200 transition-colors text-left">
+                  🔔 Announcements
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Product Manager Quick-Access */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+          <Card className="border-green-700/30 bg-gradient-to-br from-green-950/40 to-stone-900/80">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-600/20">
+                  <LayoutGrid className="h-4 w-4 text-green-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-green-200">Product Manager</p>
+                  <p className="text-xs text-green-300/50">Quick access to product tools</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button className="rounded-md border border-green-700/20 bg-green-900/10 px-3 py-2 text-xs text-green-300/70 hover:bg-green-900/20 hover:text-green-200 transition-colors text-left">
+                  📦 Catalog Review
+                </button>
+                <button className="rounded-md border border-green-700/20 bg-green-900/10 px-3 py-2 text-xs text-green-300/70 hover:bg-green-900/20 hover:text-green-200 transition-colors text-left">
+                  🏷️ Pricing Updates
+                </button>
+                <button className="rounded-md border border-green-700/20 bg-green-900/10 px-3 py-2 text-xs text-green-300/70 hover:bg-green-900/20 hover:text-green-200 transition-colors text-left">
+                  📊 Inventory Alerts
+                </button>
+                <button className="rounded-md border border-green-700/20 bg-green-900/10 px-3 py-2 text-xs text-green-300/70 hover:bg-green-900/20 hover:text-green-200 transition-colors text-left">
+                  ✏️ Descriptions
+                </button>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
       </div>
 
       {/* Quick Stats */}

@@ -77,6 +77,8 @@ const subcategoryIcons: Record<string, LucideIcon> = {
   'women-accessories': Gem,
   'kids-toys': ToyBrick,
   'kids-fashion': Shirt,
+  'kids-shirts': Shirt,
+  'kids-dresses': Ribbon,
   'home-decor': Home,
   'home-candles': Flame,
   'home-living': Home,
