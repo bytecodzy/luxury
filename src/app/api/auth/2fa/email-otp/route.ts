@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { setOtp, DEMO_USER_MAP } from '@/lib/demo-otp-store';
+import { send2FAEmailWithDetails } from '@/lib/email';
 
 /**
  * Send (or resend) an email-based OTP for 2FA verification.
@@ -61,8 +62,25 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // In production, send the OTP via email service (e.g., Gmail SMTP, SendGrid, etc.)
-    console.log(`[2FA Email OTP] OTP ${otp} generated for ${targetEmail || userId}`);
+    // Actually send the 2FA verification code via email (non-blocking)
+    if (targetEmail) {
+      const resendTargetEmail = targetEmail;
+      const resendOtp = otp;
+      send2FAEmailWithDetails(resendTargetEmail, resendOtp).then((emailResult) => {
+        if (emailResult.success) {
+          console.log('[2FA Email OTP] ✅ Email sent to:', resendTargetEmail);
+        } else {
+          console.warn('[2FA Email OTP] ❌ Failed to send email to:', resendTargetEmail);
+        }
+        if (emailResult.ethereal && emailResult.previewUrl) {
+          console.log('[2FA Email OTP] 📬 Ethereal preview URL:', emailResult.previewUrl);
+        }
+      }).catch((err) => {
+        console.error('[2FA Email OTP] Email send error:', err);
+      });
+    }
+
+    console.log(`[2FA Email OTP] OTP generated for ${targetEmail || userId}`);
 
     const maskedEmail = targetEmail
       ? targetEmail.replace(/(.{2})(.*)(@.*)/, '$1***$3')

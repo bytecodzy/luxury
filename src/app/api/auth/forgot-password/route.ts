@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import { checkRateLimit, getClientIp, rateLimitResponse } from '@/lib/rate-limiter';
 import { validateInput, forgotPasswordSchema } from '@/lib/validations/auth';
 import { addApiLog, getClientIpFromRequest } from '@/lib/api-logger';
+import { sendPasswordResetEmail, send2FAEmail } from '@/lib/email';
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -66,6 +67,12 @@ export async function POST(request: NextRequest) {
           },
         });
 
+        // Actually send the password reset email
+        const emailSent = await sendPasswordResetEmail(user.email, resetToken);
+        if (!emailSent) {
+          console.warn('[Forgot Password] Failed to send reset email to:', user.email);
+        }
+
         addApiLog({
           timestamp: new Date().toISOString(),
           method: 'POST',
@@ -79,8 +86,9 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           message: 'If an account exists with this email, a reset link has been sent.',
-          resetToken,
-          email: user.email,
+          emailSent,
+          // Only include resetToken in dev mode for testing
+          ...(process.env.NODE_ENV !== 'production' ? { resetToken, email: user.email } : {}),
         });
       }
 
@@ -132,6 +140,14 @@ export async function POST(request: NextRequest) {
           },
         });
 
+        // Also send OTP via email if user has an email on file
+        if (user.email) {
+          const emailSent = await send2FAEmail(user.email, otp);
+          if (!emailSent) {
+            console.warn('[Forgot Password] Failed to send OTP email to:', user.email);
+          }
+        }
+
         addApiLog({
           timestamp: new Date().toISOString(),
           method: 'POST',
@@ -145,8 +161,8 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           message: 'If an account exists with this phone, an OTP has been sent.',
-          otp,
-          phone: user.phone,
+          // Only include OTP in dev mode for testing
+          ...(process.env.NODE_ENV !== 'production' ? { otp, phone: user.phone } : {}),
         });
       }
 

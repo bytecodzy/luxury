@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { db } from '@/lib/db';
 import { createSession } from '@/lib/sessions';
 import { setOtp } from '@/lib/demo-otp-store';
+import { send2FAEmailWithDetails } from '@/lib/email';
 
 const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
 
@@ -133,6 +134,22 @@ export async function POST(request: NextRequest) {
           console.warn('[Auth] Failed to store OTP in DB:', dbErr);
         }
 
+        // Actually send the 2FA verification code via email (non-blocking)
+        // We fire-and-forget the email sending so the login response returns quickly
+        const targetUserEmail = user.email;
+        send2FAEmailWithDetails(targetUserEmail, otp).then((emailResult) => {
+          if (emailResult.success) {
+            console.log('[Auth] ✅ 2FA email sent to:', targetUserEmail);
+          } else {
+            console.warn('[Auth] ❌ Failed to send 2FA email to:', targetUserEmail);
+          }
+          if (emailResult.ethereal && emailResult.previewUrl) {
+            console.log('[Auth] 📬 Ethereal preview URL:', emailResult.previewUrl);
+          }
+        }).catch((err) => {
+          console.error('[Auth] Email send error:', err);
+        });
+
         return NextResponse.json({
           requiresTwoFactor: true,
           userId: user.id,
@@ -208,6 +225,21 @@ export async function POST(request: NextRequest) {
 
         // Store OTP in-memory (don't create DB entries for demo users to avoid password conflicts)
         setOtp(demoId, otp, normalizedEmail, 5);
+
+        // Actually send the 2FA verification code via email (non-blocking)
+        const demoTargetEmail = normalizedEmail;
+        send2FAEmailWithDetails(demoTargetEmail, otp).then((emailResult) => {
+          if (emailResult.success) {
+            console.log('[Auth] ✅ 2FA email sent to:', demoTargetEmail);
+          } else {
+            console.warn('[Auth] ❌ Failed to send 2FA email to:', demoTargetEmail);
+          }
+          if (emailResult.ethereal && emailResult.previewUrl) {
+            console.log('[Auth] 📬 Ethereal preview URL:', emailResult.previewUrl);
+          }
+        }).catch((err) => {
+          console.error('[Auth] Email send error:', err);
+        });
 
         return NextResponse.json({
           requiresTwoFactor: true,
