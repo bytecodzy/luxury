@@ -504,7 +504,7 @@ export async function fetchShopifyProducts(): Promise<ShopifyProductTransformed[
         compareAtPrice: firstVariant?.compare_at_price
           ? parseFloat(firstVariant.compare_at_price)
           : null,
-        images: (p.images && p.images.length > 0)
+        images: (p.images && Array.isArray(p.images) && p.images.length > 0)
           ? p.images.map((img) => img.src)
           : getFallbackImages(category.slug, p.id),
         category: category.name,

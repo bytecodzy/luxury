@@ -88,7 +88,7 @@ export function ProductCard({ product }: { product: Product }) {
   const [isHovered, setIsHovered] = useState(false);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
-  const totalImages = product.images.length;
+  const totalImages = (product.images ?? []).length;
   const currentImage = totalImages > 0
     ? getProxiedImageUrl(product.images[currentImageIndex], product.platform)
     : '/images/placeholder.jpg';
@@ -167,7 +167,7 @@ export function ProductCard({ product }: { product: Product }) {
         {/* Carousel Dots */}
         {totalImages > 1 && (
           <div className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5">
-            {product.images.map((_, i) => (
+            {(product.images ?? []).map((_, i) => (
               <button
                 key={i}
                 onClick={(e) => handleDotClick(e, i)}

@@ -1133,8 +1133,18 @@ export async function GET(request: NextRequest) {
         relationship: relationship || null,
       })
 
+    // Normalize products to ensure all array fields are defined
+    const normalizedProducts = result.products.map(p => ({
+      ...p,
+      images: Array.isArray(p.images) ? p.images : [],
+      tags: Array.isArray(p.tags) ? p.tags : [],
+      occasions: Array.isArray(p.occasions) ? p.occasions : [],
+      recipientTypes: Array.isArray(p.recipientTypes) ? p.recipientTypes : [],
+      relationships: Array.isArray(p.relationships) ? p.relationships : [],
+    }))
+
     return NextResponse.json({
-      products: result.products,
+      products: normalizedProducts,
       total: result.total,
       page,
       totalPages: Math.ceil(result.total / limit),
@@ -1387,8 +1397,18 @@ export async function GET(request: NextRequest) {
         relationship: relationship || null,
       })
 
+    // Normalize products to ensure all array fields are defined
+    const normalizedProducts = result.products.map(p => ({
+      ...p,
+      images: Array.isArray(p.images) ? p.images : [],
+      tags: Array.isArray(p.tags) ? p.tags : [],
+      occasions: Array.isArray(p.occasions) ? p.occasions : [],
+      recipientTypes: Array.isArray(p.recipientTypes) ? p.recipientTypes : [],
+      relationships: Array.isArray(p.relationships) ? p.relationships : [],
+    }))
+
     return NextResponse.json({
-      products: result.products,
+      products: normalizedProducts,
       total: result.total,
       page,
       totalPages: Math.ceil(result.total / limit),

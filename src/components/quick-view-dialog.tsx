@@ -78,8 +78,8 @@ export function QuickViewDialog({
 
   if (!product) return null;
 
-  const mainImage = product.images.length > 0
-    ? getProxiedImageUrl(product.images[selectedImage] || product.images[0], product.platform)
+  const mainImage = (product.images ?? []).length > 0
+    ? getProxiedImageUrl((product.images ?? [])[selectedImage] || (product.images ?? [])[0], product.platform)
     : '/images/placeholder.jpg';
   const isExternal = product.isExternal && product.platform;
   const platformSlug = product.platform?.toLowerCase() || '';
@@ -96,7 +96,7 @@ export function QuickViewDialog({
       productId: product.id,
       name: product.name,
       price: product.price,
-      image: getProxiedImageUrl(product.images[0] || '/images/placeholder.jpg', product.platform),
+      image: getProxiedImageUrl((product.images ?? [])[0] || '/images/placeholder.jpg', product.platform),
     });
     setTimeout(() => setIsAdding(false), 800);
   };
@@ -116,7 +116,7 @@ export function QuickViewDialog({
         <div className="grid grid-cols-1 md:grid-cols-2">
           {/* Image Section */}
           <div className="relative aspect-square bg-stone-900/60">
-            {product.images.length > 0 && !imageErrors.has(selectedImage) ? (
+            {(product.images ?? []).length > 0 && !imageErrors.has(selectedImage) ? (
               <img
                 src={mainImage}
                 alt={product.name}
@@ -152,9 +152,9 @@ export function QuickViewDialog({
             )}
 
             {/* Thumbnail strip */}
-            {product.images.length > 1 && (
+            {(product.images ?? []).length > 1 && (
               <div className="absolute bottom-3 left-3 right-3 flex gap-1.5 overflow-x-auto pb-1">
-                {product.images.slice(0, 5).map((img, i) => (
+                {(product.images ?? []).slice(0, 5).map((img, i) => (
                   <button
                     key={i}
                     onClick={() => setSelectedImage(i)}
@@ -248,9 +248,9 @@ export function QuickViewDialog({
             </div>
 
             {/* Tags */}
-            {product.tags.length > 0 && (
+            {(product.tags ?? []).length > 0 && (
               <div className="flex flex-wrap gap-1 mb-4">
-                {product.tags.slice(0, 4).map((tag) => (
+                {(product.tags ?? []).slice(0, 4).map((tag) => (
                   <span
                     key={tag}
                     className="rounded-full bg-amber-900/20 px-2 py-0.5 text-[9px] text-amber-400/60"

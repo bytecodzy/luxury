@@ -1304,7 +1304,7 @@ function OrdersTab({ token, onMutate }: { token: string | null; onMutate: () => 
               {viewOrder.items?.length > 0 && (
                 <div>
                   <p className={`mb-2 ${lblCls}`}>Items</p>
-                  {viewOrder.items.map((item: any, i: number) => (
+                  {(viewOrder.items ?? []).map((item: any, i: number) => (
                     <div key={i} className="flex items-center gap-2 border-b border-amber-900/10 py-2">
                       {item.image && <img src={item.image} alt="" className="h-8 w-8 rounded object-cover" />}
                       <div className="flex-1">
@@ -3876,7 +3876,7 @@ function CorporateTab({ token, onMutate }: { token: string | null; onMutate: () 
                                           </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                          {campaignDetail.campaign.recipients.map((r: any) => (
+                                          {(campaignDetail?.campaign?.recipients ?? []).map((r: any) => (
                                             <TableRow key={r.id} className="border-amber-900/5 hover:bg-amber-900/5">
                                               <TableCell className="text-xs text-amber-100">{r.name}</TableCell>
                                               <TableCell className="text-xs text-amber-200/60">{r.email}</TableCell>

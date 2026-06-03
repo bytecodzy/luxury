@@ -56,3 +56,53 @@ Stage Summary:
 - Without SMTP_PASS, the system falls back to Ethereal Email test inbox + shows OTP in toast notification (dev mode)
 - The user needs to generate a Google App Password and set SMTP_PASS in .env for real email delivery
 - All API endpoints work correctly and return fast responses
+
+---
+Task ID: 1
+Agent: bugfix-null-safe-arrays
+Task: Fix critical production bug — "Cannot read properties of undefined (reading 'length')" crash on Vercel Shopify-only mode
+
+Work Log:
+- Identified root cause: Shopify API sometimes returns `images` or `tags` as `undefined` instead of `[]`, causing crashes in components that call `.length`, `.map()`, or `.slice()` on these fields
+- Added product normalization at API boundary in `/src/app/api/products/route.ts`:
+  - Added normalization mapping before both Shopify `return NextResponse.json(...)` calls (lines ~1136 and ~1390)
+  - Normalizes `images`, `tags`, `occasions`, `recipientTypes`, `relationships` to `[]` if not arrays
+- Fixed `/src/components/product-card.tsx`:
+  - `product.images.length` → `(product.images ?? []).length`
+  - `product.images.map(` → `(product.images ?? []).map(`
+- Fixed `/src/components/product-detail.tsx` (7 instances):
+  - `product.images[0]` → `(product.images ?? [])[0]` (3 instances)
+  - `product.images.length` → `(product.images ?? []).length` (2 instances)
+  - `product.images.map(` → `(product.images ?? []).map(` (1 instance)
+  - `product.images[selectedImage]` → `(product.images ?? [])[selectedImage]` (1 instance)
+  - `product.tags.length` → `(product.tags ?? []).length` (1 instance)
+  - `product.tags.map(` → `(product.tags ?? []).map(` (1 instance)
+- Fixed `/src/components/quick-view-dialog.tsx` (8 instances):
+  - `product.images.length` → `(product.images ?? []).length` (2 instances)
+  - `product.images[selectedImage]` → `(product.images ?? [])[selectedImage]`
+  - `product.images[0]` → `(product.images ?? [])[0]` (2 instances)
+  - `product.images.slice(` → `(product.images ?? []).slice(`
+  - `product.tags.length` → `(product.tags ?? []).length`
+  - `product.tags.slice(` → `(product.tags ?? []).slice(`
+  - `product.tags.map(` → `(product.tags ?? []).map(`
+- Fixed `/src/components/gift-builder.tsx` (3 instances):
+  - `product.images.length` → `(product.images ?? []).length` (3 instances)
+- Fixed `/src/components/order-tracking.tsx` (4 instances):
+  - `order.items.slice(` → `(order.items ?? []).slice(`
+  - `order.items.length` → `(order.items ?? []).length` (2 instances)
+  - `ordersData.orders.map(` → `(ordersData?.orders ?? []).map(`
+- Fixed `/src/components/order-history.tsx` (1 instance):
+  - `order.items.map(` → `(order.items ?? []).map(`
+- Fixed `/src/components/admin-dashboard.tsx` (2 instances):
+  - `viewOrder.items.map(` → `(viewOrder.items ?? []).map(`
+  - `campaignDetail.campaign.recipients.map(` → `(campaignDetail?.campaign?.recipients ?? []).map(`
+- Fixed `/src/components/ProductDetail.tsx` (capital P, 6 instances):
+  - Same patterns as product-detail.tsx
+- Fixed `/src/lib/shopify.ts`:
+  - Added `Array.isArray(p.images)` check in the Shopify transform function
+- Ran ESLint on all modified files — no errors
+
+Stage Summary:
+- Two-layer defense: API normalization ensures arrays are never undefined at the boundary, and component-level null-safe access prevents crashes even if normalization is bypassed
+- All 10 files modified successfully with zero lint errors
+- Fixes the "Cannot read properties of undefined (reading 'length')" crash on Vercel Shopify-only mode

@@ -269,7 +269,7 @@ export function OrderHistory() {
                         </div>
                       )}
 
-                      {order.items.map((item) => (
+                      {(order.items ?? []).map((item) => (
                         <div
                           key={item.id}
                           className="flex items-center justify-between"

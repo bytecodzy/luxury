@@ -187,7 +187,7 @@ export function GiftBuilder() {
 
   const handleAddToCart = (product: (typeof filteredProducts)[0]) => {
     const mainImage =
-      product.images.length > 0
+      (product.images ?? []).length > 0
         ? getProxiedImageUrl(product.images[0], product.platform)
         : '/images/placeholder.jpg';
 
@@ -499,7 +499,7 @@ export function GiftBuilder() {
                       {filteredProducts.map((product) => {
                         const isSelected = selection.selectedProducts.includes(product.id);
                         const mainImage =
-                          product.images.length > 0
+                          (product.images ?? []).length > 0
                             ? getProxiedImageUrl(product.images[0], product.platform)
                             : '/images/placeholder.jpg';
 
@@ -614,7 +614,7 @@ export function GiftBuilder() {
                       <div className="space-y-3">
                         {getSelectedProducts().map((product) => {
                           const mainImage =
-                            product.images.length > 0
+                            (product.images ?? []).length > 0
                               ? getProxiedImageUrl(product.images[0], product.platform)
                               : '/images/placeholder.jpg';
                           const isAdded = addedToCart.has(product.id);

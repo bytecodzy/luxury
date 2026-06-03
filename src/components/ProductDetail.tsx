@@ -969,7 +969,7 @@ export function ProductDetail() {
         productId: product.id,
         name: product.name,
         price: product.price,
-        image: getProxiedImageUrl(product.images[0] || '/images/placeholder.jpg', product.platform),
+        image: getProxiedImageUrl((product.images ?? [])[0] || '/images/placeholder.jpg', product.platform),
       });
     }
     setTimeout(() => setIsAdding(false), 800);
@@ -1042,7 +1042,7 @@ export function ProductDetail() {
               </div>
             ) : (
               <img
-                src={getProxiedImageUrl(product.images[selectedImage] || '/images/hero.png', product.platform)}
+                src={getProxiedImageUrl((product.images ?? [])[selectedImage] || '/images/hero.png', product.platform)}
                 alt={product.name}
                 className="absolute inset-0 h-full w-full object-cover"
                 onError={() => {
@@ -1063,9 +1063,9 @@ export function ProductDetail() {
           </div>
 
           {/* Thumbnails */}
-          {product.images.length > 1 && (
+          {(product.images ?? []).length > 1 && (
             <div className="flex gap-3 overflow-x-auto pb-2">
-              {product.images.map((img, i) => (
+              {(product.images ?? []).map((img, i) => (
                 <button
                   key={i}
                   onClick={() => setSelectedImage(i)}
@@ -1158,9 +1158,9 @@ export function ProductDetail() {
           </p>
 
           {/* Tags */}
-          {product.tags.length > 0 && (
+          {(product.tags ?? []).length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {product.tags.map((tag) => (
+              {(product.tags ?? []).map((tag) => (
                 <Badge
                   key={tag}
                   variant="outline"
@@ -1574,9 +1574,9 @@ export function ProductDetail() {
           onOpenChange={setTryOnOpen}
           productId={product.id}
           productName={product.name}
-          productImage={getProxiedImageUrl(product.images[0] || '/images/hero.png', product.platform)}
+          productImage={getProxiedImageUrl((product.images ?? [])[0] || '/images/hero.png', product.platform)}
           categorySlug={product.categorySlug}
-          productImages={product.images.map(img => getProxiedImageUrl(img, product.platform))}
+          productImages={(product.images ?? []).map(img => getProxiedImageUrl(img, product.platform))}
           onBackgroundJob={handleBackgroundJob}
           onResetBackground={handleResetBackground}
 />

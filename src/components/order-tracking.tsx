@@ -322,16 +322,16 @@ export function OrderTracking() {
 
           {/* Items */}
           <div className="flex items-center gap-2 mb-4 overflow-x-auto">
-            {order.items.slice(0, 4).map((item) => (
+            {(order.items ?? []).slice(0, 4).map((item) => (
               <div key={item.id} className="h-14 w-14 rounded-lg overflow-hidden bg-stone-800 shrink-0">
                 {item.image && (
                   <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
                 )}
               </div>
             ))}
-            {order.items.length > 4 && (
+            {(order.items ?? []).length > 4 && (
               <div className="h-14 w-14 rounded-lg bg-stone-800 flex items-center justify-center shrink-0">
-                <span className="text-xs text-amber-200/50">+{order.items.length - 4}</span>
+                <span className="text-xs text-amber-200/50">+{(order.items ?? []).length - 4}</span>
               </div>
             )}
           </div>
@@ -482,7 +482,7 @@ export function OrderTracking() {
               </div>
             ) : ordersData?.orders?.length ? (
               <div className="space-y-3">
-                {ordersData.orders.map((order: OrderData) => renderOrderCard(order, true))}
+                {(ordersData?.orders ?? []).map((order: OrderData) => renderOrderCard(order, true))}
               </div>
             ) : (
               <div className="text-center py-8">
