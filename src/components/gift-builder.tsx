@@ -155,7 +155,7 @@ export function GiftBuilder() {
     platform?: string;
     sourceUrl?: string;
     affiliateUrl?: string;
-  }> = productsData?.products ?? [];
+  }> = Array.isArray(productsData?.products) ? productsData.products : [];
 
   // Filter products by occasion/recipient on client side
   const filteredProducts = products;
@@ -186,9 +186,10 @@ export function GiftBuilder() {
   };
 
   const handleAddToCart = (product: (typeof filteredProducts)[0]) => {
+    const imgs = Array.isArray(product.images) ? product.images : [];
     const mainImage =
-      (product.images ?? []).length > 0
-        ? getProxiedImageUrl(product.images[0], product.platform)
+      imgs.length > 0
+        ? getProxiedImageUrl(imgs[0], product.platform)
         : '/images/placeholder.jpg';
 
     addItem({
@@ -499,8 +500,8 @@ export function GiftBuilder() {
                       {filteredProducts.map((product) => {
                         const isSelected = selection.selectedProducts.includes(product.id);
                         const mainImage =
-                          (product.images ?? []).length > 0
-                            ? getProxiedImageUrl(product.images[0], product.platform)
+                          (Array.isArray(product.images) ? product.images : []).length > 0
+                            ? getProxiedImageUrl((Array.isArray(product.images) ? product.images : [])[0], product.platform)
                             : '/images/placeholder.jpg';
 
                         return (
@@ -614,8 +615,8 @@ export function GiftBuilder() {
                       <div className="space-y-3">
                         {getSelectedProducts().map((product) => {
                           const mainImage =
-                            (product.images ?? []).length > 0
-                              ? getProxiedImageUrl(product.images[0], product.platform)
+                            (Array.isArray(product.images) ? product.images : []).length > 0
+                              ? getProxiedImageUrl((Array.isArray(product.images) ? product.images : [])[0], product.platform)
                               : '/images/placeholder.jpg';
                           const isAdded = addedToCart.has(product.id);
 

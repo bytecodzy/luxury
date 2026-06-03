@@ -194,7 +194,7 @@ function AgentQuickStats({ token, agentId }: { token: string | null; agentId: st
     },
   })
 
-  const orders = ordersData?.orders || []
+  const orders = Array.isArray(ordersData?.orders) ? ordersData.orders : []
   const totalOrders = orders.length
   const resolvedOrders = orders.filter((o: any) => o.status === 'delivered').length
 
@@ -239,7 +239,7 @@ function AssignedTickets({ token, agentId }: { token: string | null; agentId: st
     },
   })
 
-  const tickets = data?.tickets || []
+  const tickets = Array.isArray(data?.tickets) ? data.tickets : []
 
   // Sample tickets for display when API returns empty
   const sampleTickets: Ticket[] = tickets.length > 0 ? tickets : [
@@ -309,7 +309,7 @@ function SharedDocuments({ token, agentId }: { token: string | null; agentId: st
     },
   })
 
-  const docs = data?.docs || []
+  const docs = Array.isArray(data?.docs) ? data.docs : []
 
   // Sample shared docs for display
   const sampleDocs: SharedDoc[] = docs.length > 0 ? docs : [

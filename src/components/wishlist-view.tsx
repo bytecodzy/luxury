@@ -39,7 +39,7 @@ export function WishlistView() {
       });
       if (res.ok) {
         const data = await res.json();
-        setItems(data.items);
+        setItems(Array.isArray(data.items) ? data.items : []);
       }
     } catch (err) {
       console.error('Failed to fetch wishlist:', err);

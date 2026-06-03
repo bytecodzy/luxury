@@ -36,10 +36,18 @@ function AppContent() {
       case 'home':
         return (
           <>
-            <HeroSection />
-            <CategoryGrid />
-            <ProductGrid />
-            <AppDownloadSection />
+            <ErrorBoundary fallback={null}>
+              <HeroSection />
+            </ErrorBoundary>
+            <ErrorBoundary fallback={null}>
+              <CategoryGrid />
+            </ErrorBoundary>
+            <ErrorBoundary fallback={null}>
+              <ProductGrid />
+            </ErrorBoundary>
+            <ErrorBoundary fallback={null}>
+              <AppDownloadSection />
+            </ErrorBoundary>
           </>
         );
       case 'product':
@@ -67,10 +75,18 @@ function AppContent() {
       default:
         return (
           <>
-            <HeroSection />
-            <CategoryGrid />
-            <ProductGrid />
-            <AppDownloadSection />
+            <ErrorBoundary fallback={null}>
+              <HeroSection />
+            </ErrorBoundary>
+            <ErrorBoundary fallback={null}>
+              <CategoryGrid />
+            </ErrorBoundary>
+            <ErrorBoundary fallback={null}>
+              <ProductGrid />
+            </ErrorBoundary>
+            <ErrorBoundary fallback={null}>
+              <AppDownloadSection />
+            </ErrorBoundary>
           </>
         );
     }
@@ -98,10 +114,18 @@ function AppContent() {
         </div>
       </main>
       <Footer />
-      <AuthDialog />
-      <GiftBuilder />
-      <GiftAssistant />
-      <AppDownloadBanner />
+      <ErrorBoundary fallback={null}>
+        <AuthDialog />
+      </ErrorBoundary>
+      <ErrorBoundary fallback={null}>
+        <GiftBuilder />
+      </ErrorBoundary>
+      <ErrorBoundary fallback={null}>
+        <GiftAssistant />
+      </ErrorBoundary>
+      <ErrorBoundary fallback={null}>
+        <AppDownloadBanner />
+      </ErrorBoundary>
       <ToastContainer />
     </div>
   );
@@ -113,10 +137,10 @@ interface ErrorBoundaryState {
 }
 
 class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
+  { children: React.ReactNode; fallback?: React.ReactNode },
   ErrorBoundaryState
 > {
-  constructor(props: { children: React.ReactNode }) {
+  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
     super(props);
     this.state = { hasError: false, error: null };
   }
@@ -131,6 +155,7 @@ class ErrorBoundary extends React.Component<
 
   render() {
     if (this.state.hasError) {
+      if (this.props.fallback) return this.props.fallback;
       return (
         <div className="flex min-h-screen flex-col items-center justify-center bg-stone-950 p-8 text-center">
           <h2 className="mb-4 text-2xl font-bold text-amber-100">Something went wrong!</h2>

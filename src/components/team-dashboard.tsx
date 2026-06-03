@@ -184,8 +184,8 @@ function TeamQuickStats({ token }: { token: string | null }) {
     },
   })
 
-  const totalProducts = productsData?.pagination?.total || productsData?.products?.length || 0
-  const totalCategories = categoriesData?.categories?.length || 0
+  const totalProducts = productsData?.pagination?.total || (Array.isArray(productsData?.products) ? productsData.products.length : 0) || 0
+  const totalCategories = Array.isArray(categoriesData?.categories) ? categoriesData.categories.length : 0
 
   const stats = [
     { title: 'Products', value: totalProducts.toString(), icon: Package, color: 'text-amber-400', bg: 'bg-amber-600/10' },
@@ -228,7 +228,7 @@ function ProductCatalogOverview({ token }: { token: string | null }) {
     },
   })
 
-  const products = data?.products || []
+  const products = Array.isArray(data?.products) ? data.products : []
 
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
@@ -305,7 +305,7 @@ function RecentOrdersSummary({ token }: { token: string | null }) {
     },
   })
 
-  const orders = data?.orders || []
+  const orders = Array.isArray(data?.orders) ? data.orders : []
 
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>

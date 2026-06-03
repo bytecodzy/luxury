@@ -181,7 +181,7 @@ export function InvestorDownloads() {
                         {file.title}
                       </h3>
                       <div className="flex flex-wrap gap-2 mb-3">
-                        {file.tags.map((tag) => (
+                        {(file.tags ?? []).map((tag: string) => (
                           <span
                             key={tag}
                             className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-amber-900/20 text-amber-300/80 border border-amber-900/20"

@@ -1616,6 +1616,9 @@ export function ProductDetail() {
   });
 
   const product = data?.product;
+  // Bulletproof array access - prevents "Cannot read properties of undefined (reading 'length')"
+  const safeImages = Array.isArray(product?.images) ? product.images : [];
+  const safeTags = Array.isArray(product?.tags) ? product.tags : [];
 
   // Wishlist check
   const { data: wishlistData } = useQuery({
@@ -1645,7 +1648,7 @@ export function ProductDetail() {
     enabled: !!selectedProductId,
   });
 
-  const reviews: Review[] = reviewsData?.reviews ?? [];
+  const reviews: Review[] = Array.isArray(reviewsData?.reviews) ? reviewsData.reviews : [];
 
   const handleToggleWishlist = async () => {
     if (!authToken || !selectedProductId) return;
@@ -1709,7 +1712,7 @@ export function ProductDetail() {
         productId: product.id,
         name: product.name,
         price: product.price,
-        image: getProxiedImageUrl((product.images ?? [])[0] || '/images/placeholder.jpg', product.platform),
+        image: getProxiedImageUrl(safeImages[0] || '/images/placeholder.jpg', product.platform),
       });
     }
     setTimeout(() => setIsAdding(false), 800);
@@ -1782,7 +1785,7 @@ export function ProductDetail() {
               </div>
             ) : (
               <img
-                src={getProxiedImageUrl((product.images ?? [])[selectedImage] || '/images/hero.png', product.platform)}
+                src={getProxiedImageUrl(safeImages[selectedImage] || '/images/hero.png', product.platform)}
                 alt={product.name}
                 className="absolute inset-0 h-full w-full object-cover"
                 onError={() => {
@@ -1802,16 +1805,16 @@ export function ProductDetail() {
             </div>
 
             {/* Image counter */}
-            {(product.images ?? []).length > 1 && (
+            {safeImages.length > 1 && (
               <div className="absolute bottom-3 right-3 rounded-full bg-stone-950/70 px-2.5 py-1 text-[10px] font-medium text-amber-200/70 backdrop-blur-sm">
-                {selectedImage + 1} / {(product.images ?? []).length}
+                {selectedImage + 1} / {safeImages.length}
               </div>
             )}
           </div>
 
           {/* Thumbnails */}
           <div className="flex gap-3 overflow-x-auto pb-2">
-            {(product.images ?? []).map((img, i) => (
+            {safeImages.map((img, i) => (
               <button
                 key={i}
                 onClick={() => setSelectedImage(i)}
@@ -1903,9 +1906,9 @@ export function ProductDetail() {
           </p>
 
           {/* Tags */}
-          {(product.tags ?? []).length > 0 && (
+          {safeTags.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              {(product.tags ?? []).map((tag) => (
+              {safeTags.map((tag) => (
                 <Badge
                   key={tag}
                   variant="outline"
@@ -2247,10 +2250,10 @@ export function ProductDetail() {
           onOpenChange={setTryOnOpen}
           productId={product.id}
           productName={product.name}
-          productImage={getProxiedImageUrl((product.images ?? [])[0] || '/images/hero.png', product.platform)}
-          rawProductImage={(product.images ?? [])[0] || '/images/hero.png'}
+          productImage={getProxiedImageUrl(safeImages[0] || '/images/hero.png', product.platform)}
+          rawProductImage={safeImages[0] || '/images/hero.png'}
           categorySlug={product.categorySlug}
-          productImages={(product.images ?? []).map(img => getProxiedImageUrl(img, product.platform))}
+          productImages={safeImages.map(img => getProxiedImageUrl(img, product.platform))}
           onBackgroundJob={handleBackgroundJob}
           onResetBackground={handleResetBackground}
           onShareToInfluencer={(imageDataUrl) => {

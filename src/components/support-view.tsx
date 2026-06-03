@@ -91,7 +91,7 @@ export function SupportView() {
     try {
       const res = await fetch(`/api/support?userId=${user.id}`);
       const data = await res.json();
-      setTickets(data.tickets || []);
+      setTickets(Array.isArray(data.tickets) ? data.tickets : []);
     } catch {
       // Ignore
     } finally {

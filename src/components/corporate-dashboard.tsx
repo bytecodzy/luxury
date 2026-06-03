@@ -198,7 +198,7 @@ function OverviewTab({ token, onNavigate }: { token: string | null; onNavigate: 
   })
 
   const corporate = profileData?.corporate
-  const campaigns = campaignsData?.campaigns || []
+  const campaigns = Array.isArray(campaignsData?.campaigns) ? campaignsData.campaigns : []
 
   const activeCampaigns = campaigns.filter((c: any) => ['approved', 'in_progress'].includes(c.status)).length
   const totalRecipients = campaigns.reduce((sum: number, c: any) => sum + (c.recipientCount || 0), 0)
@@ -724,7 +724,7 @@ function RecipientsTab({ token }: { token: string | null }) {
     queryKey: ['corporate-campaigns'],
     queryFn: () => apiFetch('/api/corporate/campaigns?limit=50', undefined, token),
   })
-  const campaigns = campaignsData?.campaigns || []
+  const campaigns = Array.isArray(campaignsData?.campaigns) ? campaignsData.campaigns : []
 
   const { data: recipientsData, isLoading: recipientsLoading } = useQuery({
     queryKey: ['campaign-recipients', selectedCampaignId],
@@ -1279,7 +1279,7 @@ function CorporateOrdersTab({ token }: { token: string | null }) {
     enabled: !!corporateEmail,
   })
 
-  const allOrders = data?.orders || []
+  const allOrders = Array.isArray(data?.orders) ? data.orders : []
   // Also include orders matching the email domain
   const orders = allOrders.length > 0 ? allOrders : (() => {
     // Fallback: try fetching all and filter by domain

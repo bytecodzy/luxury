@@ -159,12 +159,13 @@ export function ProductGrid() {
     },
   });
 
-  const products: Product[] = data?.products ?? [];
+  const rawProducts = data?.products;
+  const products: Product[] = Array.isArray(rawProducts) ? rawProducts : [];
 
   // Compute which platforms have products in current results
   const availablePlatforms = useMemo(() => {
     const prods = data?.products;
-    if (!prods) return [];
+    if (!Array.isArray(prods)) return [];
     const platformSet = new Set<string>();
     for (const p of prods as Product[]) {
       if (p.isExternal && p.platform) {

@@ -13,16 +13,23 @@ export async function GET() {
     try {
       const shopifyCategories = await fetchShopifyCategories()
 
+      // Normalize categories to ensure children arrays are always defined
+      const normalizedCategories = shopifyCategories.map(cat => ({
+        ...cat,
+        children: Array.isArray(cat.children) ? cat.children : [],
+      }))
+
       return NextResponse.json({
-        categories: shopifyCategories,
+        categories: normalizedCategories,
         source: 'shopify',
       })
     } catch (shopifyError) {
       console.error('[Categories API] Shopify fetch failed:', shopifyError)
-      return NextResponse.json(
-        { error: 'Failed to fetch categories from Shopify' },
-        { status: 500 }
-      )
+      // Return empty categories instead of error to prevent client crash
+      return NextResponse.json({
+        categories: [],
+        source: 'shopify-error',
+      })
     }
   }
 
@@ -92,10 +99,11 @@ export async function GET() {
       })
     } catch (shopifyError) {
       console.error('[Categories API] Shopify fallback also failed:', shopifyError)
-      return NextResponse.json(
-        { error: 'Failed to fetch categories from both database and Shopify' },
-        { status: 500 }
-      )
+      // Return empty categories instead of error to prevent client crash
+      return NextResponse.json({
+        categories: [],
+        source: 'error',
+      })
     }
   }
 }

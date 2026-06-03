@@ -120,9 +120,10 @@ export function CategoryGrid() {
     queryFn: () => fetch('/api/categories').then((r) => r.json()),
   });
 
-  const categories = (data?.categories ?? []).map((cat: Category) => ({
+  const rawCategories = data?.categories;
+  const categories = (Array.isArray(rawCategories) ? rawCategories : []).map((cat: Category) => ({
     ...cat,
-    children: cat.children ?? [],
+    children: Array.isArray(cat.children) ? cat.children : [],
   }));
 
   // Find the parent category that matches the selected category

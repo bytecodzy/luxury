@@ -125,7 +125,7 @@ export function OrderTracking() {
         throw new Error(data.error || 'Order not found');
       }
       const data = await res.json();
-      setSearchedOrder(data.order);
+      setSearchedOrder(data.order || null);
     } catch (err) {
       setSearchError(err instanceof Error ? err.message : 'Order not found');
     } finally {

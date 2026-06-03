@@ -163,9 +163,9 @@ function WelcomeBanner({ userName, token, email, cartItems }: { userName: string
     enabled: !!token,
   })
 
-  const totalOrders = ordersData?.orders?.length || 0
-  const wishlistItems = wishlistData?.wishlist?.length || 0
-  const cartCount = cartItems.length
+  const totalOrders = Array.isArray(ordersData?.orders) ? ordersData.orders.length : 0
+  const wishlistItems = Array.isArray(wishlistData?.wishlist) ? wishlistData.wishlist.length : 0
+  const cartCount = Array.isArray(cartItems) ? cartItems.length : 0
 
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
@@ -498,7 +498,7 @@ function OrderTrackingSection({ token, email }: { token: string | null; email: s
   const [cancelLoading, setCancelLoading] = React.useState(false)
   const queryClient = useQueryClient()
 
-  const orders = (data?.orders || []).filter((o: any) => o.trackingNumber || o.estimatedDelivery || o.status === 'pending')
+  const orders = (Array.isArray(data?.orders) ? data.orders : []).filter((o: any) => o.trackingNumber || o.estimatedDelivery || o.status === 'pending')
 
   const handleCancelOrder = async () => {
     if (!cancelOrderId) return
@@ -746,7 +746,7 @@ function SupportTicketsSection({ token, userId }: { token: string | null; userId
     enabled: !!token && !!userId,
   })
 
-  const tickets = data?.tickets || []
+  const tickets = Array.isArray(data?.tickets) ? data.tickets : []
 
   const handleCreateTicket = async () => {
     if (!ticketForm.subject) return
