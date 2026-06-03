@@ -906,7 +906,7 @@ function SupportTicketsSection({ token, userId }: { token: string | null; userId
                     <p className="text-sm text-amber-200/70">{msg.message}</p>
                   </div>
                 ))}
-                {(!selectedTicket?.messages || selectedTicket.messages.length === 0) && (
+                {(selectedTicket?.messages?.length ?? 0) === 0 && (
                   <p className="text-sm text-amber-200/40 text-center py-4">No messages yet</p>
                 )}
               </div>

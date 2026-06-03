@@ -350,7 +350,7 @@ export function OrderTracking() {
           {/* Total */}
           <div className="flex items-center justify-between">
             <span className="text-sm text-amber-200/50">
-              {order.items.reduce((sum, item) => sum + item.quantity, 0)} item(s)
+              {(order.items ?? []).reduce((sum, item) => sum + item.quantity, 0)} item(s)
             </span>
             <span className="font-semibold text-amber-400">₹{order.total.toLocaleString()}</span>
           </div>

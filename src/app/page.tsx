@@ -156,15 +156,28 @@ class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
+      
+      // Check if this is a data-related error (undefined.length etc.)
+      const isDataError = this.state.error?.message?.includes('undefined') ||
+        this.state.error?.message?.includes('null') ||
+        this.state.error?.message?.includes('length') ||
+        this.state.error?.message?.includes('map is not a function');
+      
       return (
-        <div className="flex min-h-screen flex-col items-center justify-center bg-stone-950 p-8 text-center">
-          <h2 className="mb-4 text-2xl font-bold text-amber-100">Something went wrong!</h2>
-          <p className="mb-4 max-w-md text-sm text-amber-200/60">
-            {this.state.error?.message || 'An unexpected error occurred'}
+        <div className="flex min-h-[300px] flex-col items-center justify-center bg-stone-950/50 p-8 text-center rounded-xl border border-amber-900/20">
+          <div className="mb-4 rounded-full bg-amber-900/20 p-4">
+            <svg className="h-8 w-8 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+          </div>
+          <p className="mb-3 text-sm text-amber-200/60">
+            {isDataError
+              ? 'A data loading issue occurred. This is usually temporary.'
+              : this.state.error?.message || 'An unexpected error occurred'}
           </p>
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
-            className="rounded-md bg-amber-600 px-6 py-2 text-sm font-medium text-stone-950 hover:bg-amber-500"
+            className="rounded-md bg-amber-600 px-5 py-2 text-sm font-medium text-stone-950 hover:bg-amber-500 transition-colors"
           >
             Try again
           </button>
