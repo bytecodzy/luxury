@@ -957,10 +957,15 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
 
     if (results.length === 0) {
       if (job) {
-        job.status = 'completed'
-        job.imageUrl = ''
+        // PERMANENT FIX: Return 'failed' status instead of 'completed' with empty imageUrl.
+        // The client checks for imageUrl truthiness when status is 'completed',
+        // so an empty string would cause infinite polling showing "AI unavailable".
+        // By returning 'failed', the client's catch handler will immediately
+        // fall back to canvas overlay — the user ALWAYS gets a visual result.
+        job.status = 'failed'
+        job.error = 'AI generation unavailable — falling back to style preview'
         job.strategy = 'canvas-fallback'
-        job.progress = 'AI generation unavailable — using style preview'
+        job.progress = 'Style preview mode'
       }
       return
     }

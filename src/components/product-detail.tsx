@@ -840,7 +840,12 @@ function TryOnDialog({
                   else if (pollData.pipelinePhase === 'composite') setGenerationProgress(85);
                   else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
 
-                  if (pollData.status === 'completed' && pollData.imageUrl) {
+                  if (pollData.status === 'completed') {
+                    // PERMANENT FIX: Handle completed with empty imageUrl or canvas-fallback
+                    if (!pollData.imageUrl || pollData.strategy === 'canvas-fallback') {
+                      console.log('[try-on] Proxy completed with no imageUrl or canvas-fallback, using client canvas fallback');
+                      throw new Error('AI result unavailable — using style preview');
+                    }
                     clearTimeout(timeoutId);
                     setResultImage(pollData.imageUrl);
                     setWatermarkedResult(pollData.imageUrl);
@@ -932,7 +937,14 @@ function TryOnDialog({
         else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
         else if (pollCount > 1) setGenerationProgress(Math.min(90, 10 + pollCount * 3));
 
-        if (pollData.status === 'completed' && pollData.imageUrl) {
+        if (pollData.status === 'completed') {
+          // PERMANENT FIX: Handle completed with empty imageUrl or canvas-fallback strategy.
+          // Previously, empty imageUrl caused infinite polling showing "AI unavailable".
+          // Now we immediately fall back to canvas overlay for ANY non-AI result.
+          if (!pollData.imageUrl || pollData.strategy === 'canvas-fallback') {
+            console.log('[try-on] Server completed with no imageUrl or canvas-fallback strategy, using client canvas fallback');
+            throw new Error('AI result unavailable — using style preview');
+          }
           clearTimeout(timeoutId);
           setGenerationProgress(100);
           setResultImage(pollData.imageUrl);
