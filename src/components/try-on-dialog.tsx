@@ -396,12 +396,12 @@ export function TryOnDialog({
   /**
    * Poll a try-on job until completed or failed.
    * Works with both local /api/try-on and direct proxy URLs.
+   * PERMANENT FIX: On ANY failure, falls back to canvas — user NEVER sees error.
    */
   const pollJob = useCallback(async (
     jobId: string,
     baseUrl: string,
     onComplete: (imageUrl: string) => void,
-    onFailed: (error: string) => void,
   ) => {
     setProgress('Generating your try-on look...');
     setProgressPercent(50);
@@ -432,8 +432,7 @@ export function TryOnDialog({
         if (statusData.status === 'completed') {
           clearInterval(pollInterval);
           setProgressPercent(100);
-          // PERMANENT FIX: If no imageUrl or canvas-fallback strategy,
-          // use canvas fallback instead of showing 'AI unavailable' error
+          // If no imageUrl or canvas-fallback strategy, use client canvas fallback
           if (!statusData.imageUrl || statusData.strategy === 'canvas-fallback') {
             console.log('[try-on] Server returned canvas-fallback or no imageUrl, using client canvas fallback');
             generateCanvasFallback().then((canvasResult) => {
@@ -444,16 +443,24 @@ export function TryOnDialog({
           onComplete(statusData.imageUrl);
         } else if (statusData.status === 'failed') {
           clearInterval(pollInterval);
-          onFailed(statusData.error || 'Generation failed. Please try again.');
+          // Canvas fallback — user ALWAYS gets a visual result
+          console.log('[try-on] Job failed, using canvas fallback instead of showing error');
+          generateCanvasFallback().then((canvasResult) => {
+            onComplete(canvasResult);
+          });
         }
       } catch (pollErr) {
         console.error('Polling error:', pollErr);
+        clearInterval(pollInterval);
+        generateCanvasFallback().then((canvasResult) => {
+          onComplete(canvasResult);
+        });
       }
     }, 3000);
 
     // Safety timeout: stop polling after 2 minutes
     setTimeout(() => clearInterval(pollInterval), 120000);
-  }, []);
+  }, [generateCanvasFallback]);
 
   const handleGenerate = useCallback(async () => {
     if (!selfieData) return;
@@ -542,7 +549,7 @@ export function TryOnDialog({
               if (proxyData.jobId) {
                 // Poll the proxy for results
                 const pollBaseUrl = proxyUrl;
-                await new Promise<void>((resolve, reject) => {
+                await new Promise<void>((resolve) => {
                   pollJob(
                     proxyData.jobId,
                     pollBaseUrl,
@@ -551,9 +558,6 @@ export function TryOnDialog({
                       setProgressPercent(100);
                       setStep('result');
                       resolve();
-                    },
-                    (error) => {
-                      reject(new Error(error));
                     },
                   );
                 });
