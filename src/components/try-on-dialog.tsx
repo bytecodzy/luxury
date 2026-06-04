@@ -432,8 +432,13 @@ export function TryOnDialog({
         if (statusData.status === 'completed') {
           clearInterval(pollInterval);
           setProgressPercent(100);
+          // PERMANENT FIX: If no imageUrl or canvas-fallback strategy,
+          // use canvas fallback instead of showing 'AI unavailable' error
           if (!statusData.imageUrl || statusData.strategy === 'canvas-fallback') {
-            onFailed('AI generation unavailable');
+            console.log('[try-on] Server returned canvas-fallback or no imageUrl, using client canvas fallback');
+            generateCanvasFallback().then((canvasResult) => {
+              onComplete(canvasResult);
+            });
             return;
           }
           onComplete(statusData.imageUrl);
