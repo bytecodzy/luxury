@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
 import { isZAIAvailable, getZAIConfig } from '@/lib/zai'
 import { createJob, getJob, runPipeline } from '@/lib/try-on-pipeline'
-import { getStaticProductById } from '@/lib/static-products'
 
 // ── Product image helpers ──────────────────────────────────────────
 
@@ -142,6 +140,26 @@ function getPairingCategory(categorySlug: string): string[] {
   return pairs[categorySlug] || ['jewelry']
 }
 
+// ── Canvas fallback helper (ALWAYS returns 200, never shows errors to user) ──
+
+function returnCanvasMode(
+  productImageUrl: string | null | undefined,
+  productImageBase64: string | null | undefined,
+  productName: string | null | undefined,
+  categorySlug: string | null | undefined,
+  message?: string,
+): NextResponse {
+  return NextResponse.json({
+    mode: 'canvas',
+    message: message || 'AI style preview is temporarily unavailable. Showing style overlay with product image instead.',
+    code: 'AI_CANVAS_MODE',
+    productName: productName || null,
+    categorySlug: categorySlug || null,
+    productImageBase64: productImageBase64 || null,
+    productImageUrl: productImageUrl || null,
+  }, { status: 200 })
+}
+
 // ── POST /api/try-on ───────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -153,6 +171,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
+  // PERMANENT FIX: The entire handler is wrapped so that ANY error
+  // falls back to canvas mode. The user should NEVER see "AI unavailable".
   try {
     const isVercel = !!process.env.VERCEL
     const proxyUrl = process.env.ZAI_PROXY_URL
@@ -254,43 +274,45 @@ export async function POST(request: NextRequest) {
         console.error('[try-on] Failed to resolve product image base64 for canvas mode:', imgErr)
       }
 
-      return NextResponse.json({
-        mode: 'canvas',
-        message: 'AI style preview is temporarily unavailable. Showing style overlay with product image instead.',
-        code: 'AI_CANVAS_MODE',
-        productName: clientProductName,
-        categorySlug: clientCategorySlug,
-        productImageBase64: canvasProductImageBase64,
-        productImageUrl: productImageUrl || null,
-      }, { status: 200 })
+      // Also try client-provided base64
+      const clientProvidedBase64 = body.productImageBase64 as string | undefined
+      const finalBase64 = clientProvidedBase64 || canvasProductImageBase64
+
+      return returnCanvasMode(productImageUrl, finalBase64, clientProductName, clientCategorySlug)
     }
 
     // ── Non-Vercel: local AI processing ──
     return await handleLocalAIGeneration(body, isVercel)
   } catch (error) {
-    console.error('[try-on] API error:', error)
+    console.error('[try-on] API error (falling back to canvas mode):', error)
+    
+    // PERMANENT FIX: ANY error falls back to canvas mode.
+    // The user should NEVER see "AI unavailable" or any other error.
+    // Only truly invalid requests (missing body) get error responses.
     if (error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
-    const message = error instanceof Error ? error.message : 'Unexpected error occurred'
-    if (message.includes('AI_STYLE_SERVICE_UNAVAILABLE') || message.includes('.z-ai-config') || message.includes('not configured')) {
-      let errorProductImageBase64: string | null = null
-      try {
-        const imgUrl = body?.productImageUrl
-        if (imgUrl) {
-          errorProductImageBase64 = await getProductImageBase64(imgUrl)
-        }
-      } catch {}
 
-      return NextResponse.json({
-        mode: 'canvas',
-        message: 'AI style preview is not configured. Showing style overlay with product image instead.',
-        code: 'AI_CANVAS_MODE',
-        productImageBase64: errorProductImageBase64,
-        productImageUrl: body?.productImageUrl || null,
-      }, { status: 200 })
-    }
-    return NextResponse.json({ error: 'An unexpected error occurred while generating your style preview.' }, { status: 500 })
+    // For ALL other errors — return canvas mode so the client can
+    // generate a style preview overlay. This ensures the user ALWAYS
+    // gets a visual result, never a broken error message.
+    let errorProductImageBase64: string | null = null
+    try {
+      const imgUrl = body?.productImageUrl
+      if (imgUrl) {
+        errorProductImageBase64 = await getProductImageBase64(imgUrl)
+      }
+    } catch {}
+
+    // Also try client-provided base64
+    const clientBase64 = body?.productImageBase64 as string | undefined
+
+    return returnCanvasMode(
+      body?.productImageUrl || null,
+      clientBase64 || errorProductImageBase64,
+      body?.productName || body?.productName || null,
+      body?.categorySlug || null,
+    )
   }
 }
 
@@ -304,13 +326,14 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
     const fallbackProductImage = body.productImageUrl
       ? await getProductImageBase64(body.productImageUrl).catch(() => null)
       : null
-    return NextResponse.json({
-      mode: 'canvas',
-      message: 'AI style preview is temporarily unavailable. Showing style overlay with product image instead.',
-      code: 'AI_CANVAS_MODE',
-      productImageBase64: fallbackProductImage,
-      productImageUrl: body.productImageUrl || null,
-    }, { status: 200 })
+    // Also try client-provided base64
+    const clientBase64 = body.productImageBase64 as string | undefined
+    return returnCanvasMode(
+      body.productImageUrl || null,
+      clientBase64 || fallbackProductImage,
+      body.productName || null,
+      body.categorySlug || null,
+    )
   }
 
   const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
@@ -331,8 +354,10 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
   }
   let product: TryOnProduct | null = null
 
+  // Use dynamic import for db to avoid top-level crash on Vercel
   if (!isVercel) {
     try {
+      const { db } = await import('@/lib/db')
       const dbProduct = await db.product.findUnique({
         where: { id: productId },
         include: { category: true },
@@ -380,19 +405,38 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
 
   if (!product) {
     // Try static products (Corporate Gifts, Office, New Arrivals)
-    const staticProduct = getStaticProductById(productId)
-    if (staticProduct) {
-      product = {
-        id: staticProduct.id,
-        name: staticProduct.name,
-        images: JSON.stringify(staticProduct.images),
-        category: { name: staticProduct.category, slug: staticProduct.categorySlug },
+    try {
+      const { getStaticProductById } = await import('@/lib/static-products')
+      const staticProduct = getStaticProductById(productId)
+      if (staticProduct) {
+        product = {
+          id: staticProduct.id,
+          name: staticProduct.name,
+          images: JSON.stringify(staticProduct.images),
+          category: { name: staticProduct.category, slug: staticProduct.categorySlug },
+        }
       }
-    }
+    } catch {}
   }
 
   if (!product) {
-    return NextResponse.json({ error: 'Product not found.' }, { status: 404 })
+    // PERMANENT FIX: Instead of returning 404, fall back to canvas mode
+    // The user should still get a visual preview even if the product isn't found in DB
+    console.log('[try-on] Product not found in any source, falling back to canvas mode')
+    const clientBase64 = body.productImageBase64 as string | undefined
+    let fallbackBase64: string | null = null
+    try {
+      if (productImageUrl) {
+        fallbackBase64 = await getProductImageBase64(productImageUrl)
+      }
+    } catch {}
+    return returnCanvasMode(
+      productImageUrl || null,
+      clientBase64 || fallbackBase64,
+      clientProductName || null,
+      clientCategorySlug || null,
+      'Product details not found. Showing style overlay with product image instead.',
+    )
   }
 
   const productImages: string[] = JSON.parse(product.images || '[]')
@@ -407,9 +451,16 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
   const productImageBase64 = clientProvidedBase64 || resolvedBase64 || null
 
   if (!productImageBase64) {
-    return NextResponse.json({ 
-      error: 'Product image not available',
-    }, { status: 400 })
+    // PERMANENT FIX: Instead of returning 400, fall back to canvas mode
+    // The client-side canvas can still work with just the product image URL
+    console.log('[try-on] Could not resolve product image base64, falling back to canvas mode')
+    return returnCanvasMode(
+      productImageUrl || productImageToUse || null,
+      null,
+      product.name,
+      product.category?.slug || null,
+      'Product image could not be processed. Showing style overlay instead.',
+    )
   }
 
   // Fetch AI suggestions in parallel
@@ -437,6 +488,7 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
     })()
   } else {
     try {
+      const { db } = await import('@/lib/db')
       suggestionsPromise = db.product.findMany({
         where: {
           category: { slug: { in: pairingCategories } },

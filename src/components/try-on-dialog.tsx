@@ -485,15 +485,15 @@ export function TryOnDialog({
 
       const contentType = response.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        console.error('Non-JSON response:', response.status, errorText.substring(0, 200));
-        throw new Error(
-          response.status === 413
-            ? 'Image is too large. Please try a smaller photo.'
-            : response.status === 503
-            ? 'AI service is currently busy. Please try again in a moment.'
-            : `Server error (${response.status}). Please try again.`
-        );
+        // PERMANENT FIX: Non-JSON response — fall back to canvas instead of throwing
+        console.warn('[try-on] Non-JSON response:', response.status);
+        setProgress('Creating style preview overlay...');
+        setProgressPercent(70);
+        const canvasResult = await generateCanvasFallback();
+        setResultImage(canvasResult);
+        setProgressPercent(100);
+        setStep('result');
+        return;
       }
 
       const data = await response.json();
@@ -577,17 +577,16 @@ export function TryOnDialog({
         return;
       }
 
+      // PERMANENT FIX: Handle ANY non-ok response by falling back to canvas mode.
+      // The user should NEVER see "AI unavailable" — they ALWAYS get a visual result.
       if (!response.ok) {
-        if (response.status === 503 || data.code === 'AI_SERVICE_UNAVAILABLE') {
-          setProgress('Creating style preview overlay...');
-          setProgressPercent(70);
-          const canvasResult = await generateCanvasFallback();
-          setResultImage(canvasResult);
-          setProgressPercent(100);
-          setStep('result');
-          return;
-        }
-        throw new Error(data.error || `Error: ${response.status}`);
+        setProgress('Creating style preview overlay...');
+        setProgressPercent(70);
+        const canvasResult = await generateCanvasFallback();
+        setResultImage(canvasResult);
+        setProgressPercent(100);
+        setStep('result');
+        return;
       }
 
       // If server returned a jobId, poll for completion
@@ -650,20 +649,24 @@ export function TryOnDialog({
         return;
       }
 
-      throw new Error('Unexpected response from server');
+      // PERMANENT FIX: Unexpected response — always fall back to canvas mode
+      setProgress('Creating style preview overlay...');
+      setProgressPercent(70);
+      const canvasResult = await generateCanvasFallback();
+      setResultImage(canvasResult);
+      setProgressPercent(100);
+      setStep('result');
+      return;
     } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        setError('Request timed out. The AI service may be busy — please try again.');
-        setStep('preview');
-      } else {
-        // Canvas fallback ALWAYS succeeds — user never sees error
-        setProgress('Creating style preview...');
-        setProgressPercent(70);
-        const canvasResult = await generateCanvasFallback();
-        setResultImage(canvasResult);
-        setProgressPercent(100);
-        setStep('result');
-      }
+      // PERMANENT FIX: On ANY error (including timeout), canvas fallback ALWAYS succeeds.
+      // The user should NEVER see "AI unavailable" — they ALWAYS get a visual result.
+      console.warn('[try-on] Error, falling back to canvas:', err instanceof Error ? err.message : String(err));
+      setProgress('Creating style preview...');
+      setProgressPercent(70);
+      const canvasResult = await generateCanvasFallback();
+      setResultImage(canvasResult);
+      setProgressPercent(100);
+      setStep('result');
     }
   }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, generateCanvasFallback, pollJob]);
 
