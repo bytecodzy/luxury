@@ -220,7 +220,7 @@ export async function POST(request: NextRequest) {
             method: 'POST',
             headers: proxyHeaders,
             body: JSON.stringify(proxyBody),
-            signal: AbortSignal.timeout(90000), // 90s timeout for proxy
+            signal: AbortSignal.timeout(15000), // 15s timeout — fail fast, let client canvas fallback work
           })
 
           if (proxyResponse.ok) {
