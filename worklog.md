@@ -47,3 +47,25 @@ Stage Summary:
 - The client ALWAYS falls back to canvas overlay on any error
 - A 90-second global timeout prevents the UI from ever "freezing"
 - The user will ALWAYS see a style preview result, never an error message
+---
+Task ID: 1
+Agent: Main Agent
+Task: Permanent fix for AI Virtual Try-On "AI unavailable" error
+
+Work Log:
+- Investigated the entire try-on flow: API route → pipeline → client polling
+- Found ROOT CAUSE: try-on-pipeline.ts line 958-966 returned `status: 'completed'` with empty `imageUrl` and `strategy: 'canvas-fallback'` when all AI strategies failed
+- Client code in product-detail.tsx checked `pollData.status === 'completed' && pollData.imageUrl` — empty string is falsy, so condition was FALSE
+- This caused the client to keep polling indefinitely, displaying the pipeline's progress message "AI generation unavailable — using style preview" to the user for 90 seconds until global timeout
+- FIXED pipeline: Changed `status: 'completed'` → `status: 'failed'` with clear error message when all AI strategies fail
+- FIXED client polling: Added defensive check for `completed` with empty imageUrl or canvas-fallback strategy — throws error to trigger immediate canvas fallback
+- Applied same fix to proxy polling code path
+- Fixed deprecated try-on-dialog.tsx: replaced `onFailed('AI generation unavailable')` with canvas fallback
+- Added global-error.tsx as root layout safety net
+- Committed and pushed to GitHub
+
+Stage Summary:
+- Root cause identified: pipeline returned completed+empty imageUrl causing infinite polling
+- Three-layer fix applied: pipeline fix + client polling fix + global error boundary
+- All changes pushed to GitHub (commit 1658578)
+- Vercel deployment requires manual trigger (no auth token available in sandbox)
