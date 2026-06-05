@@ -10,6 +10,9 @@ const HEALTH_CACHE_TTL = 30_000 // 30 seconds
 let proxyHealthCache: { reachable: boolean; timestamp: number } | null = null
 const PROXY_HEALTH_CACHE_TTL = 60_000 // 60 seconds
 
+let localProxyCache: { reachable: boolean; timestamp: number } | null = null
+const LOCAL_PROXY_CACHE_TTL = 30_000 // 30 seconds
+
 /**
  * Get the 'Abc' header value for authenticating with the sandbox gateway.
  */
@@ -38,9 +41,47 @@ function isSpaceZaiGateway(urlStr: string): boolean {
 }
 
 /**
+ * Check if the local ai-proxy service on port 3030 is reachable and available.
+ * This is the PRIMARY way to reach ZAI from within the sandbox.
+ */
+export async function isLocalProxyReachable(): Promise<boolean> {
+  const now = Date.now()
+  if (localProxyCache && now - localProxyCache.timestamp < LOCAL_PROXY_CACHE_TTL) {
+    return localProxyCache.reachable
+  }
+
+  // Only check local proxy in sandbox environment (not on Vercel)
+  if (process.env.VERCEL) {
+    localProxyCache = { reachable: false, timestamp: now }
+    return false
+  }
+
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+
+    const response = await fetch('http://localhost:3030/api/try-on/status', {
+      signal: controller.signal,
+      headers: { 'User-Agent': '3BOXES-LocalProxyCheck/1.0' },
+    })
+
+    clearTimeout(timeout)
+    if (response.ok) {
+      const data = await response.json()
+      localProxyCache = { reachable: data.available === true, timestamp: now }
+      return data.available === true
+    }
+    localProxyCache = { reachable: false, timestamp: now }
+    return false
+  } catch {
+    localProxyCache = { reachable: false, timestamp: now }
+    return false
+  }
+}
+
+/**
  * Check if the ZAI AI service endpoint is actually reachable.
- * Uses a lightweight SDK-based health check — makes a tiny chat completion
- * to verify the API is truly functional, not just that DNS resolves.
+ * Uses a lightweight HTTP check to verify connectivity.
  */
 export async function isAIReachable(baseUrl: string): Promise<boolean> {
   const now = Date.now()
@@ -49,25 +90,14 @@ export async function isAIReachable(baseUrl: string): Promise<boolean> {
   }
 
   try {
-    // Use the ZAI SDK to make a minimal API call to check connectivity.
-    // This is the most reliable check because it tests the full request path.
     const config = getZAIConfig()
     if (!config) {
       healthCache = { reachable: false, timestamp: now }
       return false
     }
 
-    const zai = new ZAI({
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      chatId: config.chatId || '',
-      token: config.token || '',
-      userId: config.userId || '',
-    })
-
-    // Make a minimal chat completion request with 1 token max
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 10000)
+    const timeout = setTimeout(() => controller.abort(), 5000)
 
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -89,13 +119,7 @@ export async function isAIReachable(baseUrl: string): Promise<boolean> {
 
     clearTimeout(timeout)
 
-    if (response.ok) {
-      healthCache = { reachable: true, timestamp: now }
-      return true
-    }
-
-    // Even a 4xx response means the server is reachable
-    if (response.status < 500) {
+    if (response.ok || response.status < 500) {
       healthCache = { reachable: true, timestamp: now }
       return true
     }
@@ -207,19 +231,27 @@ export function getZAIConfig(): { baseUrl: string; apiKey: string; chatId?: stri
 
 /**
  * Check if the ZAI AI service is available AND reachable.
- * Strategy chain:
- * 1. Direct ZAI SDK (if config exists and API is reachable)
- * 2. Proxy to sandbox ai-proxy via ZAI_PROXY_URL
- * 3. Unavailable
+ * Strategy chain (optimized — checks cheapest/most-likely first):
+ * 1. Local ai-proxy on port 3030 (fastest, sandbox-only)
+ * 2. Direct ZAI SDK (if config exists and API is reachable)
+ * 3. Proxy to sandbox ai-proxy via ZAI_PROXY_URL (for Vercel)
+ * 4. Unavailable
  */
 export async function isZAIAvailable(): Promise<{
   available: boolean
-  mode: 'ai' | 'proxy' | 'unavailable' | 'sdk-auto'
+  mode: 'ai' | 'proxy' | 'local-proxy' | 'unavailable' | 'sdk-auto'
   reason?: string
 }> {
-  const config = getZAIConfig()
+  // Strategy 0: Check local ai-proxy FIRST (cheapest check, most likely to work in sandbox)
+  if (!process.env.VERCEL) {
+    const localProxyReachable = await isLocalProxyReachable()
+    if (localProxyReachable) {
+      return { available: true, mode: 'local-proxy', reason: 'Local ai-proxy on port 3030 is available' }
+    }
+  }
 
   // Strategy 1: Direct ZAI SDK if config exists and API is reachable
+  const config = getZAIConfig()
   if (config) {
     const reachable = await isAIReachable(config.baseUrl)
 
@@ -276,7 +308,9 @@ export async function isZAIAvailable(): Promise<{
   return {
     available: false,
     mode: 'unavailable',
-    reason: config ? 'AI service is configured but not reachable, and no proxy is available.' : 'AI service is not configured and SDK auto-discovery failed.',
+    reason: config
+      ? 'AI service is configured but not reachable, local proxy unavailable, and no remote proxy configured.'
+      : 'AI service is not configured and local proxy is unavailable.',
   }
 }
 

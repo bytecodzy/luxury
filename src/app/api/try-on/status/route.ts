@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server'
-import { isZAIAvailable } from '@/lib/zai'
+import { isZAIAvailable, isLocalProxyReachable } from '@/lib/zai'
 import { isExternalAIAvailable } from '@/lib/external-ai'
 
-// Cache the AI availability check for 60 seconds to avoid repeated slow checks
+// Cache the AI availability check for 30 seconds
 let statusCache: { available: boolean; mode: string; reason?: string; timestamp: number } | null = null
-const STATUS_CACHE_TTL = 60_000 // 60 seconds
+const STATUS_CACHE_TTL = 30_000
 
 export async function GET() {
   try {
@@ -49,6 +49,22 @@ export async function GET() {
     })
   } catch (err) {
     const externalAI = isExternalAIAvailable()
+
+    // As a last resort, try checking the local proxy directly
+    if (!process.env.VERCEL) {
+      try {
+        const localProxyOk = await isLocalProxyReachable()
+        if (localProxyOk) {
+          return NextResponse.json({
+            available: true,
+            mode: 'local-proxy',
+            reason: 'Local ai-proxy is available (fallback check)',
+            externalAI,
+          })
+        }
+      } catch {}
+    }
+
     return NextResponse.json({
       available: externalAI.replicate || externalAI.openai,
       mode: externalAI.replicate ? 'replicate' : externalAI.openai ? 'openai' : 'unavailable',
