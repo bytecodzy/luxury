@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isZAIAvailable, getZAIConfig } from '@/lib/zai'
 import { createJob, getJob, runPipeline } from '@/lib/try-on-pipeline'
+import { externalTryOn, isExternalAIAvailable } from '@/lib/external-ai'
 
 // ── Product image helpers ──────────────────────────────────────────
 
@@ -183,19 +184,78 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
     }
 
+    // ── Resolve product image base64 (used by multiple strategies) ──
+    const clientProvidedBase64 = body.productImageBase64 as string | undefined
+    let resolvedBase64: string | null = null
+    if (productImageUrl && !clientProvidedBase64) {
+      resolvedBase64 = await getProductImageBase64(productImageUrl)
+    }
+    const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64 || null
+
+    // ── Strategy 0: External AI services (Replicate IDM-VTON / OpenAI) ──
+    // These work from BOTH sandbox and Vercel — publicly accessible APIs
+    const externalAI = isExternalAIAvailable()
+    if (externalAI.replicate || externalAI.openai) {
+      console.log('[try-on] External AI available: replicate=', externalAI.replicate, 'openai=', externalAI.openai)
+      try {
+        if (!finalProductImageBase64) {
+          console.log('[try-on] No product image base64 for external AI, skipping')
+        } else {
+          // Create a job for polling
+          const jobId = `ext_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+          createJob(jobId, {
+            categorySlug: clientCategorySlug || '',
+            productName: clientProductName || '',
+            progress: 'Generating AI try-on with external service...',
+          })
+
+          // Run external AI in background
+          ;(async () => {
+            const job = getJob(jobId)
+            if (!job) return
+            try {
+              const result = await externalTryOn({
+                selfieData,
+                productImageBase64: finalProductImageBase64,
+                productName: clientProductName || 'Product',
+                categorySlug: clientCategorySlug || '',
+              })
+
+              if (result.success && result.imageUrl) {
+                job.status = 'completed'
+                job.imageUrl = result.imageUrl
+                job.strategy = result.strategy
+                job.progress = 'Complete!'
+              } else {
+                job.status = 'failed'
+                job.error = result.error || 'External AI generation failed'
+              }
+            } catch (err) {
+              job.status = 'failed'
+              job.error = err instanceof Error ? err.message : 'External AI error'
+            }
+          })()
+
+          // Return jobId for polling
+          return NextResponse.json({
+            jobId,
+            status: 'processing',
+            productName: clientProductName,
+            categorySlug: clientCategorySlug,
+          })
+        }
+      } catch (extErr) {
+        console.error('[try-on] External AI error:', extErr)
+      }
+    }
+
     // ── On Vercel: try proxy first, then direct SDK, then canvas mode ──
     if (isVercel) {
       // Strategy 1: Try proxy if URL is configured and reachable
       if (proxyUrl) {
         console.log('[try-on] Vercel: attempting proxy to AI service:', proxyUrl)
         try {
-          // Resolve product image to base64 for proxy
-          const clientProvidedBase64 = body.productImageBase64 as string | undefined
-          let resolvedBase64: string | null = null
-          if (productImageUrl && !clientProvidedBase64) {
-            resolvedBase64 = await getProductImageBase64(productImageUrl)
-          }
-          const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64 || null
+          // Product image base64 already resolved above
 
           const proxyHeaders = getProxyHeaders(proxyUrl)
 
@@ -274,8 +334,7 @@ export async function POST(request: NextRequest) {
         console.error('[try-on] Failed to resolve product image base64 for canvas mode:', imgErr)
       }
 
-      // Also try client-provided base64
-      const clientProvidedBase64 = body.productImageBase64 as string | undefined
+      // Also try client-provided base64 (already resolved above as clientProvidedBase64)
       const finalBase64 = clientProvidedBase64 || canvasProductImageBase64
 
       return returnCanvasMode(productImageUrl, finalBase64, clientProductName, clientCategorySlug)
