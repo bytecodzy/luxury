@@ -3,6 +3,14 @@ versions/
 flutter_app/
 shopify-theme/
 agent-ctx/
+public/downloads/
+public/app/
+public/images/products/
+public/images/categories/
+public/uploads/
+skills/
+investor-assets/
+upload/
 # *.sh removed - needed for vercel-build.sh
 screenshot*.png
 test-*.png

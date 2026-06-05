@@ -239,6 +239,13 @@ function getProductOverlayPosition(categorySlug: string, kp: BodyKeypoints): { x
   };
 }
 
+/** Whether the category is a clothing/wearable item (uses multiply blend for natural look) */
+function isClothingCategory(categorySlug: string): boolean {
+  const cat = (categorySlug || '').toLowerCase();
+  return ['mens-shirts', 'men-tshirts', 'fashion', 'sarees', 'women-sarees', 'women-fashion', 'kids-fashion', 'kids-shirts', 'kids-dresses']
+    .some(c => cat.includes(c));
+}
+
 /**
  * Client-side canvas fallback: ACTUALLY overlays the product image on the person's body.
  * Uses body keypoints (from VLM or heuristics) to position the product at the correct location.
@@ -357,10 +364,10 @@ async function generateCanvasFallback(
       }
 
       // Shadow behind product for depth
-      ctx.shadowColor = 'rgba(0,0,0,0.4)';
-      ctx.shadowBlur = 15;
-      ctx.shadowOffsetX = 3;
-      ctx.shadowOffsetY = 3;
+      ctx.shadowColor = 'rgba(0,0,0,0.3)';
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
 
       // Calculate proper aspect-ratio-preserving dimensions
       const imgAspect = productImg.naturalWidth / productImg.naturalHeight;
@@ -379,17 +386,40 @@ async function generateCanvasFallback(
       const drawX = overlayCX - drawW / 2;
       const drawY = overlayCY - drawH / 2;
 
-      // Draw with slight transparency for natural blending
-      ctx.globalAlpha = 0.92;
+      // Use multiply blend for clothing (looks more natural), normal for accessories
+      const isClothing = isClothingCategory(categorySlug || '');
+      if (isClothing) {
+        ctx.globalAlpha = 0.85;
+        ctx.globalCompositeOperation = 'multiply';
+      } else {
+        ctx.globalAlpha = 0.92;
+      }
 
       // Clip to rounded rectangle
       ctx.beginPath();
-      const cornerRadius = Math.min(12, drawW * 0.08, drawH * 0.08);
+      const cornerRadius = Math.min(12, drawW * 0.06, drawH * 0.06);
       ctx.roundRect(drawX, drawY, drawW, drawH, cornerRadius);
       ctx.clip();
 
       ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
       ctx.restore();
+
+      // Second pass for clothing: overlay at reduced opacity for better blending
+      if (isClothing) {
+        ctx.save();
+        if (pos.rotation) {
+          ctx.translate(overlayCX, overlayCY);
+          ctx.rotate((pos.rotation * Math.PI) / 180);
+          ctx.translate(-overlayCX, -overlayCY);
+        }
+        ctx.globalAlpha = 0.35;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.beginPath();
+        ctx.roundRect(drawX, drawY, drawW, drawH, cornerRadius);
+        ctx.clip();
+        ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
+        ctx.restore();
+      }
 
       // ── Glow border around the product overlay ──
       ctx.save();
@@ -398,7 +428,7 @@ async function generateCanvasFallback(
         ctx.rotate((pos.rotation * Math.PI) / 180);
         ctx.translate(-overlayCX, -overlayCY);
       }
-      ctx.globalAlpha = 0.35;
+      ctx.globalAlpha = 0.3;
       ctx.strokeStyle = '#daa520';
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -408,7 +438,7 @@ async function generateCanvasFallback(
 
       // ── Small product label below the overlay ──
       ctx.save();
-      const labelFontSize = Math.max(9, Math.floor(drawW * 0.06));
+      const labelFontSize = Math.max(9, Math.floor(drawW * 0.055));
       ctx.font = `600 ${labelFontSize}px Arial, sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(28,25,23,0.75)';
