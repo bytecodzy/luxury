@@ -795,10 +795,20 @@ export function TryOnDialog({
     setProgress('Uploading your photo...');
     setProgressPercent(10);
 
+    // Pre-resolve product image to base64 to avoid server-side CORS issues
+    let productImageBase64: string | undefined;
+    try {
+      const imgToFetch = rawProductImage || productImage;
+      if (imgToFetch) {
+        productImageBase64 = await fetchImageAsBase64(imgToFetch) || undefined;
+      }
+    } catch {}
+
     const requestPayload = {
       productId,
       selfieData,
       productImageUrl: rawProductImage || productImage,
+      productImageBase64,
       productName,
       categorySlug: categorySlug || '',
     };

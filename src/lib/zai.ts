@@ -204,12 +204,26 @@ export async function isZAIAvailable(): Promise<{
   }
 
   // Strategy 2: Try SDK auto-discovery (ZAI.create()) — works in sandbox environment
+  // IMPORTANT: ZAI.create() only creates a config object; it does NOT verify
+  // the API is reachable. We must ALSO check connectivity.
   if (!process.env.VERCEL) {
     try {
       const testInstance = await ZAI.create()
       if (testInstance) {
-        console.log('[ZAI] SDK auto-discovery (ZAI.create()) succeeded — AI available')
-        return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
+        // Verify the API is actually reachable before claiming availability
+        const sdkBaseUrl = testInstance.config?.baseUrl
+        if (sdkBaseUrl) {
+          const reachable = await isAIReachable(sdkBaseUrl)
+          if (reachable) {
+            console.log('[ZAI] SDK auto-discovery succeeded AND API is reachable')
+            return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
+          }
+          console.log('[ZAI] SDK auto-discovery succeeded but API is NOT reachable at', sdkBaseUrl)
+        } else {
+          // No base URL to check — assume available (backward compat)
+          console.log('[ZAI] SDK auto-discovery succeeded (no base URL to check)')
+          return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
+        }
       }
     } catch (sdkErr) {
       console.log('[ZAI] SDK auto-discovery failed:', sdkErr instanceof Error ? sdkErr.message : String(sdkErr))

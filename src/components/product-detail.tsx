@@ -956,11 +956,15 @@ function TryOnDialog({
     setGenerationProgress(10);
     onBackgroundJob('generating');
 
-    const GLOBAL_TIMEOUT_MS = 15_000;
+    // IMPORTANT: The AI pipeline takes 30-90+ seconds (multiple VLM + image gen calls).
+    // A short timeout causes premature canvas fallback which just sticks the product
+    // image on the selfie instead of actually dressing the person via AI.
+    // 120 seconds gives the full pipeline time to complete.
+    const GLOBAL_TIMEOUT_MS = 120_000;
     let timedOut = false;
     const timeoutId = setTimeout(() => {
       timedOut = true;
-      console.warn('[try-on] Global timeout reached, forcing canvas fallback');
+      console.warn('[try-on] Global timeout reached (120s), forcing canvas fallback');
       doCanvasFallback();
     }, GLOBAL_TIMEOUT_MS);
 
@@ -1042,7 +1046,9 @@ function TryOnDialog({
 
       if (timedOut) return;
 
-      // Step 1b: POST to create a try-on job — with a SHORT timeout
+      // Step 1b: POST to create a try-on job
+      // The POST itself just creates a job and returns quickly (the pipeline runs async).
+      // But product image resolution can take a few seconds, so we allow 20s.
       setProgressMessage('Creating style preview...');
       setGenerationProgress(30);
       const postRes = await fetch('/api/try-on', {
@@ -1056,7 +1062,7 @@ function TryOnDialog({
           productName,
           categorySlug,
         }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(20000),
       });
 
       if (timedOut) return;
@@ -1087,33 +1093,38 @@ function TryOnDialog({
       }
 
       // Step 2: Poll for job completion (only when server returned a valid jobId)
-      const maxPolls = 20;
+      // The AI pipeline takes 30-90+ seconds. We poll every 3 seconds with up to 50 attempts
+      // (150 seconds max), which is enough for the full pipeline to complete.
+      const maxPolls = 50;
+      const pollIntervalMs = 3000;
       let pollCount = 0;
 
       const pollJob = async (): Promise<void> => {
         if (timedOut) return;
         pollCount++;
         if (pollCount > maxPolls) {
-          throw new Error('Generation timed out');
+          throw new Error('Generation timed out after 150s');
         }
 
-        const pollRes = await fetch(`/api/try-on?jobId=${jobId}`, { signal: AbortSignal.timeout(8000) });
+        const pollRes = await fetch(`/api/try-on?jobId=${jobId}`, { signal: AbortSignal.timeout(10000) });
         const pollData = await pollRes.json();
 
         if (pollData.progress) {
           setProgressMessage(pollData.progress);
         }
 
+        // Update progress based on pipeline phase
         if (pollData.pipelinePhase === 'product-analysis') setGenerationProgress(35);
         else if (pollData.pipelinePhase === 'generation') setGenerationProgress(50);
         else if (pollData.pipelinePhase === 'verification') setGenerationProgress(70);
         else if (pollData.pipelinePhase === 'refinement') setGenerationProgress(80);
         else if (pollData.pipelinePhase === 'composite') setGenerationProgress(85);
         else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
-        else if (pollCount > 1) setGenerationProgress(Math.min(90, 30 + pollCount * 4));
+        else if (pollCount > 1) setGenerationProgress(Math.min(90, 30 + pollCount * 2));
 
         if (pollData.status === 'completed') {
           if (!pollData.imageUrl || pollData.strategy === 'canvas-fallback') {
+            // AI pipeline completed but produced no usable image — fall back to canvas
             throw new Error('AI result unavailable — using style preview');
           }
           clearTimeout(timeoutId);
@@ -1133,7 +1144,7 @@ function TryOnDialog({
           throw new Error(pollData.error || 'Generation failed');
         }
 
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, pollIntervalMs));
         return pollJob();
       };
 
