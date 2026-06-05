@@ -5,6 +5,13 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  serverExternalPackages: [
+    'sharp',
+    'jspdf',
+    'nodemailer',
+    '@prisma/client',
+    'prisma',
+  ],
   allowedDevOrigins: [
     'boxes3.space-z.ai',
     'preview-chat-97b5f242-82cb-4d42-801a-52a64cae9d47.space-z.ai',
