@@ -483,11 +483,34 @@ function generateCanvasFallback(
         } else {
           let imgSrc = productImageUrl;
           if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
-            imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
+            // External URLs: try direct load with crossOrigin for canvas compatibility
+            productImg.crossOrigin = 'anonymous';
+            productImg.src = imgSrc;
+            // If direct load fails (CORS), onerror will retry via proxy
+            const origOnerror = productImg.onerror;
+            productImg.onerror = () => {
+              console.log('[try-on] Direct image load failed, trying proxy');
+              productImg.crossOrigin = null;
+              productImg.onerror = origOnerror;
+              productImg.src = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
+            };
+            return;
           } else if (imgSrc.startsWith('//')) {
-            imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
+            productImg.crossOrigin = 'anonymous';
+            const httpsUrl = `https:${imgSrc}`;
+            productImg.src = httpsUrl;
+            const origOnerror = productImg.onerror;
+            productImg.onerror = () => {
+              console.log('[try-on] Direct image load failed, trying proxy');
+              productImg.crossOrigin = null;
+              productImg.onerror = origOnerror;
+              productImg.src = `/api/image-proxy?url=${encodeURIComponent(httpsUrl)}`;
+            };
+            return;
           } else if (imgSrc.startsWith('/') && !imgSrc.startsWith('/api/')) {
-            imgSrc = `${window.location.origin}${imgSrc}`;
+            // Local paths: load directly, DO NOT proxy (image-proxy blocks localhost)
+            productImg.src = imgSrc;
+            return; // Skip the proxy entirely
           }
           productImg.src = imgSrc;
         }
@@ -509,12 +532,15 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
   try {
     // For data URLs, return as-is
     if (url.startsWith('data:')) return url;
-    // For relative paths, use current origin
+    // For relative paths, fetch directly (same-origin, no proxy needed)
     let fetchUrl = url;
     if (url.startsWith('/') && !url.startsWith('/api/')) {
-      fetchUrl = `${window.location.origin}${url}`;
+      fetchUrl = url; // Same-origin fetch, no need to prepend origin
     } else if (url.startsWith('//')) {
       fetchUrl = `https:${url}`;
+    } else if (url.startsWith('http://') || url.startsWith('https://')) {
+      // External URLs: use image proxy to avoid CORS
+      fetchUrl = `/api/image-proxy?url=${encodeURIComponent(url)}`;
     }
     const response = await fetch(fetchUrl, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) return null;
