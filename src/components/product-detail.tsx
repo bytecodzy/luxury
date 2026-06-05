@@ -131,55 +131,162 @@ function compressImage(file: File, maxSize = 1536, quality = 0.92): Promise<stri
 }
 
 /**
- * Client-side canvas fallback: overlay the product image on the selfie.
- * Used when the AI backend service is unavailable (e.g., Vercel serverless).
- * Creates a visually compelling style preview with product overlay and branding.
+ * Interface for VLM-detected body keypoints.
+ * Used to position the product overlay at the correct body location.
+ */
+interface BodyKeypoints {
+  faceCenter: { x: number; y: number };
+  faceWidth: number;
+  neckCenter: { x: number; y: number };
+  chestCenter: { x: number; y: number };
+  leftWrist: { x: number; y: number };
+  rightWrist: { x: number; y: number };
+  torsoCenter: { x: number; y: number };
+  shoulderWidth: number;
+  personDetected: boolean;
+  source?: string;
+}
+
+/** Default heuristic keypoints for typical selfie composition */
+const DEFAULT_KEYPOINTS: BodyKeypoints = {
+  faceCenter: { x: 0.5, y: 0.28 },
+  faceWidth: 0.22,
+  neckCenter: { x: 0.5, y: 0.4 },
+  chestCenter: { x: 0.5, y: 0.5 },
+  leftWrist: { x: 0.28, y: 0.62 },
+  rightWrist: { x: 0.72, y: 0.62 },
+  torsoCenter: { x: 0.5, y: 0.53 },
+  shoulderWidth: 0.45,
+  personDetected: true,
+  source: 'heuristic',
+};
+
+/**
+ * Determine where to place the product overlay based on category and body keypoints.
+ * Returns: { x, y, width, height } in normalized (0-1) coordinates.
+ */
+function getProductOverlayPosition(categorySlug: string, kp: BodyKeypoints): { x: number; y: number; w: number; h: number; rotation?: number } {
+  const cat = (categorySlug || '').toLowerCase();
+  
+  // Jewelry → on the neck/chest area
+  if (cat.includes('jewel') || cat.includes('necklace') || cat.includes('pendant') || cat.includes('earring')) {
+    return {
+      x: kp.chestCenter.x,
+      y: kp.chestCenter.y - 0.02,
+      w: Math.max(kp.shoulderWidth * 0.7, kp.faceWidth * 2.2),
+      h: Math.max(kp.faceWidth * 1.8, 0.18),
+    };
+  }
+  
+  // Watches → on the wrist
+  if (cat.includes('watch')) {
+    return {
+      x: kp.leftWrist.x,
+      y: kp.leftWrist.y,
+      w: kp.faceWidth * 1.2,
+      h: kp.faceWidth * 1.2,
+      rotation: -15,
+    };
+  }
+  
+  // Clothing / Sarees / Fashion → on the torso
+  if (cat.includes('saree') || cat.includes('fashion') || cat.includes('shirt') || cat.includes('tshirt') || cat.includes('kurta') || cat.includes('dress')) {
+    return {
+      x: kp.torsoCenter.x,
+      y: kp.torsoCenter.y + 0.02,
+      w: kp.shoulderWidth * 0.95,
+      h: 0.38,
+    };
+  }
+  
+  // Fragrances → near the chest/neck area, slightly offset
+  if (cat.includes('fragrance') || cat.includes('perfume')) {
+    return {
+      x: kp.chestCenter.x + kp.shoulderWidth * 0.15,
+      y: kp.chestCenter.y - 0.05,
+      w: kp.faceWidth * 1.5,
+      h: kp.faceWidth * 2.5,
+    };
+  }
+  
+  // Leather goods / Bags → on the shoulder
+  if (cat.includes('leather') || cat.includes('bag') || cat.includes('wallet')) {
+    return {
+      x: kp.torsoCenter.x - kp.shoulderWidth * 0.25,
+      y: kp.chestCenter.y,
+      w: kp.shoulderWidth * 0.55,
+      h: kp.faceWidth * 2.8,
+      rotation: 5,
+    };
+  }
+  
+  // Couple / Romantic → on the chest area
+  if (cat.includes('couple') || cat.includes('romantic') || cat.includes('gift')) {
+    return {
+      x: kp.chestCenter.x,
+      y: kp.chestCenter.y,
+      w: kp.shoulderWidth * 0.6,
+      h: kp.faceWidth * 2.0,
+    };
+  }
+  
+  // Default → center on the person's upper body
+  return {
+    x: kp.torsoCenter.x,
+    y: kp.torsoCenter.y - 0.02,
+    w: kp.shoulderWidth * 0.7,
+    h: kp.faceWidth * 2.2,
+  };
+}
+
+/**
+ * Client-side canvas fallback: ACTUALLY overlays the product image on the person's body.
+ * Uses body keypoints (from VLM or heuristics) to position the product at the correct location.
+ * Creates a visually compelling style preview that looks like the person is wearing the product.
  *
  * @param selfieData - Base64 data URL of the user's selfie
  * @param productImageUrl - URL of the product image (used as fallback if no base64)
  * @param productName - Name of the product for the overlay label
  * @param productImageBase64 - Optional base64 data URL of the product image (preferred, avoids CORS)
+ * @param categorySlug - Category slug for position-aware overlay (e.g., 'jewelry', 'watches')
+ * @param keypoints - Optional VLM-detected body keypoints for precise positioning
  */
-function generateCanvasFallback(selfieData: string, productImageUrl: string, productName: string, productImageBase64?: string): Promise<string> {
+function generateCanvasFallback(
+  selfieData: string,
+  productImageUrl: string,
+  productName: string,
+  productImageBase64?: string,
+  categorySlug?: string,
+  keypoints?: BodyKeypoints | null,
+): Promise<string> {
   // PERMANENT FIX: This function NEVER returns null.
-  // If the selfie or canvas fails, we create a minimal placeholder.
-  // This ensures the user ALWAYS sees a "Style Preview" result,
-  // never an "AI unavailable" error.
   return new Promise((resolve) => {
     // Helper: create a minimal placeholder canvas when everything else fails
     const createMinimalResult = (): string => {
       try {
         const c = document.createElement('canvas');
-        c.width = 512;
-        c.height = 680;
+        c.width = 512; c.height = 680;
         const cx = c.getContext('2d');
         if (cx) {
           const grad = cx.createLinearGradient(0, 0, 0, 680);
-          grad.addColorStop(0, '#1c1917');
-          grad.addColorStop(1, '#292524');
-          cx.fillStyle = grad;
-          cx.fillRect(0, 0, 512, 680);
-          cx.fillStyle = '#daa520';
-          cx.font = 'bold 22px Arial, sans-serif';
-          cx.textAlign = 'center';
+          grad.addColorStop(0, '#1c1917'); grad.addColorStop(1, '#292524');
+          cx.fillStyle = grad; cx.fillRect(0, 0, 512, 680);
+          cx.fillStyle = '#daa520'; cx.font = 'bold 22px Arial, sans-serif'; cx.textAlign = 'center';
           cx.fillText('✨ Style Preview', 256, 280);
-          cx.fillStyle = '#a8a29e';
-          cx.font = '14px Arial, sans-serif';
-          const name = (productName || 'Product').substring(0, 40);
-          cx.fillText(name, 256, 320);
-          cx.fillStyle = '#78716c';
-          cx.font = '12px Arial, sans-serif';
+          cx.fillStyle = '#a8a29e'; cx.font = '14px Arial, sans-serif';
+          cx.fillText((productName || 'Product').substring(0, 40), 256, 320);
+          cx.fillStyle = '#78716c'; cx.font = '12px Arial, sans-serif';
           cx.fillText('3BOXES GIFTS', 256, 360);
           return c.toDataURL('image/png');
         }
       } catch {}
-      // Absolute last resort: return a 1x1 transparent pixel
       return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==';
     };
 
     try {
       const selfieImg = document.createElement('img');
-      // Don't set crossOrigin on data URLs — it causes unnecessary CORS preflight
+      const kp = keypoints || DEFAULT_KEYPOINTS;
+
       selfieImg.onload = () => {
         const canvas = document.createElement('canvas');
         const width = Math.max(selfieImg.naturalWidth, 512);
@@ -189,95 +296,142 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
         const ctx = canvas.getContext('2d');
         if (!ctx) { resolve(createMinimalResult()); return; }
 
-        // Draw the selfie as the base
+        // 1. Draw the selfie as the base
         ctx.drawImage(selfieImg, 0, 0, width, height);
 
-        // Subtle dark vignette overlay for premium feel
+        // 2. Subtle vignette overlay for premium feel
         const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
         vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-        vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
+        vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.15)');
         ctx.fillStyle = vignetteGrad;
         ctx.fillRect(0, 0, width, height);
 
-        // Render the product overlay panel
-        const renderProductPanel = (productImg?: HTMLImageElement) => {
-          const productW = Math.floor(width * 0.38);
-          const productH = productImg ? Math.floor(width * 0.38) : Math.floor(width * 0.25);
-          const panelW = productW + 20;
-          const panelH = productH + 56;
-          const px = width - panelW - 14;
-          const py = height - panelH - 40;
+        // 3. Get overlay position based on category + keypoints
+        const pos = getProductOverlayPosition(categorySlug || '', kp);
+        const overlayW = Math.floor(pos.w * width);
+        const overlayH = Math.floor(pos.h * height);
+        const overlayCX = pos.x * width;   // center X
+        const overlayCY = pos.y * height;  // center Y
+        const overlayX = overlayCX - overlayW / 2;
+        const overlayY = overlayCY - overlayH / 2;
 
-          // Panel shadow
-          ctx.save();
-          ctx.shadowColor = 'rgba(0,0,0,0.5)';
-          ctx.shadowBlur = 20;
-          ctx.shadowOffsetX = 4;
-          ctx.shadowOffsetY = 4;
-          ctx.globalAlpha = 0.85;
-          ctx.fillStyle = '#1c1917';
-          ctx.beginPath();
-          ctx.roundRect(px, py, panelW, panelH, 12);
-          ctx.fill();
-          ctx.restore();
-
-          // Panel border
-          ctx.save();
-          ctx.globalAlpha = 0.6;
-          ctx.strokeStyle = '#daa520';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.roundRect(px, py, panelW, panelH, 12);
-          ctx.stroke();
-          ctx.restore();
-
-          // Product image inside panel
+        // 4. Function to render product ON the person
+        const renderProductOnPerson = (productImg?: HTMLImageElement) => {
           if (productImg) {
+            // ── Draw product image at the body position ──
             ctx.save();
-            ctx.globalAlpha = 1.0;
+            
+            // Apply rotation if specified
+            if (pos.rotation) {
+              ctx.translate(overlayCX, overlayCY);
+              ctx.rotate((pos.rotation * Math.PI) / 180);
+              ctx.translate(-overlayCX, -overlayCY);
+            }
+
+            // Shadow behind product for depth
+            ctx.shadowColor = 'rgba(0,0,0,0.4)';
+            ctx.shadowBlur = 15;
+            ctx.shadowOffsetX = 3;
+            ctx.shadowOffsetY = 3;
+
+            // Calculate proper aspect-ratio-preserving dimensions
+            const imgAspect = productImg.naturalWidth / productImg.naturalHeight;
+            const slotAspect = overlayW / overlayH;
+            let drawW = overlayW;
+            let drawH = overlayH;
+
+            if (imgAspect > slotAspect) {
+              // Image is wider than slot — fit to width
+              drawH = drawW / imgAspect;
+            } else {
+              // Image is taller than slot — fit to height
+              drawW = drawH * imgAspect;
+            }
+
+            const drawX = overlayCX - drawW / 2;
+            const drawY = overlayCY - drawH / 2;
+
+            // Draw with slight transparency for natural blending
+            ctx.globalAlpha = 0.92;
+
+            // Clip to rounded rectangle
             ctx.beginPath();
-            ctx.roundRect(px + 10, py + 10, productW, productH, 8);
+            const cornerRadius = Math.min(12, drawW * 0.08, drawH * 0.08);
+            ctx.roundRect(drawX, drawY, drawW, drawH, cornerRadius);
             ctx.clip();
-            ctx.drawImage(productImg, px + 10, py + 10, productW, productH);
+
+            ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
+            ctx.restore();
+
+            // ── Glow border around the product overlay ──
+            ctx.save();
+            if (pos.rotation) {
+              ctx.translate(overlayCX, overlayCY);
+              ctx.rotate((pos.rotation * Math.PI) / 180);
+              ctx.translate(-overlayCX, -overlayCY);
+            }
+            ctx.globalAlpha = 0.35;
+            ctx.strokeStyle = '#daa520';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2, cornerRadius + 1);
+            ctx.stroke();
+            ctx.restore();
+
+            // ── Small product label below the overlay ──
+            ctx.save();
+            const labelFontSize = Math.max(9, Math.floor(drawW * 0.06));
+            ctx.font = `600 ${labelFontSize}px Arial, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(28,25,23,0.75)';
+            const labelText = productName.substring(0, 28);
+            const labelWidth = ctx.measureText(labelText).width + 16;
+            const labelHeight = labelFontSize + 8;
+            const labelX = overlayCX - labelWidth / 2;
+            const labelY = drawY + drawH + 6;
+
+            ctx.beginPath();
+            ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 4);
+            ctx.fill();
+            ctx.fillStyle = '#daa520';
+            ctx.globalAlpha = 0.9;
+            ctx.fillText(labelText, overlayCX, labelY + labelFontSize + 2);
             ctx.restore();
           } else {
-            // Fallback: draw a product icon placeholder
+            // No product image — draw a subtle placeholder at the body position
             ctx.save();
-            ctx.globalAlpha = 0.6;
-            ctx.beginPath();
-            ctx.roundRect(px + 10, py + 10, productW, productH, 8);
+            if (pos.rotation) {
+              ctx.translate(overlayCX, overlayCY);
+              ctx.rotate((pos.rotation * Math.PI) / 180);
+              ctx.translate(-overlayCX, -overlayCY);
+            }
+            ctx.globalAlpha = 0.3;
             ctx.fillStyle = '#292524';
+            ctx.beginPath();
+            ctx.roundRect(overlayX, overlayY, overlayW, overlayH, 8);
             ctx.fill();
-            const iconSize = Math.floor(productH * 0.4);
+            ctx.strokeStyle = '#daa520';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(overlayX, overlayY, overlayW, overlayH, 8);
+            ctx.stroke();
+            // Product emoji placeholder
+            const iconSize = Math.floor(overlayH * 0.3);
             ctx.fillStyle = '#daa520';
             ctx.font = `${iconSize}px Arial, sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('👗', px + 10 + productW / 2, py + 10 + productH / 2);
+            ctx.globalAlpha = 0.5;
+            ctx.fillText('👗', overlayCX, overlayCY);
             ctx.restore();
           }
-
-          // Product name label
-          ctx.save();
-          ctx.globalAlpha = 1.0;
-          ctx.fillStyle = '#daa520';
-          ctx.font = `bold ${Math.max(11, Math.floor(productW * 0.065))}px Arial, sans-serif`;
-          ctx.textAlign = 'center';
-          const labelY = py + productH + 28;
-          const maxLabelWidth = productW;
-          let label = productName.substring(0, 30);
-          while (ctx.measureText(label).width > maxLabelWidth && label.length > 3) {
-            label = label.slice(0, -4) + '...';
-          }
-          ctx.fillText(label, px + panelW / 2, labelY);
-          ctx.restore();
         };
 
-        // Top-left "STYLE PREVIEW" badge
+        // 5. Top-left "AI STYLE PREVIEW" badge
         ctx.save();
         ctx.globalAlpha = 0.92;
-        const badgeW = Math.floor(width * 0.35);
-        const badgeH = Math.floor(height * 0.04);
+        const badgeW = Math.floor(width * 0.38);
+        const badgeH = Math.floor(height * 0.042);
         ctx.fillStyle = '#1c1917';
         ctx.beginPath();
         ctx.roundRect(12, 12, badgeW, badgeH, 6);
@@ -288,27 +442,25 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
         ctx.roundRect(12, 12, badgeW, badgeH, 6);
         ctx.stroke();
         ctx.fillStyle = '#daa520';
-        ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.5))}px Arial, sans-serif`;
+        ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.48))}px Arial, sans-serif`;
         ctx.textAlign = 'center';
-        ctx.fillText('✨ STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
+        ctx.fillText('✨ AI STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
         ctx.restore();
 
-        // Try loading the product image with timeout
+        // 6. Try loading the product image with timeout
         const productImg = document.createElement('img');
-        // Only set crossOrigin when loading cross-origin URLs (not for data URLs or same-origin proxy)
-        // This avoids CORS preflight failures on same-origin /api/image-proxy requests
-
         let resolved = false;
+
         const finish = (img?: HTMLImageElement) => {
           if (resolved) return;
           resolved = true;
-          renderProductPanel(img);
+          renderProductOnPerson(img);
 
           // Bottom watermark
           ctx.save();
-          ctx.globalAlpha = 0.6;
+          ctx.globalAlpha = 0.5;
           ctx.fillStyle = '#daa520';
-          ctx.font = `bold ${Math.max(10, Math.floor(width * 0.018))}px Arial, sans-serif`;
+          ctx.font = `bold ${Math.max(10, Math.floor(width * 0.017))}px Arial, sans-serif`;
           ctx.textAlign = 'right';
           ctx.fillText('3BOXES GIFTS · AI Style Preview', width - 14, height - 14);
           ctx.restore();
@@ -318,8 +470,8 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
 
         productImg.onload = () => finish(productImg);
         productImg.onerror = () => {
-          console.warn('[try-on] Product image failed to load in canvas fallback, continuing without it');
-          finish(); // Continue without product image
+          console.warn('[try-on] Product image failed to load in canvas fallback, rendering without product image');
+          finish();
         };
 
         // Timeout: if product image doesn't load in 5s, continue without it
@@ -327,10 +479,8 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
 
         // Prefer base64 data URL if available (no CORS issues at all)
         if (productImageBase64 && productImageBase64.startsWith('data:')) {
-          // Base64 data URLs work directly with no CORS issues
           productImg.src = productImageBase64;
         } else {
-          // Route external images through our proxy to avoid CORS issues
           let imgSrc = productImageUrl;
           if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
             imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
@@ -342,6 +492,7 @@ function generateCanvasFallback(selfieData: string, productImageUrl: string, pro
           productImg.src = imgSrc;
         }
       };
+
       selfieImg.onerror = () => {
         console.warn('[try-on] Selfie image failed to load in canvas fallback, using placeholder');
         resolve(createMinimalResult());
@@ -663,8 +814,10 @@ function TryOnDialog({
   // PERMANENT FIX: Helper to ALWAYS fall back to canvas overlay.
   // This guarantees the user NEVER sees "AI unavailable" or any error.
   // They ALWAYS get a visual style preview result.
+  // Now includes category-aware positioning and VLM keypoints.
   const doCanvasFallback = useCallback(async (
     fallbackProductImageBase64?: string,
+    keypoints?: BodyKeypoints | null,
   ) => {
     setProgressMessage('Creating style preview overlay...');
     try {
@@ -673,17 +826,18 @@ function TryOnDialog({
         productImage,
         productName,
         fallbackProductImageBase64,
+        categorySlug,
+        keypoints,
       );
       setResultImage(canvasResult);
       setWatermarkedResult(canvasResult);
-      setStrategy('canvas-overlay');
+      setStrategy(keypoints?.source === 'vlm' ? 'vlm-canvas-overlay' : 'canvas-overlay');
       setGenerationProgress(100);
       setStep('result');
       onBackgroundJob('result');
     } catch (canvasErr) {
       // PERMANENT FIX: generateCanvasFallback itself has a minimalResult fallback,
       // but if even THAT somehow fails, create the absolute minimal placeholder.
-      // The user should NEVER see an error — they ALWAYS get a visual result.
       console.warn('[try-on] Canvas fallback error (creating minimal placeholder):', canvasErr instanceof Error ? canvasErr.message : String(canvasErr));
       try {
         const c = document.createElement('canvas');
@@ -709,7 +863,6 @@ function TryOnDialog({
           return;
         }
       } catch {}
-      // Absolute last resort — still show result step with a transparent pixel
       setResultImage('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==');
       setWatermarkedResult('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==');
       setStrategy('canvas-overlay');
@@ -717,7 +870,7 @@ function TryOnDialog({
       setStep('result');
       onBackgroundJob('result');
     }
-  }, [selfieData, productImage, productName, onBackgroundJob, onResetBackground]);
+  }, [selfieData, productImage, productName, categorySlug, onBackgroundJob, onResetBackground]);
 
   const handleGenerate = useCallback(async () => {
     if (!selfieData) return;
@@ -727,10 +880,7 @@ function TryOnDialog({
     setGenerationProgress(10);
     onBackgroundJob('generating');
 
-    // PERMANENT FIX v3: Quick AI availability check before trying the slow server call.
-    // If AI is not available, skip the server POST entirely and go straight to canvas fallback.
-    // This ensures the user gets a result in ~3 seconds instead of waiting 25+ seconds for timeouts.
-    const GLOBAL_TIMEOUT_MS = 10_000;
+    const GLOBAL_TIMEOUT_MS = 15_000;
     let timedOut = false;
     const timeoutId = setTimeout(() => {
       timedOut = true;
@@ -739,18 +889,43 @@ function TryOnDialog({
     }, GLOBAL_TIMEOUT_MS);
 
     try {
-      // Step 0: Quick AI availability check (3 second timeout)
+      // ── Step 0: Analyze selfie with VLM for body keypoints ──
+      // This gives us accurate positioning for the product overlay.
+      // If VLM is unavailable, we fall back to heuristic positioning.
+      let vlmKeypoints: BodyKeypoints | null = null;
+      try {
+        setProgressMessage('Analyzing your photo...');
+        setGenerationProgress(15);
+        const analyzeRes = await fetch('/api/try-on/analyze-selfie', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selfieData, categorySlug }),
+          signal: AbortSignal.timeout(8000), // 8s max for VLM analysis
+        });
+        if (analyzeRes.ok) {
+          const analyzeData = await analyzeRes.json();
+          if (analyzeData.success && analyzeData.analysis?.personDetected) {
+            vlmKeypoints = analyzeData.analysis;
+            console.log('[try-on] VLM keypoints received, source:', vlmKeypoints.source);
+          }
+        }
+      } catch {
+        console.log('[try-on] VLM analysis failed/timed out — using heuristic positioning');
+      }
+
+      if (timedOut) return;
+
+      // ── Step 1: Quick AI availability check (2 second timeout) ──
       let aiAvailable = false;
       try {
         setProgressMessage('Checking AI availability...');
-        setGenerationProgress(12);
+        setGenerationProgress(20);
         const statusRes = await fetch('/api/try-on/status', {
-          signal: AbortSignal.timeout(3000),
+          signal: AbortSignal.timeout(2000),
         });
         if (statusRes.ok) {
           const statusData = await statusRes.json();
           aiAvailable = statusData.available === true;
-          console.log('[try-on] AI availability:', aiAvailable, statusData.mode, statusData.reason);
         }
       } catch {
         console.log('[try-on] AI status check failed/timed out — using canvas mode');
@@ -761,7 +936,7 @@ function TryOnDialog({
       // If AI is NOT available, skip the server POST entirely and go to canvas fallback
       if (!aiAvailable) {
         clearTimeout(timeoutId);
-        console.log('[try-on] AI unavailable, going directly to canvas overlay');
+        console.log('[try-on] AI unavailable, going directly to canvas overlay with keypoints');
         setProgressMessage('Creating style preview overlay...');
         setGenerationProgress(40);
 
@@ -774,16 +949,15 @@ function TryOnDialog({
           }
         } catch {}
 
-        await doCanvasFallback(productImageBase64);
+        await doCanvasFallback(productImageBase64, vlmKeypoints);
         return;
       }
 
-      // AI IS available — proceed with the full server flow
-      // Pre-fetch product image as base64 to avoid server-side resolution issues
+      // ── AI IS available — proceed with the full server flow ──
       let productImageBase64: string | undefined;
       try {
         setProgressMessage('Preparing product image...');
-        setGenerationProgress(15);
+        setGenerationProgress(25);
         const imgToFetch = rawProductImage || productImage;
         if (imgToFetch) {
           productImageBase64 = await fetchImageAsBase64(imgToFetch) || undefined;
@@ -792,9 +966,9 @@ function TryOnDialog({
 
       if (timedOut) return;
 
-      // Step 1: POST to create a try-on job — with a SHORT timeout
+      // Step 1b: POST to create a try-on job — with a SHORT timeout
       setProgressMessage('Creating style preview...');
-      setGenerationProgress(25);
+      setGenerationProgress(30);
       const postRes = await fetch('/api/try-on', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -806,18 +980,18 @@ function TryOnDialog({
           productName,
           categorySlug,
         }),
-        signal: AbortSignal.timeout(8000), // 8s max for initial POST
+        signal: AbortSignal.timeout(8000),
       });
 
       if (timedOut) return;
 
       const postData = await postRes.json();
 
-      // ── Canvas mode: AI service unavailable — go DIRECTLY to canvas overlay ──
+      // ── Canvas mode: AI service unavailable — go to canvas overlay with keypoints ──
       if (postData.mode === 'canvas' || postData.code === 'AI_CANVAS_MODE') {
         clearTimeout(timeoutId);
         const serverProductImageBase64 = postData.productImageBase64 as string | undefined;
-        await doCanvasFallback(serverProductImageBase64 || productImageBase64);
+        await doCanvasFallback(serverProductImageBase64 || productImageBase64, vlmKeypoints);
         return;
       }
 
@@ -825,19 +999,19 @@ function TryOnDialog({
       if (!postRes.ok) {
         clearTimeout(timeoutId);
         console.warn('[try-on] Server returned error:', postRes.status);
-        await doCanvasFallback(postData.productImageBase64 as string | undefined);
+        await doCanvasFallback(postData.productImageBase64 as string | undefined, vlmKeypoints);
         return;
       }
 
       const jobId = postData.jobId;
       if (!jobId) {
         clearTimeout(timeoutId);
-        await doCanvasFallback(postData.productImageBase64 as string | undefined);
+        await doCanvasFallback(postData.productImageBase64 as string | undefined, vlmKeypoints);
         return;
       }
 
       // Step 2: Poll for job completion (only when server returned a valid jobId)
-      const maxPolls = 20; // 20 * 2s = 40s max polling
+      const maxPolls = 20;
       let pollCount = 0;
 
       const pollJob = async (): Promise<void> => {
@@ -860,7 +1034,7 @@ function TryOnDialog({
         else if (pollData.pipelinePhase === 'refinement') setGenerationProgress(80);
         else if (pollData.pipelinePhase === 'composite') setGenerationProgress(85);
         else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
-        else if (pollCount > 1) setGenerationProgress(Math.min(90, 25 + pollCount * 4));
+        else if (pollCount > 1) setGenerationProgress(Math.min(90, 30 + pollCount * 4));
 
         if (pollData.status === 'completed') {
           if (!pollData.imageUrl || pollData.strategy === 'canvas-fallback') {
@@ -890,10 +1064,9 @@ function TryOnDialog({
       await pollJob();
     } catch (err) {
       // PERMANENT FIX: On ANY error, canvas fallback ALWAYS succeeds.
-      // The user NEVER sees "AI unavailable" — they ALWAYS get a visual result.
       clearTimeout(timeoutId);
       console.warn('[try-on] Generation error, falling back to canvas:', err instanceof Error ? err.message : String(err));
-      await doCanvasFallback();
+      await doCanvasFallback(undefined, null);
     }
   }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob, onResetBackground, doCanvasFallback]);
 
@@ -1444,7 +1617,7 @@ function TryOnDialog({
                   <Crown className="h-3.5 w-3.5 text-amber-400/60" />
                   <div className="flex-1">
                     <p className="text-[10px] font-semibold text-amber-200/70">
-                      AI Strategy: {strategy === 'edit-both' ? 'Dual-Image Edit' : strategy === 'edit-selfie' ? 'Selfie-Edit + Verify' : strategy === 'edit-selfie-refined' ? 'Selfie-Edit + Refined' : strategy === 'edit-product' ? 'Product-Edit + Verify' : strategy === 'edit-product-refined' ? 'Product-Edit + Refined' : strategy === 'create-text' ? 'AI Generate' : strategy === 'canvas-overlay' ? 'Style Overlay' : strategy}
+                      AI Strategy: {strategy === 'edit-both' ? 'Dual-Image Edit' : strategy === 'edit-selfie' ? 'Selfie-Edit + Verify' : strategy === 'edit-selfie-refined' ? 'Selfie-Edit + Refined' : strategy === 'edit-product' ? 'Product-Edit + Verify' : strategy === 'edit-product-refined' ? 'Product-Edit + Refined' : strategy === 'create-text' ? 'AI Generate' : strategy === 'vlm-canvas-overlay' ? 'AI Vision + Style Overlay' : strategy === 'canvas-overlay' ? 'Style Overlay' : strategy}
                     </p>
                     <div className="flex items-center gap-3 mt-0.5">
                       {faceAccuracy !== null && (

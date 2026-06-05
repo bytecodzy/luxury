@@ -102,3 +102,35 @@ Stage Summary:
 - All changes pushed to GitHub (commit 1658578)
 - Vercel deployment requires manual trigger (no auth token available in sandbox)
 >>>>>>> 6f67dd64e23b512c4127501d193d065877cec3bb
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix AI Virtual Try On to actually overlay product on selfie, fix header navigation for 3 sections
+
+Work Log:
+- Explored project structure: located header.tsx, product-detail.tsx (with embedded TryOnDialog), API routes
+- Analyzed existing generateCanvasFallback — it only put product thumbnail in bottom-right corner, not ON the person
+- Created new /api/try-on/analyze-selfie endpoint that uses VLM (z-ai-web-dev-sdk) for body keypoint detection
+- Rewrote generateCanvasFallback with category-aware body positioning:
+  - Jewelry → chest/neck area
+  - Watches → wrist position with slight rotation
+  - Clothing/Sarees/Fashion → torso area
+  - Fragrances → chest area offset
+  - Leather goods/bags → shoulder area
+  - Default → upper body center
+- Added BodyKeypoints interface and DEFAULT_KEYPOINTS heuristic for when VLM is unavailable
+- Added getProductOverlayPosition function for category-based overlay positioning
+- Updated doCanvasFallback to accept and pass categorySlug and keypoints
+- Updated handleGenerate to first call VLM analysis, then proceed with canvas fallback using keypoints
+- Added 'vlm-canvas-overlay' strategy display in results
+- Verified header navigation includes Family Packs, Social, Curate (all with NEW badges)
+- Verified all 3 page sections (Family Pack, Social Connections, 3BOXES Curate) render correctly
+- Tested /api/try-on/analyze-selfie endpoint returns valid heuristic keypoints
+- Tested /api/try-on/status returns available=true
+
+Stage Summary:
+- AI Virtual Try On now overlays product ON the person's body with category-aware positioning
+- VLM analysis provides precise body keypoints when available
+- Heuristic positioning works as fallback when VLM is unavailable
+- User ALWAYS gets a visual result — never sees "AI unavailable" error
+- Header navigation confirmed working with all 3 new sections visible
