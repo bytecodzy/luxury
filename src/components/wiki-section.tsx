@@ -25,7 +25,56 @@ import {
   LogIn,
   X,
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
+// Simple markdown-to-HTML renderer (replaces react-markdown to reduce bundle size)
+function simpleMarkdownToHtml(md: string): string {
+  let html = md
+
+  // Code blocks (``` ... ```) — must be before inline code
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_match, _lang, code) => {
+    const escaped = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .trimEnd()
+    return `<pre className="bg-stone-900 border border-amber-900/20 rounded-lg p-4 overflow-x-auto"><code>${escaped}</code></pre>`
+  })
+
+  // Inline code (` ... `)
+  html = html.replace(/`([^`]+)`/g, '<code class="bg-stone-800 px-1.5 py-0.5 rounded text-sm">$1</code>')
+
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+
+  // Bold & Italic
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+
+  // Links
+  html = html.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+
+  // Unordered lists
+  html = html.replace(/^[\s]*[-*] (.+)$/gm, '<li>$1</li>')
+  html = html.replace(/((<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
+
+  // Ordered lists
+  html = html.replace(/^[\s]*\d+\. (.+)$/gm, '<li>$1</li>')
+
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr />')
+
+  // Blockquotes
+  html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+
+  // Paragraphs: wrap remaining lines that aren't already wrapped in HTML tags
+  html = html.replace(/^(?!<[hublop]|<li|<hr|<pre|<code|<strong|<em|<a |<block)(.+)$/gm, '<p>$1</p>')
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, '')
+
+  return html
+}
 import { useState, useCallback, useRef } from 'react'
 
 // ── Types ────────────────────────────────────────────────────────
@@ -488,7 +537,7 @@ export function WikiSection() {
                   <article
                     className={`prose prose-invert max-w-none ${markdownStyles}`}
                   >
-                    <ReactMarkdown>{selectedDoc.content}</ReactMarkdown>
+                    <div dangerouslySetInnerHTML={{ __html: simpleMarkdownToHtml(selectedDoc.content) }} />
                   </article>
                 </div>
               </ScrollArea>

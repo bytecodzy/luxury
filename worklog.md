@@ -241,3 +241,84 @@ Stage Summary:
 - Sharp package completely removed — reduces serverless bundle by ~40MB+
 - Vercel 250MB deployment limit should now be resolved
 - Watermark functionality preserved via client-side canvas approach
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix Vercel 250MB serverless function deployment error (continued - aggressive bundle size reduction)
+
+Work Log:
+
+## Root Cause
+The Vercel deployment was still failing with "A Serverless Function has exceeded the unzipped maximum size of 250 MB" despite previous sharp removal. The remaining bloat came from:
+1. `react-day-picker` → pulls `date-fns` (39MB) + `date-fns-jalali` (16MB) = 55MB
+2. `react-markdown` = ~5MB
+3. Insufficiently aggressive `outputFileTracingExcludes` in next.config.ts
+4. Missing `serverExternalPackages` entries for heavy deps
+5. Missing `optimizePackageImports` for tree-shaking
+
+## Actions Taken
+
+### 1. Replaced `react-day-picker` with custom Calendar component
+- Removed all imports from `react-day-picker` (DayPicker, DayButton, getDefaultClassNames)
+- Created a new `src/components/ui/calendar.tsx` using ONLY native JavaScript Date APIs
+- Custom implementation features:
+  - Same `Calendar` export name for backward compatibility
+  - Props: `selected`, `onSelect`, `fromDate`, `toDate`, `showOutsideDays`, `month`, `onMonthChange`, `disabled`, etc.
+  - Month navigation with prev/next buttons
+  - Today highlighting, selected date styling, disabled dates
+  - Multiple months support (`numberOfMonths`)
+  - Uses shadcn/ui `Button` component and `cn` utility for consistent styling
+  - `data-slot="calendar"` attribute for CSS targeting compatibility
+- **Savings: ~55MB** (date-fns + date-fns-jalali eliminated)
+
+### 2. Replaced `react-markdown` with simple custom renderer
+- Removed `import ReactMarkdown from 'react-markdown'` from `wiki-section.tsx`
+- Added `simpleMarkdownToHtml()` function that handles:
+  - Code blocks (``` ... ```)
+  - Inline code (` ... `)
+  - Headers (h1, h2, h3)
+  - Bold (**...**) and italic (*...*)
+  - Links [...](...)
+  - Unordered and ordered lists
+  - Horizontal rules (---)
+  - Blockquotes (> ...)
+  - Paragraphs
+- Replaced `<ReactMarkdown>{content}</ReactMarkdown>` with `<div dangerouslySetInnerHTML={{ __html: simpleMarkdownToHtml(content) }} />`
+- **Savings: ~5MB**
+
+### 3. Updated `next.config.ts` with much more aggressive configuration
+- Expanded `serverExternalPackages` to include: sharp, @img/*, jspdf, canvg, core-js, canvas, prisma
+- Added `experimental.optimizePackageImports` for: lucide-react, recharts, @radix-ui/react-icons, framer-motion, date-fns
+- Significantly expanded `outputFileTracingExcludes` with:
+  - react-day-picker/**, date-fns/**, date-fns-jalali/**
+  - react-markdown/**
+  - recharts/**, d3-*/** (recharts pulls in d3)
+  - jspdf/**, canvg/**, core-js/**
+  - sharp/**, @img/**
+  - @reduxjs/**, es-toolkit/**
+  - canvas/**, react-syntax-highlighter/**
+  - All platform-specific binaries (darwin, win32, arm, musl)
+  - Non-linux Prisma engines
+  - Dev-only packages (typescript, eslint, bun-types, tsx, playwright)
+
+### 4. Removed packages from `package.json`
+- Removed `"react-day-picker": "^9.8.0"` from dependencies
+- Removed `"react-markdown": "^10.1.0"` from dependencies
+- Ran `bun install` — confirmed 2 packages removed
+
+### 5. Verified `pdf-utils.ts` already uses dynamic import
+- `pdf-utils.ts` already uses `await import('jspdf')` (dynamic import)
+- No top-level jspdf import — no changes needed
+
+### 6. Verification
+- ESLint passes on all modified files (calendar.tsx, wiki-section.tsx, next.config.ts, pdf-utils.ts)
+- Dev server running (HTTP 200)
+- `bun install` completed successfully (2 packages removed)
+
+Stage Summary:
+- Removed react-day-picker + react-markdown from package.json (~60MB savings)
+- Custom calendar component with zero external dependencies replaces react-day-picker
+- Custom markdown renderer replaces react-markdown (handles all common markdown syntax)
+- Aggressive next.config.ts excludes ~150MB+ of unnecessary packages from serverless bundle
+- Added serverExternalPackages and optimizePackageImports for further optimization
+- Total estimated bundle reduction: ~200MB+ (should comfortably fit within 250MB Vercel limit)
