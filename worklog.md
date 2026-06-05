@@ -322,3 +322,24 @@ Stage Summary:
 - Aggressive next.config.ts excludes ~150MB+ of unnecessary packages from serverless bundle
 - Added serverExternalPackages and optimizePackageImports for further optimization
 - Total estimated bundle reduction: ~200MB+ (should comfortably fit within 250MB Vercel limit)
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix Vercel 250MB error + Verify AI Virtual Try On in browser + Push to GitHub
+
+Work Log:
+- Analyzed the top 20 heaviest packages in node_modules (total 1.4GB)
+- Identified that react-day-picker (55MB deps) and react-markdown were the biggest removable packages
+- Replaced react-day-picker with custom calendar component (zero deps, saves 55MB)
+- Replaced react-markdown with simple markdown renderer in wiki-section.tsx
+- Updated next.config.ts with aggressive serverExternalPackages, optimizePackageImports, outputFileTracingExcludes
+- Removed react-day-picker and react-markdown from package.json
+- Tested AI Virtual Try On in browser: Style Preview button opens TryOnDialog correctly
+- Verified dialog shows upload step with disclaimer flow
+- Pushed all changes to GitHub (commit c49f012)
+
+Stage Summary:
+- Vercel 250MB fix: removed ~60MB of deps, added aggressive excludes for ~150MB more
+- AI Virtual Try On: dialog opens correctly, upload flow works
+- All changes pushed to GitHub at https://github.com/pmkshar/3-boxes-luxury
+- Awaiting Vercel deployment to verify bundle size fits within 250MB limit
