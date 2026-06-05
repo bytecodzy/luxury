@@ -5,7 +5,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2, Sun, Moon } from 'lucide-react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2, Sun, Moon, Users, Crown } from 'lucide-react';
 import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
@@ -24,6 +24,7 @@ interface CategoryNavItem {
   slug: string;
   icon: LucideIcon;
   children: CategoryChild[];
+  scrollToId?: string; // If set, clicking scrolls to this section ID on the home page
 }
 
 const CATEGORY_NAV: CategoryNavItem[] = [
@@ -96,6 +97,27 @@ const CATEGORY_NAV: CategoryNavItem[] = [
     slug: 'new-arrivals',
     icon: Sparkles,
     children: [],
+  },
+  {
+    name: 'Family Packs',
+    slug: 'family-packs',
+    icon: Package,
+    children: [],
+    scrollToId: 'family-pack-section',
+  },
+  {
+    name: 'Social',
+    slug: 'social-connections',
+    icon: Users,
+    children: [],
+    scrollToId: 'social-connections-section',
+  },
+  {
+    name: 'Curate',
+    slug: '3boxes-curate',
+    icon: Crown,
+    children: [],
+    scrollToId: '3boxes-curate-section',
   },
 ];
 
@@ -446,6 +468,57 @@ export function Header() {
                     {t('nav.giftBuilder')}
                     <Sparkles className="h-3 w-3 text-amber-400/60" />
                   </button>
+
+                  {/* Quick section links */}
+                  <div className="my-3 border-t border-amber-900/20 pt-3">
+                    <p className="px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest text-amber-400/50">Explore</p>
+                    <button
+                      onClick={() => {
+                        setView('home');
+                        setCategory(null);
+                        setMobileMenuOpen(false);
+                        setTimeout(() => {
+                          const el = document.getElementById('family-pack-section');
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 100);
+                      }}
+                      className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
+                    >
+                      <Package className="h-4 w-4" />
+                      Family Packs
+                    </button>
+                    <button
+                      onClick={() => {
+                        setView('home');
+                        setCategory(null);
+                        setMobileMenuOpen(false);
+                        setTimeout(() => {
+                          const el = document.getElementById('social-connections-section');
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 100);
+                      }}
+                      className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
+                    >
+                      <Users className="h-4 w-4" />
+                      Social Connections
+                    </button>
+                    <button
+                      onClick={() => {
+                        setView('home');
+                        setCategory(null);
+                        setMobileMenuOpen(false);
+                        setTimeout(() => {
+                          const el = document.getElementById('3boxes-curate-section');
+                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 100);
+                      }}
+                      className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
+                    >
+                      <Crown className="h-4 w-4" />
+                      3BOXES Curate
+                    </button>
+                  </div>
+
                   <button
                     onClick={() => {
                       if (canInstall) {
@@ -481,12 +554,30 @@ export function Header() {
               const hasChildren = cat.children.length > 0;
               const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
 
+              // Helper: handle nav item click — either scroll to section or set category
+              const handleNavClick = () => {
+                if (cat.scrollToId) {
+                  // Scroll to section on home page
+                  setView('home');
+                  setCategory(null);
+                  // Use setTimeout to ensure the home view is rendered before scrolling
+                  setTimeout(() => {
+                    const el = document.getElementById(cat.scrollToId!);
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }, 100);
+                } else {
+                  setCategory(cat.slug);
+                }
+              };
+
               if (!hasChildren) {
-                // No subcategories — click directly sets filter
+                // No subcategories — click directly sets filter or scrolls to section
                 return (
                   <button
                     key={cat.slug}
-                    onClick={() => { setCategory(cat.slug); }}
+                    onClick={handleNavClick}
                     className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors rounded-md ${
                       isActive
                         ? 'bg-amber-900/30 text-amber-300'
@@ -495,9 +586,16 @@ export function Header() {
                   >
                     <Icon className="h-4 w-4" />
                     {cat.name}
-                    <span className="ml-1 rounded bg-amber-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                      New
-                    </span>
+                    {cat.scrollToId && (
+                      <span className="ml-1 rounded bg-amber-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                        New
+                      </span>
+                    )}
+                    {cat.slug === 'new-arrivals' && !cat.scrollToId && (
+                      <span className="ml-1 rounded bg-amber-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                        New
+                      </span>
+                    )}
                   </button>
                 );
               }
@@ -570,10 +668,24 @@ export function Header() {
             {CATEGORY_NAV.map((cat) => {
               const Icon = cat.icon;
               const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
+              const handleMobileNavClick = () => {
+                if (cat.scrollToId) {
+                  setView('home');
+                  setCategory(null);
+                  setTimeout(() => {
+                    const el = document.getElementById(cat.scrollToId!);
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }, 100);
+                } else {
+                  setCategory(cat.slug);
+                }
+              };
               return (
                 <button
                   key={cat.slug}
-                  onClick={() => setCategory(cat.slug)}
+                  onClick={handleMobileNavClick}
                   className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors rounded-md whitespace-nowrap ${
                     isActive
                       ? 'bg-amber-900/30 text-amber-300'

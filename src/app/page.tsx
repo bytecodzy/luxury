@@ -23,9 +23,115 @@ import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
 import { AppDownloadSection } from '@/components/app-download-section';
 import { AppDownloadBanner } from '@/components/app-download-banner';
+import { FamilyPackSection } from '@/components/family-pack-section';
+import { SocialConnectionsSection } from '@/components/social-connections-section';
+import { ThreeboxesCurateSection } from '@/components/threeboxes-curate-section';
 import { ToastContainer } from '@/hooks/use-toast-notification';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
+
+// ── ErrorBoundary must be defined BEFORE any component that uses it ──
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback?: React.ReactNode },
+  ErrorBoundaryState
+> {
+  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('App ErrorBoundary caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      if (this.props.fallback) return this.props.fallback;
+      
+      const isDataError = this.state.error?.message?.includes('undefined') ||
+        this.state.error?.message?.includes('null') ||
+        this.state.error?.message?.includes('length') ||
+        this.state.error?.message?.includes('map is not a function');
+      
+      return (
+        <div className="flex min-h-[300px] flex-col items-center justify-center bg-stone-950/50 p-8 text-center rounded-xl border border-amber-900/20">
+          <div className="mb-4 rounded-full bg-amber-900/20 p-4">
+            <svg className="h-8 w-8 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+          </div>
+          <p className="mb-3 text-sm text-amber-200/60">
+            {isDataError
+              ? 'A data loading issue occurred. This is usually temporary.'
+              : this.state.error?.message || 'An unexpected error occurred'}
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="rounded-md bg-amber-600 px-5 py-2 text-sm font-medium text-stone-950 hover:bg-amber-500 transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ── Home page sections (uses ErrorBoundary, so must be after it) ──
+
+function HomeSections() {
+  return (
+    <>
+      <ErrorBoundary fallback={null}>
+        <HeroSection />
+      </ErrorBoundary>
+      <ErrorBoundary fallback={null}>
+        <CategoryGrid />
+      </ErrorBoundary>
+      <ErrorBoundary fallback={null}>
+        <ProductGrid />
+      </ErrorBoundary>
+
+      {/* Family Pack Section */}
+      <div id="family-pack-section">
+        <ErrorBoundary fallback={null}>
+          <FamilyPackSection />
+        </ErrorBoundary>
+      </div>
+
+      {/* Social Connections Section */}
+      <div id="social-connections-section">
+        <ErrorBoundary fallback={null}>
+          <SocialConnectionsSection />
+        </ErrorBoundary>
+      </div>
+
+      {/* 3BOXES Curate Section */}
+      <div id="3boxes-curate-section">
+        <ErrorBoundary fallback={null}>
+          <ThreeboxesCurateSection />
+        </ErrorBoundary>
+      </div>
+
+      <ErrorBoundary fallback={null}>
+        <AppDownloadSection />
+      </ErrorBoundary>
+    </>
+  );
+}
+
+// ── App Content ──
 
 function AppContent() {
   const view = useStore((s) => s.view);
@@ -34,22 +140,7 @@ function AppContent() {
   const renderView = () => {
     switch (view) {
       case 'home':
-        return (
-          <>
-            <ErrorBoundary fallback={null}>
-              <HeroSection />
-            </ErrorBoundary>
-            <ErrorBoundary fallback={null}>
-              <CategoryGrid />
-            </ErrorBoundary>
-            <ErrorBoundary fallback={null}>
-              <ProductGrid />
-            </ErrorBoundary>
-            <ErrorBoundary fallback={null}>
-              <AppDownloadSection />
-            </ErrorBoundary>
-          </>
-        );
+        return <HomeSections />;
       case 'product':
         return <ProductDetail />;
       case 'cart':
@@ -73,22 +164,7 @@ function AppContent() {
       case 'security-policy':
         return <SecurityPolicy />;
       default:
-        return (
-          <>
-            <ErrorBoundary fallback={null}>
-              <HeroSection />
-            </ErrorBoundary>
-            <ErrorBoundary fallback={null}>
-              <CategoryGrid />
-            </ErrorBoundary>
-            <ErrorBoundary fallback={null}>
-              <ProductGrid />
-            </ErrorBoundary>
-            <ErrorBoundary fallback={null}>
-              <AppDownloadSection />
-            </ErrorBoundary>
-          </>
-        );
+        return <HomeSections />;
     }
   };
 
@@ -129,63 +205,6 @@ function AppContent() {
       <ToastContainer />
     </div>
   );
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class ErrorBoundary extends React.Component<
-  { children: React.ReactNode; fallback?: React.ReactNode },
-  ErrorBoundaryState
-> {
-  constructor(props: { children: React.ReactNode; fallback?: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('App ErrorBoundary caught:', error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      if (this.props.fallback) return this.props.fallback;
-      
-      // Check if this is a data-related error (undefined.length etc.)
-      const isDataError = this.state.error?.message?.includes('undefined') ||
-        this.state.error?.message?.includes('null') ||
-        this.state.error?.message?.includes('length') ||
-        this.state.error?.message?.includes('map is not a function');
-      
-      return (
-        <div className="flex min-h-[300px] flex-col items-center justify-center bg-stone-950/50 p-8 text-center rounded-xl border border-amber-900/20">
-          <div className="mb-4 rounded-full bg-amber-900/20 p-4">
-            <svg className="h-8 w-8 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-            </svg>
-          </div>
-          <p className="mb-3 text-sm text-amber-200/60">
-            {isDataError
-              ? 'A data loading issue occurred. This is usually temporary.'
-              : this.state.error?.message || 'An unexpected error occurred'}
-          </p>
-          <button
-            onClick={() => this.setState({ hasError: false, error: null })}
-            className="rounded-md bg-amber-600 px-5 py-2 text-sm font-medium text-stone-950 hover:bg-amber-500 transition-colors"
-          >
-            Try again
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
 }
 
 export default function Home() {

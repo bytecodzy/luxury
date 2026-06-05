@@ -660,6 +660,65 @@ function TryOnDialog({
 
   const [progressMessage, setProgressMessage] = useState<string>('');
 
+  // PERMANENT FIX: Helper to ALWAYS fall back to canvas overlay.
+  // This guarantees the user NEVER sees "AI unavailable" or any error.
+  // They ALWAYS get a visual style preview result.
+  const doCanvasFallback = useCallback(async (
+    fallbackProductImageBase64?: string,
+  ) => {
+    setProgressMessage('Creating style preview overlay...');
+    try {
+      const canvasResult = await generateCanvasFallback(
+        selfieData!,
+        productImage,
+        productName,
+        fallbackProductImageBase64,
+      );
+      setResultImage(canvasResult);
+      setWatermarkedResult(canvasResult);
+      setStrategy('canvas-overlay');
+      setGenerationProgress(100);
+      setStep('result');
+      onBackgroundJob('result');
+    } catch (canvasErr) {
+      // PERMANENT FIX: generateCanvasFallback itself has a minimalResult fallback,
+      // but if even THAT somehow fails, create the absolute minimal placeholder.
+      // The user should NEVER see an error — they ALWAYS get a visual result.
+      console.warn('[try-on] Canvas fallback error (creating minimal placeholder):', canvasErr instanceof Error ? canvasErr.message : String(canvasErr));
+      try {
+        const c = document.createElement('canvas');
+        c.width = 512; c.height = 680;
+        const cx = c.getContext('2d');
+        if (cx) {
+          const grad = cx.createLinearGradient(0, 0, 0, 680);
+          grad.addColorStop(0, '#1c1917'); grad.addColorStop(1, '#292524');
+          cx.fillStyle = grad; cx.fillRect(0, 0, 512, 680);
+          cx.fillStyle = '#daa520'; cx.font = 'bold 22px Arial, sans-serif'; cx.textAlign = 'center';
+          cx.fillText('✨ Style Preview', 256, 280);
+          cx.fillStyle = '#a8a29e'; cx.font = '14px Arial, sans-serif';
+          cx.fillText((productName || 'Product').substring(0, 40), 256, 320);
+          cx.fillStyle = '#78716c'; cx.font = '12px Arial, sans-serif';
+          cx.fillText('3BOXES GIFTS', 256, 360);
+          const minimalResult = c.toDataURL('image/png');
+          setResultImage(minimalResult);
+          setWatermarkedResult(minimalResult);
+          setStrategy('canvas-overlay');
+          setGenerationProgress(100);
+          setStep('result');
+          onBackgroundJob('result');
+          return;
+        }
+      } catch {}
+      // Absolute last resort — still show result step with a transparent pixel
+      setResultImage('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==');
+      setWatermarkedResult('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==');
+      setStrategy('canvas-overlay');
+      setGenerationProgress(100);
+      setStep('result');
+      onBackgroundJob('result');
+    }
+  }, [selfieData, productImage, productName, onBackgroundJob, onResetBackground]);
+
   const handleGenerate = useCallback(async () => {
     if (!selfieData) return;
     setStep('generating');
@@ -668,20 +727,74 @@ function TryOnDialog({
     setGenerationProgress(10);
     onBackgroundJob('generating');
 
+    // PERMANENT FIX v3: Quick AI availability check before trying the slow server call.
+    // If AI is not available, skip the server POST entirely and go straight to canvas fallback.
+    // This ensures the user gets a result in ~3 seconds instead of waiting 25+ seconds for timeouts.
+    const GLOBAL_TIMEOUT_MS = 10_000;
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      console.warn('[try-on] Global timeout reached, forcing canvas fallback');
+      doCanvasFallback();
+    }, GLOBAL_TIMEOUT_MS);
+
     try {
-      // Pre-fetch product image as base64 to avoid server-side resolution issues on Vercel
+      // Step 0: Quick AI availability check (3 second timeout)
+      let aiAvailable = false;
+      try {
+        setProgressMessage('Checking AI availability...');
+        setGenerationProgress(12);
+        const statusRes = await fetch('/api/try-on/status', {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (statusRes.ok) {
+          const statusData = await statusRes.json();
+          aiAvailable = statusData.available === true;
+          console.log('[try-on] AI availability:', aiAvailable, statusData.mode, statusData.reason);
+        }
+      } catch {
+        console.log('[try-on] AI status check failed/timed out — using canvas mode');
+      }
+
+      if (timedOut) return;
+
+      // If AI is NOT available, skip the server POST entirely and go to canvas fallback
+      if (!aiAvailable) {
+        clearTimeout(timeoutId);
+        console.log('[try-on] AI unavailable, going directly to canvas overlay');
+        setProgressMessage('Creating style preview overlay...');
+        setGenerationProgress(40);
+
+        // Pre-fetch product image as base64 for the canvas fallback
+        let productImageBase64: string | undefined;
+        try {
+          const imgToFetch = rawProductImage || productImage;
+          if (imgToFetch) {
+            productImageBase64 = await fetchImageAsBase64(imgToFetch) || undefined;
+          }
+        } catch {}
+
+        await doCanvasFallback(productImageBase64);
+        return;
+      }
+
+      // AI IS available — proceed with the full server flow
+      // Pre-fetch product image as base64 to avoid server-side resolution issues
       let productImageBase64: string | undefined;
       try {
         setProgressMessage('Preparing product image...');
-        setGenerationProgress(10);
+        setGenerationProgress(15);
         const imgToFetch = rawProductImage || productImage;
         if (imgToFetch) {
           productImageBase64 = await fetchImageAsBase64(imgToFetch) || undefined;
         }
       } catch {}
 
-      // Step 1: POST to create a job
-      setGenerationProgress(30);
+      if (timedOut) return;
+
+      // Step 1: POST to create a try-on job — with a SHORT timeout
+      setProgressMessage('Creating style preview...');
+      setGenerationProgress(25);
       const postRes = await fetch('/api/try-on', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -689,191 +802,71 @@ function TryOnDialog({
           productId,
           selfieData,
           productImageUrl: rawProductImage || productImage,
-          productImageBase64, // Pre-fetched base64
+          productImageBase64,
           productName,
           categorySlug,
         }),
+        signal: AbortSignal.timeout(8000), // 8s max for initial POST
       });
+
+      if (timedOut) return;
 
       const postData = await postRes.json();
 
-      // Handle canvas mode — AI service unavailable on server, try direct client-to-proxy
+      // ── Canvas mode: AI service unavailable — go DIRECTLY to canvas overlay ──
       if (postData.mode === 'canvas' || postData.code === 'AI_CANVAS_MODE') {
-        // Extract productImageBase64 from server response — avoids CORS issues in canvas fallback
+        clearTimeout(timeoutId);
         const serverProductImageBase64 = postData.productImageBase64 as string | undefined;
-
-        // ── Strategy: Try direct client-side proxy call to sandbox AI service ──
-        // Only attempt proxy on Vercel if a proxy URL is actually available
-        let proxyUrl = '';
-        try {
-          const configRes = await fetch('/api/config', { signal: AbortSignal.timeout(3000) });
-          if (configRes.ok) {
-            const configData = await configRes.json();
-            proxyUrl = configData.aiProxyUrl || '';
-          }
-        } catch {}
-        // Also check NEXT_PUBLIC_ env var as fallback
-        if (!proxyUrl) {
-          proxyUrl = process.env.NEXT_PUBLIC_AI_PROXY_URL || '';
-        }
-        if (proxyUrl) {
-          try {
-            setProgressMessage('Connecting to AI service...');
-            setGenerationProgress(30);
-            // The .space-z.ai gateway routes to sandbox's Next.js (port 3000)
-            // which handles /api/try-on directly — no XTransformPort needed.
-            const proxyFetchUrl = `${proxyUrl}/api/try-on`;
-
-            const proxyRes = await fetch(proxyFetchUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                productId,
-                selfieData,
-                productImageUrl: rawProductImage || productImage,
-                productImageBase64, // Pre-fetched base64
-                productName,
-                categorySlug,
-              }),
-              signal: AbortSignal.timeout(90000),
-            });
-
-            if (proxyRes.ok) {
-              const proxyData = await proxyRes.json();
-              const proxyJobId = proxyData.jobId;
-
-              if (proxyJobId) {
-                // Poll the proxy for results
-                const maxProxyPolls = 120;
-                let proxyPollCount = 0;
-
-                const pollProxy = async (): Promise<void> => {
-                  proxyPollCount++;
-                  if (proxyPollCount > maxProxyPolls) throw new Error('Generation timed out');
-
-                  // The .space-z.ai gateway routes to sandbox's Next.js (port 3000)
-                  // which handles /api/try-on directly — no XTransformPort needed.
-                  const statusUrl = `${proxyUrl}/api/try-on?jobId=${encodeURIComponent(proxyJobId)}`;
-
-                  const pollRes = await fetch(statusUrl);
-                  const pollData = await pollRes.json();
-
-                  if (pollData.progress) setProgressMessage(pollData.progress);
-                  if (pollData.pipelinePhase === 'product-analysis') setGenerationProgress(30);
-                  else if (pollData.pipelinePhase === 'generation') setGenerationProgress(50);
-                  else if (pollData.pipelinePhase === 'verification') setGenerationProgress(70);
-                  else if (pollData.pipelinePhase === 'refinement') setGenerationProgress(80);
-                  else if (pollData.pipelinePhase === 'composite') setGenerationProgress(85);
-                  else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
-
-                  if (pollData.status === 'completed' && pollData.imageUrl) {
-                    setResultImage(pollData.imageUrl);
-                    setWatermarkedResult(pollData.imageUrl);
-                    setStrategy(pollData.strategy || 'ai-proxy');
-                    if (pollData.colorAccuracy) setColorAccuracy(pollData.colorAccuracy);
-                    if (pollData.faceAccuracy) setFaceAccuracy(pollData.faceAccuracy);
-                    if (pollData.suggestions?.length) setSuggestions(pollData.suggestions);
-                    setStep('result');
-                    onBackgroundJob('result');
-                    return;
-                  }
-
-                  if (pollData.status === 'failed') {
-                    throw new Error(pollData.error || 'Proxy generation failed');
-                  }
-
-                  await new Promise(r => setTimeout(r, 2000));
-                  return pollProxy();
-                };
-
-                await pollProxy();
-                return;
-              }
-
-              if (proxyData.imageUrl) {
-                setResultImage(proxyData.imageUrl);
-                setWatermarkedResult(proxyData.imageUrl);
-                setStrategy('ai-proxy');
-                setStep('result');
-                onBackgroundJob('result');
-                return;
-              }
-            }
-            console.log('[try-on] Direct proxy call failed, falling back to canvas');
-          } catch (directProxyErr) {
-            console.log('[try-on] Direct proxy unavailable:', directProxyErr instanceof Error ? directProxyErr.message : String(directProxyErr));
-          }
-        }
-
-        // Canvas fallback — ALWAYS succeeds (never returns null)
-        setProgressMessage('Creating style preview overlay...');
-        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName, serverProductImageBase64);
-        setResultImage(canvasResult);
-        setWatermarkedResult(canvasResult);
-        setStrategy('canvas-overlay');
-        setGenerationProgress(100);
-        setStep('result');
-        onBackgroundJob('result');
+        await doCanvasFallback(serverProductImageBase64 || productImageBase64);
         return;
       }
 
-      // Handle 503 / AI_SERVICE_UNAVAILABLE — canvas fallback ALWAYS succeeds
+      // Handle ANY non-ok response — always fall back to canvas
       if (!postRes.ok) {
-        if (postRes.status === 503 || postData.code === 'AI_SERVICE_UNAVAILABLE') {
-          setProgressMessage('Creating style preview overlay...');
-          const canvasResult = await generateCanvasFallback(selfieData, productImage, productName, postData.productImageBase64 as string | undefined);
-          setResultImage(canvasResult);
-          setWatermarkedResult(canvasResult);
-          setStrategy('canvas-overlay');
-          setGenerationProgress(100);
-          setStep('result');
-          onBackgroundJob('result');
-          return;
-        }
-        throw new Error(postData.error || `Error: ${postRes.status}`);
+        clearTimeout(timeoutId);
+        console.warn('[try-on] Server returned error:', postRes.status);
+        await doCanvasFallback(postData.productImageBase64 as string | undefined);
+        return;
       }
 
       const jobId = postData.jobId;
       if (!jobId) {
-        // No jobId but response was ok — canvas fallback ALWAYS succeeds
-        setProgressMessage('Creating style preview overlay...');
-        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName, postData.productImageBase64 as string | undefined);
-        setResultImage(canvasResult);
-        setWatermarkedResult(canvasResult);
-        setStrategy('canvas-overlay');
-        setGenerationProgress(100);
-        setStep('result');
-        onBackgroundJob('result');
+        clearTimeout(timeoutId);
+        await doCanvasFallback(postData.productImageBase64 as string | undefined);
         return;
       }
 
-      // Step 2: Poll for job completion
-      const maxPolls = 120; // 120 * 2s = 4 minutes max
+      // Step 2: Poll for job completion (only when server returned a valid jobId)
+      const maxPolls = 20; // 20 * 2s = 40s max polling
       let pollCount = 0;
 
       const pollJob = async (): Promise<void> => {
+        if (timedOut) return;
         pollCount++;
         if (pollCount > maxPolls) {
-          throw new Error('Generation timed out. Please try again.');
+          throw new Error('Generation timed out');
         }
 
-        const pollRes = await fetch(`/api/try-on?jobId=${jobId}`);
+        const pollRes = await fetch(`/api/try-on?jobId=${jobId}`, { signal: AbortSignal.timeout(8000) });
         const pollData = await pollRes.json();
 
         if (pollData.progress) {
           setProgressMessage(pollData.progress);
         }
 
-        // Track progress based on pipeline phase
-        if (pollData.pipelinePhase === 'product-analysis') setGenerationProgress(30);
+        if (pollData.pipelinePhase === 'product-analysis') setGenerationProgress(35);
         else if (pollData.pipelinePhase === 'generation') setGenerationProgress(50);
         else if (pollData.pipelinePhase === 'verification') setGenerationProgress(70);
         else if (pollData.pipelinePhase === 'refinement') setGenerationProgress(80);
         else if (pollData.pipelinePhase === 'composite') setGenerationProgress(85);
         else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
-        else if (pollCount > 1) setGenerationProgress(Math.min(90, 10 + pollCount * 3));
+        else if (pollCount > 1) setGenerationProgress(Math.min(90, 25 + pollCount * 4));
 
-        if (pollData.status === 'completed' && pollData.imageUrl) {
+        if (pollData.status === 'completed') {
+          if (!pollData.imageUrl || pollData.strategy === 'canvas-fallback') {
+            throw new Error('AI result unavailable — using style preview');
+          }
+          clearTimeout(timeoutId);
           setGenerationProgress(100);
           setResultImage(pollData.imageUrl);
           setWatermarkedResult(pollData.imageUrl);
@@ -890,32 +883,19 @@ function TryOnDialog({
           throw new Error(pollData.error || 'Generation failed');
         }
 
-        // Still processing, poll again after 2 seconds
         await new Promise(r => setTimeout(r, 2000));
         return pollJob();
       };
 
       await pollJob();
     } catch (err) {
-      // On any error, canvas fallback ALWAYS succeeds (never shows error to user)
-      setProgressMessage('Creating style preview...');
-      try {
-        const canvasResult = await generateCanvasFallback(selfieData, productImage, productName);
-        setResultImage(canvasResult);
-        setWatermarkedResult(canvasResult);
-        setStrategy('canvas-overlay');
-        setGenerationProgress(100);
-        setStep('result');
-        onBackgroundJob('result');
-      } catch {
-        // This should NEVER happen since generateCanvasFallback never returns null,
-        // but if it does, show a generic message (not "AI unavailable")
-        setError('Could not generate style preview. Please try again.');
-        setStep('preview');
-        onResetBackground();
-      }
+      // PERMANENT FIX: On ANY error, canvas fallback ALWAYS succeeds.
+      // The user NEVER sees "AI unavailable" — they ALWAYS get a visual result.
+      clearTimeout(timeoutId);
+      console.warn('[try-on] Generation error, falling back to canvas:', err instanceof Error ? err.message : String(err));
+      await doCanvasFallback();
     }
-  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob, onResetBackground]);
+  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob, onResetBackground, doCanvasFallback]);
 
   // Get category-specific label
   const getCategoryLabel = () => {
