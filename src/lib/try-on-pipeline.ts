@@ -24,7 +24,8 @@
  */
 
 import { createZAI } from './zai'
-import { addWatermark } from './watermark'
+// Dynamic import for watermark to avoid bundling sharp into every route
+// import { addWatermark } from './watermark'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -1234,6 +1235,7 @@ Studio-quality, 8K.`
 
     let finalImageUrl = finalResult.imageUrl
     try {
+      const { addWatermark } = await import('./watermark')
       finalImageUrl = await addWatermark(finalResult.imageUrl)
       console.log(`[pipeline:${jobId}] Watermark applied`)
     } catch (wmErr) {

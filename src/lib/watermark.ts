@@ -1,9 +1,14 @@
-import sharp from 'sharp'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
 // Cache the watermark buffer so we don't read from disk on every request
 let watermarkBufferCache: Buffer | null = null
+
+// Dynamic sharp import - only loaded when needed
+async function getSharp() {
+  const sharp = (await import('sharp')).default
+  return sharp
+}
 
 /**
  * Create a "3BOXES GIFTS" watermark image using Sharp.
@@ -13,8 +18,6 @@ async function createWatermarkBuffer(width: number, height: number): Promise<Buf
   // Scale watermark based on image dimensions
   const wmWidth = Math.max(Math.floor(width * 0.35), 150)
   const wmHeight = Math.max(Math.floor(height * 0.08), 40)
-  const fontSize = Math.max(Math.floor(wmHeight * 0.55), 14)
-  const subFontSize = Math.max(Math.floor(wmHeight * 0.3), 8)
 
   // Create the SVG watermark
   const svg = `<svg width="${wmWidth}" height="${wmHeight}" xmlns="http://www.w3.org/2000/svg">
@@ -26,8 +29,8 @@ async function createWatermarkBuffer(width: number, height: number): Promise<Buf
       </linearGradient>
     </defs>
     <rect x="0" y="0" width="${wmWidth}" height="${wmHeight}" rx="4" ry="4" fill="rgba(0,0,0,0.55)" />
-    <text x="${wmWidth / 2}" y="${wmHeight * 0.42}" font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" font-weight="bold" fill="url(#grad)" text-anchor="middle" dominant-baseline="middle">3BOXES GIFTS</text>
-    <text x="${wmWidth / 2}" y="${wmHeight * 0.78}" font-family="Arial, Helvetica, sans-serif" font-size="${subFontSize}" fill="rgba(218,165,32,0.6)" text-anchor="middle" dominant-baseline="middle">AI Style Preview</text>
+    <text x="${wmWidth / 2}" y="${wmHeight * 0.42}" font-family="Arial, Helvetica, sans-serif" font-size="${Math.max(Math.floor(wmHeight * 0.55), 14)}" font-weight="bold" fill="url(#grad)" text-anchor="middle" dominant-baseline="middle">3BOXES GIFTS</text>
+    <text x="${wmWidth / 2}" y="${wmHeight * 0.78}" font-family="Arial, Helvetica, sans-serif" font-size="${Math.max(Math.floor(wmHeight * 0.3), 8)}" fill="rgba(218,165,32,0.6)" text-anchor="middle" dominant-baseline="middle">AI Style Preview</text>
   </svg>`
 
   return Buffer.from(svg)
@@ -38,6 +41,8 @@ async function createWatermarkBuffer(width: number, height: number): Promise<Buf
  * Falls back to a text-based watermark if the logo is unavailable.
  */
 async function getWatermarkBuffer(width: number, height: number): Promise<Buffer> {
+  const sharp = await getSharp()
+
   // Try using the logo file
   const logoPath = join(process.cwd(), 'public', 'images', 'logo-uploaded.png')
   if (existsSync(logoPath)) {
@@ -50,7 +55,6 @@ async function getWatermarkBuffer(width: number, height: number): Promise<Buffer
       // Scale logo to fit nicely in the bottom-right
       const targetHeight = Math.max(Math.floor(height * 0.08), 36)
       const targetWidth = Math.floor((logoW / logoH) * targetHeight)
-      const padding = Math.floor(height * 0.02)
 
       // Resize logo and add transparency
       const resizedLogo = await sharp(logoData)
@@ -111,6 +115,8 @@ async function getWatermarkBuffer(width: number, height: number): Promise<Buffer
  */
 export async function addWatermark(imageDataUrl: string): Promise<string> {
   try {
+    const sharp = await getSharp()
+
     // Strip the data URL prefix
     const base64Match = imageDataUrl.match(/^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/)
     if (!base64Match) {
