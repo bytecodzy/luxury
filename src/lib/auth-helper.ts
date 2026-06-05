@@ -13,6 +13,8 @@ interface JWTPayload {
 
 export interface AuthUser {
   id: string
+  /** Alias for id — some routes use .userId */
+  userId: string
   email: string
   name: string
   role: string
@@ -23,6 +25,11 @@ export interface AuthUser {
   emailVerified?: boolean
   twoFactorEnabled?: boolean
   twoFactorRequired?: boolean
+}
+
+// Helper to add userId alias to user objects
+function withUserId<T extends { id: string }>(user: T): T & { userId: string } {
+  return { ...user, userId: user.id }
 }
 
 /**
@@ -49,7 +56,7 @@ export async function authenticate(
     // JWT session token with embedded user data (used on Vercel)
     if (decoded.type === 'session' && decoded.userId) {
       return {
-        user: {
+        user: withUserId({
           id: decoded.userId,
           email: decoded.email || '',
           name: decoded.name || '',
@@ -58,7 +65,7 @@ export async function authenticate(
           approvalStatus: 'approved',
           emailVerified: true,
           twoFactorEnabled: false,
-        },
+        }),
         error: null,
       }
     }
@@ -90,13 +97,13 @@ export async function authenticate(
       }
 
       return {
-        user: dbUser as AuthUser,
+        user: withUserId(dbUser) as AuthUser,
         error: null,
       }
     } catch {
       // DB unavailable — return JWT data
       return {
-        user: {
+        user: withUserId({
           id: decoded.userId,
           email: decoded.email || '',
           name: decoded.name || '',
@@ -105,7 +112,7 @@ export async function authenticate(
           approvalStatus: 'approved',
           emailVerified: true,
           twoFactorEnabled: false,
-        },
+        }),
         error: null,
       }
     }
@@ -150,13 +157,13 @@ export async function authenticate(
       }
 
       return {
-        user: dbUser as AuthUser,
+        user: withUserId(dbUser) as AuthUser,
         error: null,
       }
     } catch {
       // DB unavailable — return session user data
       return {
-        user: {
+        user: withUserId({
           id: sessionUser.id,
           email: sessionUser.email,
           name: sessionUser.name,
@@ -165,7 +172,7 @@ export async function authenticate(
           approvalStatus: 'approved',
           emailVerified: true,
           twoFactorEnabled: false,
-        },
+        }),
         error: null,
       }
     }

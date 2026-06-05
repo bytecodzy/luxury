@@ -315,6 +315,51 @@ export async function sendPasswordResetEmail(email: string, resetToken: string):
 }
 
 /**
+ * Get current SMTP settings (for admin panel).
+ */
+export function getSmtpSettings() {
+  return {
+    host: SMTP_HOST,
+    port: SMTP_PORT,
+    user: SMTP_USER,
+    from: SMTP_FROM,
+    configured: !!(SMTP_USER && SMTP_PASS),
+  };
+}
+
+/**
+ * Test SMTP connection with optional custom config.
+ */
+export async function testSmtpConnection(config?: { host: string; port: number; user: string; pass: string; from: string }): Promise<{ success: boolean; message: string }> {
+  try {
+    const testConfig = config || { host: SMTP_HOST, port: SMTP_PORT, user: SMTP_USER, pass: SMTP_PASS, from: SMTP_FROM };
+    const transport = nodemailer.createTransport({
+      host: testConfig.host,
+      port: testConfig.port,
+      secure: testConfig.port === 465,
+      auth: {
+        user: testConfig.user,
+        pass: testConfig.pass,
+      },
+      tls: { rejectUnauthorized: false },
+    });
+    await transport.verify();
+    transport.close();
+    return { success: true, message: 'SMTP connection successful' };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { success: false, message: `SMTP connection failed: ${msg}` };
+  }
+}
+
+/**
+ * Reset the cached Gmail transporter (so new settings take effect).
+ */
+export function resetSmtpTransporter(): void {
+  gmailTransporter = null;
+}
+
+/**
  * Send an email verification code.
  */
 export async function sendEmailVerification(email: string, code: string): Promise<boolean> {

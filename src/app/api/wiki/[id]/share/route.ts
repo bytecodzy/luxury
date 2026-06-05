@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, edb } from '@/lib/db'
 import { verifyAuth } from '@/lib/auth-api'
 
 // POST /api/wiki/[id]/share — share a document with specific roles/users
@@ -26,7 +26,7 @@ export async function POST(
       return NextResponse.json({ error: 'Document not found' }, { status: 404 })
     }
 
-    const share = await db.trainingShare.create({
+    const share = await edb.trainingShare.create({
       data: {
         docId: id,
         targetRole: targetRole || 'user',
@@ -57,7 +57,7 @@ export async function GET(
 
     const { id } = await params
 
-    const shares = await db.trainingShare.findMany({
+    const shares = await edb.trainingShare.findMany({
       where: { docId: id },
       orderBy: { createdAt: 'desc' },
     })
@@ -88,7 +88,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Share ID required' }, { status: 400 })
     }
 
-    await db.trainingShare.delete({
+    await edb.trainingShare.delete({
       where: { id: shareId },
     })
 

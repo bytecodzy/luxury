@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { edb } from '@/lib/db'
 import { randomInt } from 'crypto'
 
 // In production, this would send SMS/email. For demo, we store in DB and log to console.
@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
 
     // Delete any existing OTPs for this email/phone
     const identifier = email || phone!
-    await db.oTP.deleteMany({
+    await edb.oTP.deleteMany({
       where: {
         OR: [
           { email: identifier },
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Create new OTP
-    await db.oTP.create({
+    await edb.oTP.create({
       data: {
         email: email || '',
         phone: phone || null,

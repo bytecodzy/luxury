@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db, edb } from '@/lib/db';
 
 // Helper: get user from Authorization header
 async function getUserFromRequest(req: NextRequest) {
@@ -20,7 +20,7 @@ async function getUserFromRequest(req: NextRequest) {
 
 // Helper: get corporate account for user
 async function getCorporateForUser(userId: string) {
-  return db.corporate.findUnique({
+  return edb.corporate.findUnique({
     where: { userId },
   });
 }
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Corporate account not found' }, { status: 404 });
     }
 
-    const recipients = await db.corporateRecipient.findMany({
+    const recipients = await edb.corporateRecipient.findMany({
       where: { corporateId: corporate.id },
       orderBy: { createdAt: 'desc' },
     });
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     if (body.action === 'bulk' && Array.isArray(body.recipients)) {
       const results = await Promise.allSettled(
         body.recipients.map((r: { name: string; email: string; phone?: string; department?: string; designation?: string; address?: string; city?: string; state?: string; zipCode?: string; notes?: string }) =>
-          db.corporateRecipient.create({
+          edb.corporateRecipient.create({
             data: {
               corporateId: corporate.id,
               name: r.name,
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const recipient = await db.corporateRecipient.create({
+    const recipient = await edb.corporateRecipient.create({
       data: {
         corporateId: corporate.id,
         name,
@@ -153,7 +153,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Verify recipient belongs to this corporate account
-    const recipient = await db.corporateRecipient.findUnique({
+    const recipient = await edb.corporateRecipient.findUnique({
       where: { id },
     });
 
@@ -161,7 +161,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Recipient not found' }, { status: 404 });
     }
 
-    await db.corporateRecipient.delete({
+    await edb.corporateRecipient.delete({
       where: { id },
     });
 

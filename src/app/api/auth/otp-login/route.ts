@@ -78,8 +78,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Check account lock
-      if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
-        const remainingMin = Math.ceil((new Date(user.lockedUntil).getTime() - Date.now()) / (60 * 1000));
+      if ((user as any).lockedUntil && new Date((user as any).lockedUntil) > new Date()) {
+        const remainingMin = Math.ceil((new Date((user as any).lockedUntil).getTime() - Date.now()) / (60 * 1000));
         return NextResponse.json(
           { error: `Account is locked. Try again in ${remainingMin} minutes.` },
           { status: 423 }
@@ -166,8 +166,6 @@ export async function POST(request: NextRequest) {
         data: {
           otpCode: null,
           otpExpiry: null,
-          failedLoginAttempts: 0,
-          lockedUntil: null,
           lastLoginAt: new Date(),
           lastLoginIp: ip,
           lastLoginDevice: userAgent,

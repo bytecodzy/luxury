@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { edb, db } from '@/lib/db'
 import bcrypt from 'bcryptjs'
 
 export async function POST(request: NextRequest) {
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Find the most recent unverified OTP
-    const otp = await db.oTP.findFirst({
+    const otp = await edb.oTP.findFirst({
       where: {
         OR: [
           { email: identifier },
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Mark OTP as verified
-    await db.oTP.update({
+    await edb.oTP.update({
       where: { id: otp.id },
       data: { verified: true },
     })

@@ -11,3 +11,14 @@ export const db =
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+
+// Extended DB with models that may not be in the Prisma schema yet
+// Use `edb` for models like oTP, corporate, corporateRecipient, exchangeRate, etc.
+export const edb = db as PrismaClient & {
+  oTP: any
+  corporate: any
+  corporateRecipient: any
+  exchangeRate: any
+  aIRecommendation: any
+  trainingShare: any
+}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, edb } from '@/lib/db'
 import ZAI from 'z-ai-web-dev-sdk'
 
 const SYSTEM_PROMPT = `You are the AI Gift Recommendation Assistant for 3 BOXES GIFTS — a premium luxury gifting brand in India. You are sophisticated, warm, and knowledgeable about luxury gifts.
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     // Save recommendation to database if we have filters
     if (filters) {
       try {
-        await db.aIRecommendation.create({
+        await edb.aIRecommendation.create({
           data: {
             occasion: filters.occasion || null,
             recipient: filters.recipient || null,

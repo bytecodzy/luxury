@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { edb } from '@/lib/db';
 import { DEFAULT_RATES } from '@/lib/currency/config';
 
 // In-memory cache
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     
     // Try to fetch from DB
     try {
-      const dbRates = await db.exchangeRate.findMany({
+      const dbRates = await edb.exchangeRate.findMany({
         where: { base: 'USD' },
       });
       
@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
         try {
           for (const [target, rate] of Object.entries(apiRates)) {
             if (target === 'USD') continue;
-            await db.exchangeRate.upsert({
+            await edb.exchangeRate.upsert({
               where: { base_target: { base: 'USD', target } },
               update: { rate, source: 'open-er-api', fetchedAt: new Date() },
               create: { base: 'USD', target, rate, source: 'open-er-api' },
@@ -157,7 +157,7 @@ export async function POST(request: NextRequest) {
     // Save to DB
     for (const [target, rate] of Object.entries(apiRates)) {
       if (target === 'USD') continue;
-      await db.exchangeRate.upsert({
+      await edb.exchangeRate.upsert({
         where: { base_target: { base: 'USD', target } },
         update: { rate, source: 'open-er-api', fetchedAt: new Date() },
         create: { base: 'USD', target, rate, source: 'open-er-api' },

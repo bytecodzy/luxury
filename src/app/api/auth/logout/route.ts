@@ -23,10 +23,10 @@ export async function POST(request: NextRequest) {
     const userAgent = request.headers.get('user-agent') || 'unknown';
     await db.auditLog.create({
       data: {
-        userId: auth.userId,
+        userId: auth.id,
         action: 'logout',
         entity: 'user',
-        entityId: auth.userId,
+        entityId: auth.id,
         ipAddress: ip,
         userAgent,
       },

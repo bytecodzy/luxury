@@ -1,12 +1,42 @@
 import { create } from 'zustand'
 
-export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'corporate-dashboard' | 'wiki' | 'downloads' | 'security-policy'
+export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'corporate-dashboard' | 'wiki' | 'downloads' | 'security-policy' | 'shop' | 'contact' | 'about' | 'divisions' | 'careers' | 'press' | 'sustainability' | 'shipping' | 'faq' | 'size-guide' | 'track-order' | 'privacy-policy' | 'terms-of-service' | 'cookie-policy' | 'refund-policy'
 
 export interface AuthUser {
   id: string
   email: string
   name: string
   role: 'admin' | 'user' | 'agent' | 'team' | 'corporate'
+  /** Alias for id — some routes use .userId */
+  userId: string
+  phone?: string | null
+  avatar?: string | null
+  isActive?: boolean
+  approvalStatus?: string
+  emailVerified?: boolean
+  phoneVerified?: boolean
+  twoFactorEnabled?: boolean
+  twoFactorRequired?: boolean
+  adminRole?: string | null
+  corporateRole?: string | null
+}
+
+export interface SmartBundleItem {
+  id: string
+  name: string
+  price: number
+  image: string
+  platform: string
+  platformColor: string
+  isOwnProduct: boolean
+}
+
+export interface GiftFilter {
+  occasion: string | null
+  recipient: string | null
+  relationship: string | null
+  priceRange: string | null
+  category?: string | null
 }
 
 export interface CartItem {
@@ -48,6 +78,17 @@ interface AppState {
   authPendingEmail: string | null
   giftBuilderView: boolean
 
+  // Aliases used by components
+  user: AuthUser | null
+  language: string
+  country: string | null
+  messages: Record<string, any> | null
+  exchangeRates: Record<string, any> | null
+  giftFilter: GiftFilter
+  smartBundleItems: SmartBundleItem[]
+  showAuthDialog: boolean
+  authMode: 'login' | 'register' | null
+
   // Multi-currency & i18n
   locale: string
   currency: string
@@ -81,6 +122,19 @@ interface AppState {
   setCurrency: (code: string) => void
   setCurrencyRates: (rates: Record<string, CurrencyInfo>) => void
   setGeoInfo: (info: GeoInfo) => void
+
+  // Alias setters
+  setLanguage: (lang: string) => void
+  setCountry: (country: string | null) => void
+  setMessages: (msgs: Record<string, any>) => void
+  setExchangeRates: (rates: Record<string, any>) => void
+  setGiftFilter: (filter: Partial<GiftFilter>) => void
+  clearGiftFilter: () => void
+  addSmartBundleItem: (item: SmartBundleItem) => void
+  removeSmartBundleItem: (id: string) => void
+  clearSmartBundle: () => void
+  setShowAuthDialog: (show: boolean) => void
+  setAuthMode: (mode: 'login' | 'register' | null) => void
 }
 
 function loadAuthFromStorage(): { user: AuthUser | null; token: string | null } {
@@ -128,6 +182,12 @@ function loadThemeFromStorage(): 'dark' | 'light' {
 
 const initialAuth = loadAuthFromStorage()
 
+// Helper to ensure AuthUser always has userId alias
+function withUserIdAlias(user: AuthUser | null): AuthUser | null {
+  if (!user) return null
+  return { ...user, userId: user.id }
+}
+
 export const useStore = create<AppState>((set, get) => ({
   view: 'home',
   selectedProductId: null,
@@ -135,7 +195,7 @@ export const useStore = create<AppState>((set, get) => ({
   selectedCategory: null,
   cartItems: [],
   lastOrderId: null,
-  authUser: initialAuth.user,
+  authUser: withUserIdAlias(initialAuth.user),
   authToken: initialAuth.token,
   authView: null,
   authTwoFAStep: false,
@@ -143,6 +203,17 @@ export const useStore = create<AppState>((set, get) => ({
   authTwoFAMethod: null,
   authPendingEmail: null,
   giftBuilderView: false,
+
+  // Aliases used by components
+  user: withUserIdAlias(initialAuth.user),
+  language: typeof window !== 'undefined' ? loadLocaleFromStorage() : 'en',
+  country: null,
+  messages: null,
+  exchangeRates: null,
+  giftFilter: { occasion: null, recipient: null, relationship: null, priceRange: null, category: null },
+  smartBundleItems: [],
+  showAuthDialog: false,
+  authMode: null,
 
   // Multi-currency & i18n
   locale: typeof window !== 'undefined' ? loadLocaleFromStorage() : 'en',
@@ -194,7 +265,8 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       // ignore storage errors
     }
-    set({ authUser: user, authToken: token, authView: null, authTwoFAStep: false, authPendingUserId: null, authTwoFAMethod: null, authPendingEmail: null })
+    const withAlias = withUserIdAlias(user)
+    set({ authUser: withAlias, user: withAlias, authToken: token, authView: null, authTwoFAStep: false, authPendingUserId: null, authTwoFAMethod: null, authPendingEmail: null })
   },
   clearAuth: () => {
     try {
@@ -202,7 +274,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       // ignore storage errors
     }
-    set({ authUser: null, authToken: null, authView: null, authTwoFAStep: false, authPendingUserId: null, authTwoFAMethod: null, authPendingEmail: null })
+    set({ authUser: null, user: null, authToken: null, authView: null, authTwoFAStep: false, authPendingUserId: null, authTwoFAMethod: null, authPendingEmail: null })
   },
   setAuthView: (view) => set({ authView: view }),
   setAuthTwoFAStep: (step) => set({ authTwoFAStep: step }),
@@ -224,7 +296,7 @@ export const useStore = create<AppState>((set, get) => ({
     } catch {
       // ignore storage errors
     }
-    set({ locale })
+    set({ locale, language: locale })
   },
   setCurrency: (code) => {
     const rates = get().currencyRates
@@ -264,8 +336,37 @@ export const useStore = create<AppState>((set, get) => ({
       // Keep English as default, but store detected language for suggestion
       try { localStorage.setItem('3boxes_locale', 'en') } catch {}
       updates.locale = 'en'
+      updates.language = 'en'
     }
 
     set(updates as AppState)
   },
+
+  // Alias setters
+  setLanguage: (lang) => {
+    try {
+      localStorage.setItem('3boxes_locale', lang)
+    } catch {
+      // ignore storage errors
+    }
+    set({ language: lang, locale: lang })
+  },
+  setCountry: (country) => set({ country }),
+  setMessages: (msgs) => set({ messages: msgs }),
+  setExchangeRates: (rates) => set({ exchangeRates: rates }),
+  setGiftFilter: (filter) => set((state) => ({
+    giftFilter: { ...state.giftFilter, ...filter },
+  })),
+  clearGiftFilter: () => set({
+    giftFilter: { occasion: null, recipient: null, relationship: null, priceRange: null, category: null },
+  }),
+  addSmartBundleItem: (item) => set((state) => ({
+    smartBundleItems: [...state.smartBundleItems, item],
+  })),
+  removeSmartBundleItem: (id) => set((state) => ({
+    smartBundleItems: state.smartBundleItems.filter((i) => i.id !== id),
+  })),
+  clearSmartBundle: () => set({ smartBundleItems: [] }),
+  setShowAuthDialog: (show) => set({ showAuthDialog: show }),
+  setAuthMode: (mode) => set({ authMode: mode, authView: mode }),
 }))

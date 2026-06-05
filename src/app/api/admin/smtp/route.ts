@@ -3,13 +3,24 @@ import { getSmtpSettings, testSmtpConnection, resetSmtpTransporter } from '@/lib
 import { verifyAuth } from '@/lib/auth';
 
 /**
+ * Verify admin access using raw token string
+ */
+async function verifyAdminFromToken(token: string) {
+  // Create a minimal request-like object for verifyAuth
+  const req = new NextRequest(new URL('http://localhost'), {
+    headers: new Headers({ authorization: `Bearer ${token}` }),
+  });
+  return verifyAuth(req);
+}
+
+/**
  * GET /api/admin/smtp — Get current SMTP configuration
  */
 export async function GET(request: NextRequest) {
   try {
     // Verify admin access
     const auth = request.headers.get('authorization');
-    const user = await verifyAuth(auth?.replace('Bearer ', '') ?? '');
+    const user = await verifyAdminFromToken(auth?.replace('Bearer ', '') ?? '');
 
     if (!user || user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 401 });
@@ -30,7 +41,7 @@ export async function POST(request: NextRequest) {
   try {
     // Verify admin access
     const auth = request.headers.get('authorization');
-    const user = await verifyAuth(auth?.replace('Bearer ', '') ?? '');
+    const user = await verifyAdminFromToken(auth?.replace('Bearer ', '') ?? '');
 
     if (!user || user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 401 });
@@ -113,7 +124,7 @@ export async function PUT(request: NextRequest) {
   try {
     // Verify admin access
     const auth = request.headers.get('authorization');
-    const user = await verifyAuth(auth?.replace('Bearer ', '') ?? '');
+    const user = await verifyAdminFromToken(auth?.replace('Bearer ', '') ?? '');
 
     if (!user || user.role !== 'admin') {
       return NextResponse.json({ error: 'Unauthorized. Admin access required.' }, { status: 401 });

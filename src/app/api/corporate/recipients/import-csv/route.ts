@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db, edb } from '@/lib/db';
 
 // Helper: get user from Authorization header
 async function getUserFromRequest(req: NextRequest) {
@@ -20,7 +20,7 @@ async function getUserFromRequest(req: NextRequest) {
 
 // Helper: get corporate account for user
 async function getCorporateForUser(userId: string) {
-  return db.corporate.findUnique({
+  return edb.corporate.findUnique({
     where: { userId },
   });
 }
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        await db.corporateRecipient.create({ data: data as never });
+        await edb.corporateRecipient.create({ data: data as never });
         imported++;
       } catch (err) {
         errors.push({
