@@ -117,13 +117,27 @@ function getProxyHeaders(proxyUrl: string): Record<string, string> {
   return headers
 }
 
+function isSpaceZaiGateway(urlStr: string): boolean {
+  try {
+    const hostname = new URL(urlStr).hostname
+    return hostname.includes('.space-z.ai')
+  } catch {
+    return false
+  }
+}
+
 function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<string, string>): string {
   const base = proxyUrl.replace(/\/+$/, '')
-  if (queryParams && Object.keys(queryParams).length > 0) {
-    const params = new URLSearchParams(queryParams)
-    return `${base}${path}?${params.toString()}`
+  const params = new URLSearchParams(queryParams || {})
+
+  // For .space-z.ai gateway URLs, add XTransformPort=3030
+  // to route to the ai-proxy service on the sandbox
+  if (isSpaceZaiGateway(proxyUrl)) {
+    params.set('XTransformPort', '3030')
   }
-  return `${base}${path}`
+
+  const paramStr = params.toString()
+  return paramStr ? `${base}${path}?${paramStr}` : `${base}${path}`
 }
 
 // ── Category pairing for suggestions ───────────────────────────────
@@ -341,6 +355,8 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Non-Vercel: local AI processing ──
+    // First try the local ai-proxy service on port 3030 (dedicated AI service)
+    // If that fails, try direct ZAI SDK, then canvas fallback
     return await handleLocalAIGeneration(body, isVercel)
   } catch (error) {
     console.error('[try-on] API error (falling back to canvas mode):', error)
@@ -378,6 +394,38 @@ export async function POST(request: NextRequest) {
 // ── Local AI Generation Handler ────────────────────────────────────
 
 async function handleLocalAIGeneration(body: any, isVercel: boolean) {
+  // ── Strategy 0: Try local ai-proxy service on port 3030 ──
+  // The ai-proxy is a dedicated service with the ZAI SDK that may have
+  // better connectivity than the Next.js app. Try it first.
+  if (!isVercel) {
+    try {
+      const proxyCheck = await fetch('http://localhost:3030/api/try-on/status', {
+        signal: AbortSignal.timeout(3000),
+      })
+      if (proxyCheck.ok) {
+        const proxyStatus = await proxyCheck.json()
+        if (proxyStatus.available) {
+          console.log('[try-on] Local ai-proxy (port 3030) is available, routing through it')
+          const proxyRes = await fetch('http://localhost:3030/api/try-on', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (proxyRes.ok) {
+            const proxyResult = await proxyRes.json()
+            console.log('[try-on] ai-proxy accepted job:', proxyResult.jobId)
+            return NextResponse.json(proxyResult)
+          }
+          console.warn('[try-on] ai-proxy POST returned', proxyRes.status)
+        }
+      }
+    } catch (proxyErr) {
+      console.log('[try-on] Local ai-proxy not reachable:', proxyErr instanceof Error ? proxyErr.message : String(proxyErr))
+    }
+  }
+
+  // ── Strategy 1: Direct ZAI SDK ──
   const aiCheck = await isZAIAvailable()
 
   if (!aiCheck.available) {
@@ -616,7 +664,24 @@ export async function GET(request: NextRequest) {
   const job = getJob(jobId)
 
   if (!job) {
-    // Job not found locally — might be on the proxy
+    // Job not found locally — might be on the local ai-proxy or the remote proxy
+
+    // Try local ai-proxy first (same sandbox)
+    if (!process.env.VERCEL) {
+      try {
+        const localProxyRes = await fetch(`http://localhost:3030/api/try-on?jobId=${jobId}`, {
+          signal: AbortSignal.timeout(5000),
+        })
+        if (localProxyRes.ok) {
+          const localResult = await localProxyRes.json()
+          if (localResult.status && localResult.status !== 'failed') {
+            return NextResponse.json(localResult, { status: 200 })
+          }
+        }
+      } catch {}
+    }
+
+    // Try remote proxy (for Vercel → sandbox routing)
     const proxyUrl = process.env.ZAI_PROXY_URL
     if (proxyUrl) {
       try {

@@ -1495,7 +1495,7 @@ function TryOnDialog({
                   Retake
                 </Button>
                 <Button
-                  onClick={handleGenerate}
+                  onClick={(e) => { e.stopPropagation(); handleGenerate(); }}
                   className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 hover:shadow-lg hover:shadow-amber-600/25"
                 >
                   <Sparkles className="mr-2 h-4 w-4" />

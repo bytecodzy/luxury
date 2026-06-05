@@ -1,15 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
- * Remote Try-On Route — forwards the entire try-on request to the sandbox.
+ * Remote Try-On Route — forwards try-on requests to the sandbox ai-proxy.
  *
- * On Vercel, the AI service (172.25.136.193:8080) is not directly accessible.
- * Instead of trying to use the ZAI SDK on Vercel, this route forwards the
- * try-on request to the sandbox's /api/try-on endpoint, which has direct
- * access to the AI service.
+ * On Vercel, the ZAI SDK is not directly accessible.
+ * This route forwards try-on requests to the sandbox's ai-proxy service
+ * (port 3030) via the external gateway URL (ZAI_PROXY_URL).
  *
  * The sandbox URL is configured via the ZAI_PROXY_URL environment variable.
+ * For .space-z.ai gateway URLs, XTransformPort=3030 is automatically added
+ * to route to the ai-proxy service.
  */
+
+function isSpaceZaiGateway(urlStr: string): boolean {
+  try {
+    const hostname = new URL(urlStr).hostname
+    return hostname.includes('.space-z.ai')
+  } catch {
+    return false
+  }
+}
+
+function buildProxyUrl(proxyUrl: string, path: string, extraParams?: Record<string, string>): string {
+  const base = proxyUrl.replace(/\/+$/, '')
+  const params = new URLSearchParams(extraParams || {})
+
+  // For .space-z.ai gateway URLs, add XTransformPort=3030
+  // to route to the ai-proxy service on the sandbox
+  if (isSpaceZaiGateway(proxyUrl)) {
+    params.set('XTransformPort', '3030')
+  }
+
+  const paramStr = params.toString()
+  return paramStr ? `${base}${path}?${paramStr}` : `${base}${path}`
+}
+
+function getProxyHeaders(proxyUrl: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  try {
+    const proxyHost = new URL(proxyUrl).hostname
+    if (proxyHost.includes('.space-z.ai')) {
+      headers['Abc'] = proxyHost.split('.')[0]
+    }
+  } catch {}
+  return headers
+}
 
 export async function POST(request: NextRequest) {
   const proxyUrl = process.env.ZAI_PROXY_URL
@@ -23,13 +60,15 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
+    const proxyHeaders = getProxyHeaders(proxyUrl)
 
-    // Forward the request to the sandbox
-    const response = await fetch(`${proxyUrl}/api/try-on`, {
+    // Forward the request to the sandbox ai-proxy
+    const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on')
+    console.log('[try-on-remote] Forwarding to:', proxyFetchUrl)
+
+    const response = await fetch(proxyFetchUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: proxyHeaders,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(30000),
     })
@@ -61,7 +100,11 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const jobId = searchParams.get('jobId')
-    const response = await fetch(`${proxyUrl}/api/try-on?jobId=${jobId}`, {
+    const proxyHeaders = getProxyHeaders(proxyUrl)
+
+    const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on', jobId ? { jobId } : undefined)
+    const response = await fetch(proxyFetchUrl, {
+      headers: proxyHeaders,
       signal: AbortSignal.timeout(10000),
     })
     const result = await response.json()
