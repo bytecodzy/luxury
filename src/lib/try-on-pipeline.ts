@@ -24,8 +24,8 @@
  */
 
 import { createZAI } from './zai'
-// Dynamic import for watermark to avoid bundling sharp into every route
-// import { addWatermark } from './watermark'
+// Watermark is now handled client-side (canvas-based) — no sharp dependency needed.
+// Server-side watermark removed to fix Vercel 250MB serverless function limit.
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -1230,17 +1230,13 @@ Studio-quality, 8K.`
     // ── Phase 5: Record Final Scores ──────────────────────────────
     console.log(`[pipeline:${jobId}] Final: ${finalResult.strategy}, color=${bestVerification.colorScore}/10, face=${bestVerification.faceScore}/10, naturalWear=${bestVerification.naturalWearScore}/10, skinTone=${bestVerification.skinToneScore}/10, overall=${bestVerification.overallScore}/10`)
 
-    // ── Phase 6: Watermark + Deliver ──────────────────────────────
-    if (job) { job.progress = 'Adding finishing touches...'; job.pipelinePhase = 'watermark' }
+    // ── Phase 6: Deliver (watermark now handled client-side) ─────
+    if (job) { job.progress = 'Finalizing your style preview...'; job.pipelinePhase = 'deliver' }
 
-    let finalImageUrl = finalResult.imageUrl
-    try {
-      const { addWatermark } = await import('./watermark')
-      finalImageUrl = await addWatermark(finalResult.imageUrl)
-      console.log(`[pipeline:${jobId}] Watermark applied`)
-    } catch (wmErr) {
-      console.error('[pipeline] Watermark failed:', wmErr)
-    }
+    const finalImageUrl = finalResult.imageUrl
+    // Watermark is now applied client-side using canvas — no server-side sharp needed.
+    // This fixes the Vercel 250MB serverless function limit caused by sharp's native binary.
+    console.log(`[pipeline:${jobId}] Delivering result (watermark will be applied client-side)`)
 
     // ── Update job ────────────────────────────────────────────────
     if (job) {

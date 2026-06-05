@@ -244,6 +244,9 @@ function getProductOverlayPosition(categorySlug: string, kp: BodyKeypoints): { x
  * Uses body keypoints (from VLM or heuristics) to position the product at the correct location.
  * Creates a visually compelling style preview that looks like the person is wearing the product.
  *
+ * KEY FIX: Always converts the product image to base64 BEFORE drawing on canvas.
+ * This eliminates ALL CORS/canvas-taint issues that prevented the product from appearing.
+ *
  * @param selfieData - Base64 data URL of the user's selfie
  * @param productImageUrl - URL of the product image (used as fallback if no base64)
  * @param productName - Name of the product for the overlay label
@@ -251,7 +254,7 @@ function getProductOverlayPosition(categorySlug: string, kp: BodyKeypoints): { x
  * @param categorySlug - Category slug for position-aware overlay (e.g., 'jewelry', 'watches')
  * @param keypoints - Optional VLM-detected body keypoints for precise positioning
  */
-function generateCanvasFallback(
+async function generateCanvasFallback(
   selfieData: string,
   productImageUrl: string,
   productName: string,
@@ -259,301 +262,318 @@ function generateCanvasFallback(
   categorySlug?: string,
   keypoints?: BodyKeypoints | null,
 ): Promise<string> {
-  // PERMANENT FIX: This function NEVER returns null.
-  return new Promise((resolve) => {
-    // Helper: create a minimal placeholder canvas when everything else fails
-    const createMinimalResult = (): string => {
-      try {
-        const c = document.createElement('canvas');
-        c.width = 512; c.height = 680;
-        const cx = c.getContext('2d');
-        if (cx) {
-          const grad = cx.createLinearGradient(0, 0, 0, 680);
-          grad.addColorStop(0, '#1c1917'); grad.addColorStop(1, '#292524');
-          cx.fillStyle = grad; cx.fillRect(0, 0, 512, 680);
-          cx.fillStyle = '#daa520'; cx.font = 'bold 22px Arial, sans-serif'; cx.textAlign = 'center';
-          cx.fillText('✨ Style Preview', 256, 280);
-          cx.fillStyle = '#a8a29e'; cx.font = '14px Arial, sans-serif';
-          cx.fillText((productName || 'Product').substring(0, 40), 256, 320);
-          cx.fillStyle = '#78716c'; cx.font = '12px Arial, sans-serif';
-          cx.fillText('3BOXES GIFTS', 256, 360);
-          return c.toDataURL('image/png');
-        }
-      } catch {}
-      return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==';
-    };
-
+  // Helper: create a minimal placeholder canvas when everything else fails
+  const createMinimalResult = (): string => {
     try {
-      const selfieImg = document.createElement('img');
-      const kp = keypoints || DEFAULT_KEYPOINTS;
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 680;
+      const cx = c.getContext('2d');
+      if (cx) {
+        const grad = cx.createLinearGradient(0, 0, 0, 680);
+        grad.addColorStop(0, '#1c1917'); grad.addColorStop(1, '#292524');
+        cx.fillStyle = grad; cx.fillRect(0, 0, 512, 680);
+        cx.fillStyle = '#daa520'; cx.font = 'bold 22px Arial, sans-serif'; cx.textAlign = 'center';
+        cx.fillText('✨ Style Preview', 256, 280);
+        cx.fillStyle = '#a8a29e'; cx.font = '14px Arial, sans-serif';
+        cx.fillText((productName || 'Product').substring(0, 40), 256, 320);
+        cx.fillStyle = '#78716c'; cx.font = '12px Arial, sans-serif';
+        cx.fillText('3BOXES GIFTS', 256, 360);
+        return c.toDataURL('image/png');
+      }
+    } catch {}
+    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==';
+  };
 
-      selfieImg.onload = () => {
-        const canvas = document.createElement('canvas');
-        const width = Math.max(selfieImg.naturalWidth, 512);
-        const height = Math.max(selfieImg.naturalHeight, 680);
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { resolve(createMinimalResult()); return; }
+  try {
+    // ── STEP 1: Convert product image to base64 FIRST ──
+    // This eliminates ALL CORS/canvas-taint issues.
+    // We try multiple approaches to get the product image as base64.
+    let resolvedProductBase64: string | null = productImageBase64 || null;
 
-        // 1. Draw the selfie as the base
-        ctx.drawImage(selfieImg, 0, 0, width, height);
-
-        // 2. Subtle vignette overlay for premium feel
-        const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
-        vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-        vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.15)');
-        ctx.fillStyle = vignetteGrad;
-        ctx.fillRect(0, 0, width, height);
-
-        // 3. Get overlay position based on category + keypoints
-        const pos = getProductOverlayPosition(categorySlug || '', kp);
-        const overlayW = Math.floor(pos.w * width);
-        const overlayH = Math.floor(pos.h * height);
-        const overlayCX = pos.x * width;   // center X
-        const overlayCY = pos.y * height;  // center Y
-        const overlayX = overlayCX - overlayW / 2;
-        const overlayY = overlayCY - overlayH / 2;
-
-        // 4. Function to render product ON the person
-        const renderProductOnPerson = (productImg?: HTMLImageElement) => {
-          if (productImg) {
-            // ── Draw product image at the body position ──
-            ctx.save();
-            
-            // Apply rotation if specified
-            if (pos.rotation) {
-              ctx.translate(overlayCX, overlayCY);
-              ctx.rotate((pos.rotation * Math.PI) / 180);
-              ctx.translate(-overlayCX, -overlayCY);
-            }
-
-            // Shadow behind product for depth
-            ctx.shadowColor = 'rgba(0,0,0,0.4)';
-            ctx.shadowBlur = 15;
-            ctx.shadowOffsetX = 3;
-            ctx.shadowOffsetY = 3;
-
-            // Calculate proper aspect-ratio-preserving dimensions
-            const imgAspect = productImg.naturalWidth / productImg.naturalHeight;
-            const slotAspect = overlayW / overlayH;
-            let drawW = overlayW;
-            let drawH = overlayH;
-
-            if (imgAspect > slotAspect) {
-              // Image is wider than slot — fit to width
-              drawH = drawW / imgAspect;
-            } else {
-              // Image is taller than slot — fit to height
-              drawW = drawH * imgAspect;
-            }
-
-            const drawX = overlayCX - drawW / 2;
-            const drawY = overlayCY - drawH / 2;
-
-            // Draw with slight transparency for natural blending
-            ctx.globalAlpha = 0.92;
-
-            // Clip to rounded rectangle
-            ctx.beginPath();
-            const cornerRadius = Math.min(12, drawW * 0.08, drawH * 0.08);
-            ctx.roundRect(drawX, drawY, drawW, drawH, cornerRadius);
-            ctx.clip();
-
-            ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
-            ctx.restore();
-
-            // ── Glow border around the product overlay ──
-            ctx.save();
-            if (pos.rotation) {
-              ctx.translate(overlayCX, overlayCY);
-              ctx.rotate((pos.rotation * Math.PI) / 180);
-              ctx.translate(-overlayCX, -overlayCY);
-            }
-            ctx.globalAlpha = 0.35;
-            ctx.strokeStyle = '#daa520';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2, cornerRadius + 1);
-            ctx.stroke();
-            ctx.restore();
-
-            // ── Small product label below the overlay ──
-            ctx.save();
-            const labelFontSize = Math.max(9, Math.floor(drawW * 0.06));
-            ctx.font = `600 ${labelFontSize}px Arial, sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.fillStyle = 'rgba(28,25,23,0.75)';
-            const labelText = productName.substring(0, 28);
-            const labelWidth = ctx.measureText(labelText).width + 16;
-            const labelHeight = labelFontSize + 8;
-            const labelX = overlayCX - labelWidth / 2;
-            const labelY = drawY + drawH + 6;
-
-            ctx.beginPath();
-            ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 4);
-            ctx.fill();
-            ctx.fillStyle = '#daa520';
-            ctx.globalAlpha = 0.9;
-            ctx.fillText(labelText, overlayCX, labelY + labelFontSize + 2);
-            ctx.restore();
-          } else {
-            // No product image — draw a subtle placeholder at the body position
-            ctx.save();
-            if (pos.rotation) {
-              ctx.translate(overlayCX, overlayCY);
-              ctx.rotate((pos.rotation * Math.PI) / 180);
-              ctx.translate(-overlayCX, -overlayCY);
-            }
-            ctx.globalAlpha = 0.3;
-            ctx.fillStyle = '#292524';
-            ctx.beginPath();
-            ctx.roundRect(overlayX, overlayY, overlayW, overlayH, 8);
-            ctx.fill();
-            ctx.strokeStyle = '#daa520';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.roundRect(overlayX, overlayY, overlayW, overlayH, 8);
-            ctx.stroke();
-            // Product emoji placeholder
-            const iconSize = Math.floor(overlayH * 0.3);
-            ctx.fillStyle = '#daa520';
-            ctx.font = `${iconSize}px Arial, sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.globalAlpha = 0.5;
-            ctx.fillText('👗', overlayCX, overlayCY);
-            ctx.restore();
-          }
-        };
-
-        // 5. Top-left "AI STYLE PREVIEW" badge
-        ctx.save();
-        ctx.globalAlpha = 0.92;
-        const badgeW = Math.floor(width * 0.38);
-        const badgeH = Math.floor(height * 0.042);
-        ctx.fillStyle = '#1c1917';
-        ctx.beginPath();
-        ctx.roundRect(12, 12, badgeW, badgeH, 6);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(218,165,32,0.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(12, 12, badgeW, badgeH, 6);
-        ctx.stroke();
-        ctx.fillStyle = '#daa520';
-        ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.48))}px Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('✨ AI STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
-        ctx.restore();
-
-        // 6. Try loading the product image with timeout
-        const productImg = document.createElement('img');
-        let resolved = false;
-
-        const finish = (img?: HTMLImageElement) => {
-          if (resolved) return;
-          resolved = true;
-          renderProductOnPerson(img);
-
-          // Bottom watermark
-          ctx.save();
-          ctx.globalAlpha = 0.5;
-          ctx.fillStyle = '#daa520';
-          ctx.font = `bold ${Math.max(10, Math.floor(width * 0.017))}px Arial, sans-serif`;
-          ctx.textAlign = 'right';
-          ctx.fillText('3BOXES GIFTS · AI Style Preview', width - 14, height - 14);
-          ctx.restore();
-
-          resolve(canvas.toDataURL('image/png'));
-        };
-
-        productImg.onload = () => finish(productImg);
-        productImg.onerror = () => {
-          console.warn('[try-on] Product image failed to load in canvas fallback, rendering without product image');
-          finish();
-        };
-
-        // Timeout: if product image doesn't load in 5s, continue without it
-        setTimeout(() => finish(), 5000);
-
-        // Prefer base64 data URL if available (no CORS issues at all)
-        if (productImageBase64 && productImageBase64.startsWith('data:')) {
-          productImg.src = productImageBase64;
-        } else {
-          let imgSrc = productImageUrl;
-          if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
-            // External URLs: try direct load with crossOrigin for canvas compatibility
-            productImg.crossOrigin = 'anonymous';
-            productImg.src = imgSrc;
-            // If direct load fails (CORS), onerror will retry via proxy
-            const origOnerror = productImg.onerror;
-            productImg.onerror = () => {
-              console.log('[try-on] Direct image load failed, trying proxy');
-              productImg.crossOrigin = null;
-              productImg.onerror = origOnerror;
-              productImg.src = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
-            };
-            return;
-          } else if (imgSrc.startsWith('//')) {
-            productImg.crossOrigin = 'anonymous';
-            const httpsUrl = `https:${imgSrc}`;
-            productImg.src = httpsUrl;
-            const origOnerror = productImg.onerror;
-            productImg.onerror = () => {
-              console.log('[try-on] Direct image load failed, trying proxy');
-              productImg.crossOrigin = null;
-              productImg.onerror = origOnerror;
-              productImg.src = `/api/image-proxy?url=${encodeURIComponent(httpsUrl)}`;
-            };
-            return;
-          } else if (imgSrc.startsWith('/') && !imgSrc.startsWith('/api/')) {
-            // Local paths: load directly, DO NOT proxy (image-proxy blocks localhost)
-            productImg.src = imgSrc;
-            return; // Skip the proxy entirely
-          }
-          productImg.src = imgSrc;
-        }
-      };
-
-      selfieImg.onerror = () => {
-        console.warn('[try-on] Selfie image failed to load in canvas fallback, using placeholder');
-        resolve(createMinimalResult());
-      };
-      selfieImg.src = selfieData;
-    } catch {
-      resolve(createMinimalResult());
+    if (!resolvedProductBase64 || !resolvedProductBase64.startsWith('data:')) {
+      console.log('[try-on] No base64 product image provided, fetching via fetchImageAsBase64...');
+      resolvedProductBase64 = await fetchImageAsBase64(productImageUrl);
     }
+
+    if (resolvedProductBase64) {
+      console.log('[try-on] Product image resolved to base64, length:', resolvedProductBase64.length);
+    } else {
+      console.warn('[try-on] Could not resolve product image to base64, will render without product overlay');
+    }
+
+    // ── STEP 2: Load selfie image ──
+    const selfieImg = await loadImage(selfieData);
+
+    // ── STEP 3: Create canvas and draw selfie ──
+    const canvas = document.createElement('canvas');
+    const width = Math.max(selfieImg.naturalWidth, 512);
+    const height = Math.max(selfieImg.naturalHeight, 680);
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return createMinimalResult();
+
+    // Draw the selfie as the base
+    ctx.drawImage(selfieImg, 0, 0, width, height);
+
+    // Subtle vignette overlay for premium feel
+    const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
+    vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.15)');
+    ctx.fillStyle = vignetteGrad;
+    ctx.fillRect(0, 0, width, height);
+
+    // ── STEP 4: Get overlay position based on category + keypoints ──
+    const kp = keypoints || DEFAULT_KEYPOINTS;
+    const pos = getProductOverlayPosition(categorySlug || '', kp);
+    const overlayW = Math.floor(pos.w * width);
+    const overlayH = Math.floor(pos.h * height);
+    const overlayCX = pos.x * width;   // center X
+    const overlayCY = pos.y * height;  // center Y
+    const overlayX = overlayCX - overlayW / 2;
+    const overlayY = overlayCY - overlayH / 2;
+
+    // ── STEP 5: Load and render product image from base64 ──
+    let productImg: HTMLImageElement | undefined;
+    if (resolvedProductBase64) {
+      try {
+        productImg = await loadImage(resolvedProductBase64);
+        console.log('[try-on] Product image loaded from base64, size:', productImg.naturalWidth, 'x', productImg.naturalHeight);
+      } catch (err) {
+        console.warn('[try-on] Failed to load product image from base64:', err);
+      }
+    }
+
+    // Render product on the person
+    if (productImg) {
+      // ── Draw product image at the body position ──
+      ctx.save();
+
+      // Apply rotation if specified
+      if (pos.rotation) {
+        ctx.translate(overlayCX, overlayCY);
+        ctx.rotate((pos.rotation * Math.PI) / 180);
+        ctx.translate(-overlayCX, -overlayCY);
+      }
+
+      // Shadow behind product for depth
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
+      ctx.shadowBlur = 15;
+      ctx.shadowOffsetX = 3;
+      ctx.shadowOffsetY = 3;
+
+      // Calculate proper aspect-ratio-preserving dimensions
+      const imgAspect = productImg.naturalWidth / productImg.naturalHeight;
+      const slotAspect = overlayW / overlayH;
+      let drawW = overlayW;
+      let drawH = overlayH;
+
+      if (imgAspect > slotAspect) {
+        // Image is wider than slot — fit to width
+        drawH = drawW / imgAspect;
+      } else {
+        // Image is taller than slot — fit to height
+        drawW = drawH * imgAspect;
+      }
+
+      const drawX = overlayCX - drawW / 2;
+      const drawY = overlayCY - drawH / 2;
+
+      // Draw with slight transparency for natural blending
+      ctx.globalAlpha = 0.92;
+
+      // Clip to rounded rectangle
+      ctx.beginPath();
+      const cornerRadius = Math.min(12, drawW * 0.08, drawH * 0.08);
+      ctx.roundRect(drawX, drawY, drawW, drawH, cornerRadius);
+      ctx.clip();
+
+      ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
+      ctx.restore();
+
+      // ── Glow border around the product overlay ──
+      ctx.save();
+      if (pos.rotation) {
+        ctx.translate(overlayCX, overlayCY);
+        ctx.rotate((pos.rotation * Math.PI) / 180);
+        ctx.translate(-overlayCX, -overlayCY);
+      }
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = '#daa520';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2, cornerRadius + 1);
+      ctx.stroke();
+      ctx.restore();
+
+      // ── Small product label below the overlay ──
+      ctx.save();
+      const labelFontSize = Math.max(9, Math.floor(drawW * 0.06));
+      ctx.font = `600 ${labelFontSize}px Arial, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(28,25,23,0.75)';
+      const labelText = productName.substring(0, 28);
+      const labelWidth = ctx.measureText(labelText).width + 16;
+      const labelHeight = labelFontSize + 8;
+      const labelX = overlayCX - labelWidth / 2;
+      const labelY = drawY + drawH + 6;
+
+      ctx.beginPath();
+      ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 4);
+      ctx.fill();
+      ctx.fillStyle = '#daa520';
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(labelText, overlayCX, labelY + labelFontSize + 2);
+      ctx.restore();
+    } else {
+      // No product image — draw a subtle placeholder at the body position
+      ctx.save();
+      if (pos.rotation) {
+        ctx.translate(overlayCX, overlayCY);
+        ctx.rotate((pos.rotation * Math.PI) / 180);
+        ctx.translate(-overlayCX, -overlayCY);
+      }
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#292524';
+      ctx.beginPath();
+      ctx.roundRect(overlayX, overlayY, overlayW, overlayH, 8);
+      ctx.fill();
+      ctx.strokeStyle = '#daa520';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(overlayX, overlayY, overlayW, overlayH, 8);
+      ctx.stroke();
+      // Product emoji placeholder
+      const iconSize = Math.floor(overlayH * 0.3);
+      ctx.fillStyle = '#daa520';
+      ctx.font = `${iconSize}px Arial, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.globalAlpha = 0.5;
+      ctx.fillText('👗', overlayCX, overlayCY);
+      ctx.restore();
+    }
+
+    // ── STEP 6: Top-left "AI STYLE PREVIEW" badge ──
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    const badgeW = Math.floor(width * 0.38);
+    const badgeH = Math.floor(height * 0.042);
+    ctx.fillStyle = '#1c1917';
+    ctx.beginPath();
+    ctx.roundRect(12, 12, badgeW, badgeH, 6);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(218,165,32,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(12, 12, badgeW, badgeH, 6);
+    ctx.stroke();
+    ctx.fillStyle = '#daa520';
+    ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.48))}px Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('✨ AI STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
+    ctx.restore();
+
+    // ── STEP 7: Bottom watermark ──
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#daa520';
+    ctx.font = `bold ${Math.max(10, Math.floor(width * 0.017))}px Arial, sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.fillText('3BOXES GIFTS · AI Style Preview', width - 14, height - 14);
+    ctx.restore();
+
+    // Since we used base64 data URLs for both images, the canvas is NOT tainted
+    // and toDataURL() will work without SecurityError
+    return canvas.toDataURL('image/png');
+  } catch (err) {
+    console.warn('[try-on] generateCanvasFallback error:', err instanceof Error ? err.message : String(err));
+    return createMinimalResult();
+  }
+}
+
+/** Helper: Load an image from a data URL or any URL and return it as HTMLImageElement */
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = document.createElement('img');
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load image: ${src.substring(0, 60)}`));
+    img.src = src;
   });
 }
 
 // ── Fetch image as base64 (client-side) ────────────────────────
 async function fetchImageAsBase64(url: string): Promise<string | null> {
-  try {
-    // For data URLs, return as-is
-    if (url.startsWith('data:')) return url;
-    // For relative paths, fetch directly (same-origin, no proxy needed)
-    let fetchUrl = url;
-    if (url.startsWith('/') && !url.startsWith('/api/')) {
-      fetchUrl = url; // Same-origin fetch, no need to prepend origin
-    } else if (url.startsWith('//')) {
-      fetchUrl = `https:${url}`;
-    } else if (url.startsWith('http://') || url.startsWith('https://')) {
-      // External URLs: use image proxy to avoid CORS
-      fetchUrl = `/api/image-proxy?url=${encodeURIComponent(url)}`;
-    }
-    const response = await fetch(fetchUrl, { signal: AbortSignal.timeout(10000) });
-    if (!response.ok) return null;
-    const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
+  // For data URLs, return as-is
+  if (url.startsWith('data:')) return url;
+
+  // Build a list of fetch strategies to try in order
+  const strategies: Array<{ label: string; fetchUrl: string }> = [];
+
+  if (url.startsWith('/api/image-proxy?url=')) {
+    // Already-proxied URL: fetch it directly (it's same-origin),
+    // but ALSO try extracting the original URL and fetching via proxy as fallback
+    strategies.push({ label: 'already-proxied (direct)', fetchUrl: url });
+    try {
+      const proxyUrlObj = new URL(url, 'http://localhost');
+      const originalUrl = proxyUrlObj.searchParams.get('url');
+      if (originalUrl) {
+        if (originalUrl.startsWith('//')) {
+          strategies.push({ label: 'original-https', fetchUrl: `https:${originalUrl}` });
+        } else if (originalUrl.startsWith('http://') || originalUrl.startsWith('https://')) {
+          // Try fetching the original URL directly first, then via a fresh proxy
+          strategies.push({ label: 'original-direct', fetchUrl: originalUrl });
+          strategies.push({ label: 'original-re-proxied', fetchUrl: `/api/image-proxy?url=${encodeURIComponent(originalUrl)}` });
+        }
+      }
+    } catch {}
+  } else if (url.startsWith('/') && !url.startsWith('/api/')) {
+    // Same-origin local paths: fetch directly
+    strategies.push({ label: 'local-path', fetchUrl: url });
+  } else if (url.startsWith('//')) {
+    // Protocol-relative: try https, then proxy
+    const httpsUrl = `https:${url}`;
+    strategies.push({ label: 'protocol-relative-https', fetchUrl: httpsUrl });
+    strategies.push({ label: 'protocol-relative-proxied', fetchUrl: `/api/image-proxy?url=${encodeURIComponent(httpsUrl)}` });
+  } else if (url.startsWith('http://') || url.startsWith('https://')) {
+    // External URLs: try proxy first (avoids CORS), then direct as fallback
+    strategies.push({ label: 'external-proxied', fetchUrl: `/api/image-proxy?url=${encodeURIComponent(url)}` });
+    strategies.push({ label: 'external-direct', fetchUrl: url });
+  } else {
+    // Unknown format: try as-is
+    strategies.push({ label: 'as-is', fetchUrl: url });
   }
+
+  for (const strategy of strategies) {
+    try {
+      console.log(`[try-on] fetchImageAsBase64: trying ${strategy.label} for ${url.substring(0, 80)}`);
+      const response = await fetch(strategy.fetchUrl, { signal: AbortSignal.timeout(8000) });
+      if (!response.ok) {
+        console.log(`[try-on] fetchImageAsBase64: ${strategy.label} returned ${response.status}`);
+        continue;
+      }
+      const blob = await response.blob();
+      if (!blob.type.startsWith('image/') && !blob.type.startsWith('application/octet-stream')) {
+        console.log(`[try-on] fetchImageAsBase64: ${strategy.label} returned non-image type: ${blob.type}`);
+        continue;
+      }
+      const base64 = await new Promise<string | null>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+      if (base64) {
+        console.log(`[try-on] fetchImageAsBase64: SUCCESS with ${strategy.label}, size=${base64.length}`);
+        return base64;
+      }
+    } catch (err) {
+      console.log(`[try-on] fetchImageAsBase64: ${strategy.label} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  console.warn(`[try-on] fetchImageAsBase64: ALL strategies failed for ${url.substring(0, 80)}`);
+  return null;
 }
 
 // ── Try-On Dialog ──────────────────────────────────────────────
@@ -932,7 +952,7 @@ function TryOnDialog({
           const analyzeData = await analyzeRes.json();
           if (analyzeData.success && analyzeData.analysis?.personDetected) {
             vlmKeypoints = analyzeData.analysis;
-            console.log('[try-on] VLM keypoints received, source:', vlmKeypoints.source);
+            console.log('[try-on] VLM keypoints received, source:', vlmKeypoints?.source);
           }
         }
       } catch {
