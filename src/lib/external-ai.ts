@@ -6,10 +6,10 @@
  * 2. OpenAI DALL-E / GPT-Image — Image generation/editing (FALLBACK)
  *
  * These services are publicly accessible and work from both sandbox and Vercel.
+ *
+ * IMPORTANT: Uses dynamic imports so the app doesn't crash if
+ * 'replicate' or 'openai' packages are not installed.
  */
-
-import Replicate from 'replicate'
-import OpenAI from 'openai'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -30,18 +30,6 @@ export interface ExternalTryOnResult {
 type GarmentCategory = 'upper_body' | 'lower_body' | 'dresses' | 'full_body'
 
 // ── Configuration ──────────────────────────────────────────────────
-
-function getReplicateClient(): Replicate | null {
-  const token = process.env.REPLICATE_API_TOKEN
-  if (!token) return null
-  return new Replicate({ auth: token })
-}
-
-function getOpenAIClient(): OpenAI | null {
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) return null
-  return new OpenAI({ apiKey })
-}
 
 export function isExternalAIAvailable(): { replicate: boolean; openai: boolean } {
   return {
@@ -70,7 +58,6 @@ function mapCategoryToGarment(categorySlug: string, productName: string): Garmen
   if (cat.includes('pant') || cat.includes('trouser') || name.includes('pant') || name.includes('jean')) return 'lower_body'
 
   // Accessories — not really garment categories, but we'll use upper_body as default
-  // for jewelry, watches, etc. the prompt will guide the model
   if (cat.includes('jewel') || cat.includes('watch') || cat.includes('accessor')) return 'upper_body'
 
   // Default
@@ -79,44 +66,30 @@ function mapCategoryToGarment(categorySlug: string, productName: string): Garmen
 
 // ── Data URL Helpers ───────────────────────────────────────────────
 
-/**
- * Extract raw base64 from a data URL (strip the data:image/...;base64, prefix)
- */
 function dataUrlToBase64(dataUrl: string): string {
   const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
   if (match) return match[1]
-  return dataUrl // assume it's already raw base64
-}
-
-/**
- * Convert a base64 string to a data URL if it isn't already
- */
-function base64ToDataUrl(base64: string, mimeType = 'image/png'): string {
-  if (base64.startsWith('data:')) return base64
-  return `data:${mimeType};base64,${base64}`
+  return dataUrl
 }
 
 // ── Strategy 1: Replicate IDM-VTON ────────────────────────────────
 
-/**
- * Use Replicate's IDM-VTON model for virtual try-on.
- * This is a PURPOSE-BUILT virtual try-on model that:
- * - Takes a person image and garment image
- * - Generates a realistic image of the person wearing the garment
- * - Preserves the person's face, body, and skin tone
- * - Accurately applies the garment's colors, patterns, and design
- *
- * Models:
- * - cuuupid/idm-vton — Best quality, dedicated try-on
- * - tencentarc/ootdiffusion — Alternative try-on model
- */
-export async function replicateTryOn(input: ExternalTryOnInput): Promise<ExternalTryOnResult> {
-  const replicate = getReplicateClient()
-  if (!replicate) {
+async function replicateTryOn(input: ExternalTryOnInput): Promise<ExternalTryOnResult> {
+  if (!process.env.REPLICATE_API_TOKEN) {
     return { success: false, strategy: 'replicate-idm-vton', error: 'REPLICATE_API_TOKEN not configured' }
   }
 
+  // Dynamic import — won't crash if 'replicate' package is not installed
+  let Replicate: any
   try {
+    const mod = await import('replicate')
+    Replicate = mod.default || mod
+  } catch {
+    return { success: false, strategy: 'replicate', error: 'replicate package not installed. Run: bun add replicate' }
+  }
+
+  try {
+    const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN })
     const garmentCategory = mapCategoryToGarment(input.categorySlug, input.productName)
     const humanImgBase64 = dataUrlToBase64(input.selfieData)
     const garmentImgBase64 = dataUrlToBase64(input.productImageBase64)
@@ -142,10 +115,9 @@ export async function replicateTryOn(input: ExternalTryOnInput): Promise<Externa
       ) as any
 
       if (output) {
-        // Replicate returns a URL or array of URLs
         let resultUrl: string | null = null
         if (Array.isArray(output) && output.length > 0) {
-          resultUrl = output[0] // Usually returns [url]
+          resultUrl = output[0]
         } else if (typeof output === 'string') {
           resultUrl = output
         } else if (output?.url) {
@@ -154,7 +126,6 @@ export async function replicateTryOn(input: ExternalTryOnInput): Promise<Externa
 
         if (resultUrl) {
           console.log('[external-ai] Replicate IDM-VTON success, fetching result image')
-          // Fetch the result image and convert to base64
           const imageResponse = await fetch(resultUrl, {
             headers: { 'User-Agent': '3BOXES-Internal/1.0' },
             signal: AbortSignal.timeout(30000),
@@ -218,56 +189,6 @@ export async function replicateTryOn(input: ExternalTryOnInput): Promise<Externa
       console.error('[external-ai] OOTDiffusion failed:', (ootErr as Error).message?.substring(0, 300))
     }
 
-    // Strategy 1c: Use Replicate's SDXL img2img with try-on prompt
-    try {
-      console.log('[external-ai] Trying Replicate SDXL img2img with try-on prompt')
-      const prompt = buildTryOnPrompt(input)
-
-      const output = await replicate.run(
-        'stability-ai/sdxl',
-        {
-          input: {
-            prompt,
-            negative_prompt: 'deformed, ugly, wrong proportions, extra limbs, bad anatomy, blurry, low quality, distorted face, changed face',
-            width: 768,
-            height: 1344,
-            num_outputs: 1,
-            guidance_scale: 7.5,
-            num_inference_steps: 50,
-            image: `data:image/png;base64,${humanImgBase64}`,
-            prompt_strength: 0.7,
-          },
-        }
-      ) as any
-
-      if (output) {
-        let resultUrl: string | null = null
-        if (Array.isArray(output) && output.length > 0) {
-          resultUrl = output[0]
-        } else if (typeof output === 'string') {
-          resultUrl = output
-        }
-
-        if (resultUrl) {
-          const imageResponse = await fetch(resultUrl, {
-            headers: { 'User-Agent': '3BOXES-Internal/1.0' },
-            signal: AbortSignal.timeout(30000),
-          })
-          if (imageResponse.ok) {
-            const buffer = Buffer.from(await imageResponse.arrayBuffer())
-            const base64 = buffer.toString('base64')
-            return {
-              success: true,
-              imageUrl: `data:image/png;base64,${base64}`,
-              strategy: 'replicate-sdxl',
-            }
-          }
-        }
-      }
-    } catch (sdxlErr) {
-      console.error('[external-ai] SDXL failed:', (sdxlErr as Error).message?.substring(0, 300))
-    }
-
     return { success: false, strategy: 'replicate', error: 'All Replicate strategies failed' }
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error)
@@ -278,27 +199,28 @@ export async function replicateTryOn(input: ExternalTryOnInput): Promise<Externa
 
 // ── Strategy 2: OpenAI DALL-E / GPT-Image ─────────────────────────
 
-/**
- * Use OpenAI's image generation for virtual try-on.
- * DALL-E 3 and GPT-Image can generate images from text prompts,
- * and GPT-Image can also edit existing images.
- */
-export async function openAITryOn(input: ExternalTryOnInput): Promise<ExternalTryOnResult> {
-  const openai = getOpenAIClient()
-  if (!openai) {
+async function openAITryOn(input: ExternalTryOnInput): Promise<ExternalTryOnResult> {
+  if (!process.env.OPENAI_API_KEY) {
     return { success: false, strategy: 'openai', error: 'OPENAI_API_KEY not configured' }
+  }
+
+  // Dynamic import — won't crash if 'openai' package is not installed
+  let OpenAI: any
+  try {
+    const mod = await import('openai')
+    OpenAI = mod.default || mod
+  } catch {
+    return { success: false, strategy: 'openai', error: 'openai package not installed. Run: bun add openai' }
   }
 
   try {
     const prompt = buildTryOnPrompt(input)
-    const humanBase64 = dataUrlToBase64(input.selfieData)
-    const productBase64 = dataUrlToBase64(input.productImageBase64)
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
-    // Strategy 2a: GPT-Image-1 edit (best for try-on — can take multiple input images)
+    // Strategy 2a: GPT-Image-1 edit
     try {
       console.log('[external-ai] OpenAI GPT-Image-1: generating try-on')
 
-      // GPT-Image-1 can accept multiple images in the edit API
       const response = await openai.images.generate({
         model: 'gpt-image-1',
         prompt,
@@ -316,7 +238,6 @@ export async function openAITryOn(input: ExternalTryOnInput): Promise<ExternalTr
           }
         }
         if (img.url) {
-          // Fetch the URL and convert to base64
           const imgResp = await fetch(img.url, { signal: AbortSignal.timeout(15000) })
           if (imgResp.ok) {
             const buffer = Buffer.from(await imgResp.arrayBuffer())
