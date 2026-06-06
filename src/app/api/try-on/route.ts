@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isZAIAvailable, getZAIConfig } from '@/lib/zai'
 import { createJob, getJob, runPipeline } from '@/lib/try-on-pipeline'
+import { externalTryOn, isExternalAIAvailable } from '@/lib/external-ai'
 
 // ── Product image helpers ──────────────────────────────────────────
 
@@ -116,13 +117,27 @@ function getProxyHeaders(proxyUrl: string): Record<string, string> {
   return headers
 }
 
+function isSpaceZaiGateway(urlStr: string): boolean {
+  try {
+    const hostname = new URL(urlStr).hostname
+    return hostname.includes('.space-z.ai')
+  } catch {
+    return false
+  }
+}
+
 function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<string, string>): string {
   const base = proxyUrl.replace(/\/+$/, '')
-  if (queryParams && Object.keys(queryParams).length > 0) {
-    const params = new URLSearchParams(queryParams)
-    return `${base}${path}?${params.toString()}`
+  const params = new URLSearchParams(queryParams || {})
+
+  // For .space-z.ai gateway URLs, add XTransformPort=3030
+  // to route to the ai-proxy service on the sandbox
+  if (isSpaceZaiGateway(proxyUrl)) {
+    params.set('XTransformPort', '3030')
   }
-  return `${base}${path}`
+
+  const paramStr = params.toString()
+  return paramStr ? `${base}${path}?${paramStr}` : `${base}${path}`
 }
 
 // ── Category pairing for suggestions ───────────────────────────────
@@ -183,19 +198,78 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
     }
 
+    // ── Resolve product image base64 (used by multiple strategies) ──
+    const clientProvidedBase64 = body.productImageBase64 as string | undefined
+    let resolvedBase64: string | null = null
+    if (productImageUrl && !clientProvidedBase64) {
+      resolvedBase64 = await getProductImageBase64(productImageUrl)
+    }
+    const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64 || null
+
+    // ── Strategy 0: External AI services (Replicate IDM-VTON / OpenAI) ──
+    // These work from BOTH sandbox and Vercel — publicly accessible APIs
+    const externalAI = isExternalAIAvailable()
+    if (externalAI.replicate || externalAI.openai) {
+      console.log('[try-on] External AI available: replicate=', externalAI.replicate, 'openai=', externalAI.openai)
+      try {
+        if (!finalProductImageBase64) {
+          console.log('[try-on] No product image base64 for external AI, skipping')
+        } else {
+          // Create a job for polling
+          const jobId = `ext_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+          createJob(jobId, {
+            categorySlug: clientCategorySlug || '',
+            productName: clientProductName || '',
+            progress: 'Generating AI try-on with external service...',
+          })
+
+          // Run external AI in background
+          ;(async () => {
+            const job = getJob(jobId)
+            if (!job) return
+            try {
+              const result = await externalTryOn({
+                selfieData,
+                productImageBase64: finalProductImageBase64,
+                productName: clientProductName || 'Product',
+                categorySlug: clientCategorySlug || '',
+              })
+
+              if (result.success && result.imageUrl) {
+                job.status = 'completed'
+                job.imageUrl = result.imageUrl
+                job.strategy = result.strategy
+                job.progress = 'Complete!'
+              } else {
+                job.status = 'failed'
+                job.error = result.error || 'External AI generation failed'
+              }
+            } catch (err) {
+              job.status = 'failed'
+              job.error = err instanceof Error ? err.message : 'External AI error'
+            }
+          })()
+
+          // Return jobId for polling
+          return NextResponse.json({
+            jobId,
+            status: 'processing',
+            productName: clientProductName,
+            categorySlug: clientCategorySlug,
+          })
+        }
+      } catch (extErr) {
+        console.error('[try-on] External AI error:', extErr)
+      }
+    }
+
     // ── On Vercel: try proxy first, then direct SDK, then canvas mode ──
     if (isVercel) {
       // Strategy 1: Try proxy if URL is configured and reachable
       if (proxyUrl) {
         console.log('[try-on] Vercel: attempting proxy to AI service:', proxyUrl)
         try {
-          // Resolve product image to base64 for proxy
-          const clientProvidedBase64 = body.productImageBase64 as string | undefined
-          let resolvedBase64: string | null = null
-          if (productImageUrl && !clientProvidedBase64) {
-            resolvedBase64 = await getProductImageBase64(productImageUrl)
-          }
-          const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64 || null
+          // Product image base64 already resolved above
 
           const proxyHeaders = getProxyHeaders(proxyUrl)
 
@@ -274,14 +348,15 @@ export async function POST(request: NextRequest) {
         console.error('[try-on] Failed to resolve product image base64 for canvas mode:', imgErr)
       }
 
-      // Also try client-provided base64
-      const clientProvidedBase64 = body.productImageBase64 as string | undefined
+      // Also try client-provided base64 (already resolved above as clientProvidedBase64)
       const finalBase64 = clientProvidedBase64 || canvasProductImageBase64
 
       return returnCanvasMode(productImageUrl, finalBase64, clientProductName, clientCategorySlug)
     }
 
     // ── Non-Vercel: local AI processing ──
+    // First try the local ai-proxy service on port 3030 (dedicated AI service)
+    // If that fails, try direct ZAI SDK, then canvas fallback
     return await handleLocalAIGeneration(body, isVercel)
   } catch (error) {
     console.error('[try-on] API error (falling back to canvas mode):', error)
@@ -319,6 +394,38 @@ export async function POST(request: NextRequest) {
 // ── Local AI Generation Handler ────────────────────────────────────
 
 async function handleLocalAIGeneration(body: any, isVercel: boolean) {
+  // ── Strategy 0: Try local ai-proxy service on port 3030 ──
+  // The ai-proxy is a dedicated service with the ZAI SDK that may have
+  // better connectivity than the Next.js app. Try it first.
+  if (!isVercel) {
+    try {
+      const proxyCheck = await fetch('http://localhost:3030/api/try-on/status', {
+        signal: AbortSignal.timeout(3000),
+      })
+      if (proxyCheck.ok) {
+        const proxyStatus = await proxyCheck.json()
+        if (proxyStatus.available) {
+          console.log('[try-on] Local ai-proxy (port 3030) is available, routing through it')
+          const proxyRes = await fetch('http://localhost:3030/api/try-on', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (proxyRes.ok) {
+            const proxyResult = await proxyRes.json()
+            console.log('[try-on] ai-proxy accepted job:', proxyResult.jobId)
+            return NextResponse.json(proxyResult)
+          }
+          console.warn('[try-on] ai-proxy POST returned', proxyRes.status)
+        }
+      }
+    } catch (proxyErr) {
+      console.log('[try-on] Local ai-proxy not reachable:', proxyErr instanceof Error ? proxyErr.message : String(proxyErr))
+    }
+  }
+
+  // ── Strategy 1: Direct ZAI SDK ──
   const aiCheck = await isZAIAvailable()
 
   if (!aiCheck.available) {
@@ -557,7 +664,24 @@ export async function GET(request: NextRequest) {
   const job = getJob(jobId)
 
   if (!job) {
-    // Job not found locally — might be on the proxy
+    // Job not found locally — might be on the local ai-proxy or the remote proxy
+
+    // Try local ai-proxy first (same sandbox)
+    if (!process.env.VERCEL) {
+      try {
+        const localProxyRes = await fetch(`http://localhost:3030/api/try-on?jobId=${jobId}`, {
+          signal: AbortSignal.timeout(5000),
+        })
+        if (localProxyRes.ok) {
+          const localResult = await localProxyRes.json()
+          if (localResult.status && localResult.status !== 'failed') {
+            return NextResponse.json(localResult, { status: 200 })
+          }
+        }
+      } catch {}
+    }
+
+    // Try remote proxy (for Vercel → sandbox routing)
     const proxyUrl = process.env.ZAI_PROXY_URL
     if (proxyUrl) {
       try {

@@ -10,6 +10,9 @@ const HEALTH_CACHE_TTL = 30_000 // 30 seconds
 let proxyHealthCache: { reachable: boolean; timestamp: number } | null = null
 const PROXY_HEALTH_CACHE_TTL = 60_000 // 60 seconds
 
+let localProxyCache: { reachable: boolean; timestamp: number } | null = null
+const LOCAL_PROXY_CACHE_TTL = 30_000 // 30 seconds
+
 /**
  * Get the 'Abc' header value for authenticating with the sandbox gateway.
  */
@@ -26,7 +29,59 @@ function getAbcHeader(urlStr: string): string | undefined {
 }
 
 /**
+ * Check if a URL is a .space-z.ai gateway URL.
+ */
+function isSpaceZaiGateway(urlStr: string): boolean {
+  try {
+    const hostname = new URL(urlStr).hostname
+    return hostname.includes('.space-z.ai')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Check if the local ai-proxy service on port 3030 is reachable and available.
+ * This is the PRIMARY way to reach ZAI from within the sandbox.
+ */
+export async function isLocalProxyReachable(): Promise<boolean> {
+  const now = Date.now()
+  if (localProxyCache && now - localProxyCache.timestamp < LOCAL_PROXY_CACHE_TTL) {
+    return localProxyCache.reachable
+  }
+
+  // Only check local proxy in sandbox environment (not on Vercel)
+  if (process.env.VERCEL) {
+    localProxyCache = { reachable: false, timestamp: now }
+    return false
+  }
+
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000)
+
+    const response = await fetch('http://localhost:3030/api/try-on/status', {
+      signal: controller.signal,
+      headers: { 'User-Agent': '3BOXES-LocalProxyCheck/1.0' },
+    })
+
+    clearTimeout(timeout)
+    if (response.ok) {
+      const data = await response.json()
+      localProxyCache = { reachable: data.available === true, timestamp: now }
+      return data.available === true
+    }
+    localProxyCache = { reachable: false, timestamp: now }
+    return false
+  } catch {
+    localProxyCache = { reachable: false, timestamp: now }
+    return false
+  }
+}
+
+/**
  * Check if the ZAI AI service endpoint is actually reachable.
+ * Uses a lightweight HTTP check to verify connectivity.
  */
 export async function isAIReachable(baseUrl: string): Promise<boolean> {
   const now = Date.now()
@@ -35,46 +90,44 @@ export async function isAIReachable(baseUrl: string): Promise<boolean> {
   }
 
   try {
-    const isInternalIP = baseUrl.includes('172.25.') || baseUrl.includes('192.168.') || baseUrl.includes('10.')
-      || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')
-
-    if (isInternalIP) {
-      const healthUrl = baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 4000)
-
-      await fetch(`${healthUrl}/dashboard/`, {
-        signal: controller.signal,
-        headers: { 'User-Agent': '3BOXES-HealthCheck/1.0' },
-      })
-
-      clearTimeout(timeout)
-      healthCache = { reachable: true, timestamp: now }
-      return true
-    } else {
-      const healthUrl = baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')
-      const abcHeader = getAbcHeader(healthUrl)
-      const headers: Record<string, string> = { 'User-Agent': '3BOXES-HealthCheck/1.0' }
-      if (abcHeader) headers['Abc'] = abcHeader
-
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 5000)
-
-      const response = await fetch(`${healthUrl}/api/try-on/status`, {
-        signal: controller.signal,
-        headers,
-      })
-
-      clearTimeout(timeout)
-      if (response.ok) {
-        const data = await response.json()
-        healthCache = { reachable: data.available === true, timestamp: now }
-        return data.available === true
-      }
+    const config = getZAIConfig()
+    if (!config) {
       healthCache = { reachable: false, timestamp: now }
       return false
     }
-  } catch {
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 5000)
+
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+        'X-Z-AI-From': 'Z',
+        ...(config.chatId ? { 'X-Chat-Id': config.chatId } : {}),
+        ...(config.userId ? { 'X-User-Id': config.userId } : {}),
+        ...(config.token ? { 'X-Token': config.token } : {}),
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'ok' }],
+        max_tokens: 1,
+        thinking: { type: 'disabled' },
+      }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeout)
+
+    if (response.ok || response.status < 500) {
+      healthCache = { reachable: true, timestamp: now }
+      return true
+    }
+
+    healthCache = { reachable: false, timestamp: now }
+    return false
+  } catch (err) {
+    console.log('[ZAI] AI reachable check failed:', err instanceof Error ? err.message : String(err))
     healthCache = { reachable: false, timestamp: now }
     return false
   }
@@ -82,6 +135,8 @@ export async function isAIReachable(baseUrl: string): Promise<boolean> {
 
 /**
  * Check if the sandbox proxy URL is reachable.
+ * Routes through the .space-z.ai gateway with XTransformPort=3030
+ * to reach the ai-proxy service.
  */
 export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
   const now = Date.now()
@@ -95,12 +150,13 @@ export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
     if (abcHeader) headers['Abc'] = abcHeader
 
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
+    const timeout = setTimeout(() => controller.abort(), 8000)
 
-    // The .space-z.ai gateway routes all requests to the sandbox's
-    // Next.js server (port 3000) which has the ZAI SDK available.
-    // Do NOT add XTransformPort — the external gateway doesn't support it.
-    const statusUrl = `${proxyUrl}/api/try-on/status`
+    // For .space-z.ai gateway URLs, we need XTransformPort=3030
+    // to route to the ai-proxy service instead of the Next.js app
+    const statusUrl = isSpaceZaiGateway(proxyUrl)
+      ? `${proxyUrl}/api/try-on/status?XTransformPort=3030`
+      : `${proxyUrl}/api/try-on/status`
 
     const response = await fetch(statusUrl, {
       signal: controller.signal,
@@ -175,17 +231,27 @@ export function getZAIConfig(): { baseUrl: string; apiKey: string; chatId?: stri
 
 /**
  * Check if the ZAI AI service is available AND reachable.
- * Tries explicit config first, then SDK auto-discovery (ZAI.create()),
- * then proxy URL.
+ * Strategy chain (optimized — checks cheapest/most-likely first):
+ * 1. Local ai-proxy on port 3030 (fastest, sandbox-only)
+ * 2. Direct ZAI SDK (if config exists and API is reachable)
+ * 3. Proxy to sandbox ai-proxy via ZAI_PROXY_URL (for Vercel)
+ * 4. Unavailable
  */
 export async function isZAIAvailable(): Promise<{
   available: boolean
-  mode: 'ai' | 'proxy' | 'unavailable' | 'sdk-auto'
+  mode: 'ai' | 'proxy' | 'local-proxy' | 'unavailable' | 'sdk-auto'
   reason?: string
 }> {
-  const config = getZAIConfig()
+  // Strategy 0: Check local ai-proxy FIRST (cheapest check, most likely to work in sandbox)
+  if (!process.env.VERCEL) {
+    const localProxyReachable = await isLocalProxyReachable()
+    if (localProxyReachable) {
+      return { available: true, mode: 'local-proxy', reason: 'Local ai-proxy on port 3030 is available' }
+    }
+  }
 
-  // Strategy 1: Explicit config from env vars or .z-ai-config file
+  // Strategy 1: Direct ZAI SDK if config exists and API is reachable
+  const config = getZAIConfig()
   if (config) {
     const reachable = await isAIReachable(config.baseUrl)
 
@@ -208,8 +274,18 @@ export async function isZAIAvailable(): Promise<{
     try {
       const testInstance = await ZAI.create()
       if (testInstance) {
-        console.log('[ZAI] SDK auto-discovery (ZAI.create()) succeeded — AI available')
-        return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
+        const sdkBaseUrl = testInstance.config?.baseUrl
+        if (sdkBaseUrl) {
+          const reachable = await isAIReachable(sdkBaseUrl)
+          if (reachable) {
+            console.log('[ZAI] SDK auto-discovery succeeded AND API is reachable')
+            return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
+          }
+          console.log('[ZAI] SDK auto-discovery succeeded but API is NOT reachable at', sdkBaseUrl)
+        } else {
+          console.log('[ZAI] SDK auto-discovery succeeded (no base URL to check)')
+          return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
+        }
       }
     } catch (sdkErr) {
       console.log('[ZAI] SDK auto-discovery failed:', sdkErr instanceof Error ? sdkErr.message : String(sdkErr))
@@ -232,7 +308,9 @@ export async function isZAIAvailable(): Promise<{
   return {
     available: false,
     mode: 'unavailable',
-    reason: config ? 'AI service is configured but not reachable, and no proxy is available.' : 'AI service is not configured and SDK auto-discovery failed.',
+    reason: config
+      ? 'AI service is configured but not reachable, local proxy unavailable, and no remote proxy configured.'
+      : 'AI service is not configured and local proxy is unavailable.',
   }
 }
 

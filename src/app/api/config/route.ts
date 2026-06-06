@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import os from 'os'
+import { isExternalAIAvailable } from '@/lib/external-ai'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,9 +59,14 @@ export async function GET() {
       }
     }
 
+    const externalAI = isExternalAIAvailable()
+
     return NextResponse.json({
       aiProxyUrl,
       isVercel,
+      externalAI,
+      // Indicate the best available AI mode
+      aiMode: externalAI.replicate ? 'replicate' : externalAI.openai ? 'openai' : aiProxyUrl ? 'proxy' : 'none',
     })
   } catch (error) {
     return NextResponse.json({ error: 'Config unavailable' }, { status: 500 })
