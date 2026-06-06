@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isZAIAvailable, getZAIConfig } from '@/lib/zai'
 import { createJob, getJob, runPipeline } from '@/lib/try-on-pipeline'
-import { externalTryOn, isExternalAIAvailable } from '@/lib/external-ai'
+import { hfTryOn, isHFAvailable } from '@/lib/huggingface-tryon'
 
 // ── Product image helpers ──────────────────────────────────────────
 
@@ -206,60 +206,56 @@ export async function POST(request: NextRequest) {
     }
     const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64 || null
 
-    // ── Strategy 0: External AI services (Replicate IDM-VTON / OpenAI) ──
-    // These work from BOTH sandbox and Vercel — publicly accessible APIs
-    const externalAI = isExternalAIAvailable()
-    if (externalAI.replicate || externalAI.openai) {
-      console.log('[try-on] External AI available: replicate=', externalAI.replicate, 'openai=', externalAI.openai)
+    // ── Strategy 0: HuggingFace Free Inference (works from both sandbox and Vercel) ──
+    // This is a FREE fallback when ZAI is unavailable
+    if (isHFAvailable() && finalProductImageBase64) {
+      console.log('[try-on] HuggingFace free inference available, trying as strategy')
       try {
-        if (!finalProductImageBase64) {
-          console.log('[try-on] No product image base64 for external AI, skipping')
-        } else {
-          // Create a job for polling
-          const jobId = `ext_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
-          createJob(jobId, {
-            categorySlug: clientCategorySlug || '',
-            productName: clientProductName || '',
-            progress: 'Generating AI try-on with external service...',
-          })
+        const jobId = `hf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+        createJob(jobId, {
+          categorySlug: clientCategorySlug || '',
+          productName: clientProductName || '',
+          progress: 'Generating AI try-on with HuggingFace (free)...',
+        })
 
-          // Run external AI in background
-          ;(async () => {
-            const job = getJob(jobId)
-            if (!job) return
-            try {
-              const result = await externalTryOn({
-                selfieData,
-                productImageBase64: finalProductImageBase64,
-                productName: clientProductName || 'Product',
-                categorySlug: clientCategorySlug || '',
-              })
+        // Run HuggingFace in background
+        ;(async () => {
+          const job = getJob(jobId)
+          if (!job) return
+          try {
+            const result = await hfTryOn({
+              selfieData,
+              productImageBase64: finalProductImageBase64,
+              productName: clientProductName || 'Product',
+              categorySlug: clientCategorySlug || '',
+            })
 
-              if (result.success && result.imageUrl) {
-                job.status = 'completed'
-                job.imageUrl = result.imageUrl
-                job.strategy = result.strategy
-                job.progress = 'Complete!'
-              } else {
-                job.status = 'failed'
-                job.error = result.error || 'External AI generation failed'
-              }
-            } catch (err) {
+            if (result.success && result.imageUrl) {
+              job.status = 'completed'
+              job.imageUrl = result.imageUrl
+              job.strategy = result.strategy
+              job.progress = 'Complete!'
+            } else {
+              // HF failed, try ZAI as next strategy
+              console.log('[try-on] HuggingFace failed, will try ZAI next:', result.error)
               job.status = 'failed'
-              job.error = err instanceof Error ? err.message : 'External AI error'
+              job.error = result.error || 'HuggingFace generation failed'
             }
-          })()
+          } catch (err) {
+            job.status = 'failed'
+            job.error = err instanceof Error ? err.message : 'HuggingFace error'
+          }
+        })()
 
-          // Return jobId for polling
-          return NextResponse.json({
-            jobId,
-            status: 'processing',
-            productName: clientProductName,
-            categorySlug: clientCategorySlug,
-          })
-        }
-      } catch (extErr) {
-        console.error('[try-on] External AI error:', extErr)
+        // Return jobId for polling
+        return NextResponse.json({
+          jobId,
+          status: 'processing',
+          productName: clientProductName,
+          categorySlug: clientCategorySlug,
+        })
+      } catch (hfErr) {
+        console.error('[try-on] HuggingFace error:', hfErr)
       }
     }
 
