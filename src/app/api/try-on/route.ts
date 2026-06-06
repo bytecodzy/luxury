@@ -400,8 +400,9 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
       })
       if (proxyCheck.ok) {
         const proxyStatus = await proxyCheck.json()
-        if (proxyStatus.available) {
-          console.log('[try-on] Local ai-proxy (port 3030) is available, routing through it')
+        // Only use proxy if BOTH available AND zaiReachable are true
+        if (proxyStatus.available && proxyStatus.zaiReachable !== false) {
+          console.log('[try-on] Local ai-proxy (port 3030) is available and ZAI is reachable, routing through it')
           const proxyRes = await fetch('http://localhost:3030/api/try-on', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -414,6 +415,8 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
             return NextResponse.json(proxyResult)
           }
           console.warn('[try-on] ai-proxy POST returned', proxyRes.status)
+        } else {
+          console.log('[try-on] Local ai-proxy reports ZAI unreachable (available=' + proxyStatus.available + ', zaiReachable=' + proxyStatus.zaiReachable + '), skipping proxy')
         }
       }
     } catch (proxyErr) {
@@ -421,11 +424,14 @@ async function handleLocalAIGeneration(body: any, isVercel: boolean) {
     }
   }
 
-  // ── Strategy 1: Direct ZAI SDK ──
+  // ── Strategy 1: Direct ZAI SDK with fast-fail ──
+  // Add an overall 30-second timeout for the entire AI generation attempt.
+  // If ZAI is unreachable, we skip to canvas fallback quickly instead of
+  // waiting 2+ minutes for all 4 strategies to time out.
   const aiCheck = await isZAIAvailable()
 
   if (!aiCheck.available) {
-    console.log('[try-on] AI unavailable:', aiCheck.reason)
+    console.log('[try-on] AI unavailable:', aiCheck.reason, '— skipping to canvas fallback immediately')
     const fallbackProductImage = body.productImageUrl
       ? await getProductImageBase64(body.productImageUrl).catch(() => null)
       : null

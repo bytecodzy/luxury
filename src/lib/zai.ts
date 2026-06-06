@@ -68,8 +68,14 @@ export async function isLocalProxyReachable(): Promise<boolean> {
     clearTimeout(timeout)
     if (response.ok) {
       const data = await response.json()
-      localProxyCache = { reachable: data.available === true, timestamp: now }
-      return data.available === true
+      // Check both `available` AND `zaiReachable` — the proxy may be UP
+      // but the ZAI API it connects to may be DOWN
+      const reachable = data.available === true && data.zaiReachable !== false
+      if (data.available && !data.zaiReachable) {
+        console.log('[ZAI] Local proxy is UP but ZAI API is UNREACHABLE (zaiReachable=false)')
+      }
+      localProxyCache = { reachable, timestamp: now }
+      return reachable
     }
     localProxyCache = { reachable: false, timestamp: now }
     return false
@@ -166,8 +172,14 @@ export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
     clearTimeout(timeout)
     if (response.ok) {
       const data = await response.json()
-      proxyHealthCache = { reachable: data.available === true, timestamp: now }
-      return data.available === true
+      // Check both `available` AND `zaiReachable` — the proxy may be UP
+      // but the ZAI API it connects to may be DOWN
+      const reachable = data.available === true && data.zaiReachable !== false
+      if (data.available && !data.zaiReachable) {
+        console.log('[ZAI] Proxy is UP but ZAI API is UNREACHABLE (zaiReachable=false)')
+      }
+      proxyHealthCache = { reachable, timestamp: now }
+      return reachable
     }
     proxyHealthCache = { reachable: false, timestamp: now }
     return false

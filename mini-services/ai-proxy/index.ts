@@ -85,6 +85,63 @@ interface TryOnJob {
 
 const jobs = new Map<string, TryOnJob>()
 
+// ─── ZAI Connectivity Check (cached) ──────────────────────────────────
+let zaiStatusCache: { available: boolean; zaiReachable: boolean; timestamp: number } | null = null
+const ZAI_STATUS_CACHE_TTL = 30_000 // 30 seconds
+
+async function getZAIStatus(): Promise<{ available: boolean; zaiReachable: boolean }> {
+  const now = Date.now()
+
+  // Return cached result if still fresh
+  if (zaiStatusCache && now - zaiStatusCache.timestamp < ZAI_STATUS_CACHE_TTL) {
+    return { available: zaiStatusCache.available, zaiReachable: zaiStatusCache.zaiReachable }
+  }
+
+  // No config → definitely unavailable
+  if (!ZAI_CONFIG) {
+    zaiStatusCache = { available: false, zaiReachable: false, timestamp: now }
+    return { available: false, zaiReachable: false }
+  }
+
+  // Actually test ZAI API connectivity with a quick call
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 3000) // 3-second timeout
+
+    const response = await fetch(`${ZAI_CONFIG.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ZAI_CONFIG.apiKey}`,
+        'X-Z-AI-From': 'Z',
+        ...(ZAI_CONFIG.chatId ? { 'X-Chat-Id': ZAI_CONFIG.chatId } : {}),
+        ...(ZAI_CONFIG.userId ? { 'X-User-Id': ZAI_CONFIG.userId } : {}),
+        ...(ZAI_CONFIG.token ? { 'X-Token': ZAI_CONFIG.token } : {}),
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        thinking: { type: 'disabled' },
+      }),
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeout)
+
+    // Any response (even 4xx) means the API server is reachable
+    const reachable = response.status < 500 || response.status === 401 || response.status === 429
+    console.log(`[ai-proxy] ZAI connectivity test: ${reachable ? 'REACHABLE' : 'UNREACHABLE'} (status=${response.status})`)
+
+    zaiStatusCache = { available: reachable, zaiReachable: reachable, timestamp: now }
+    return { available: reachable, zaiReachable: reachable }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.log(`[ai-proxy] ZAI connectivity test FAILED: ${msg.substring(0, 100)}`)
+    zaiStatusCache = { available: false, zaiReachable: false, timestamp: now }
+    return { available: false, zaiReachable: false }
+  }
+}
+
 // Clean up old jobs every 5 minutes
 setInterval(() => {
   const now = Date.now()
@@ -437,9 +494,10 @@ const server = createServer(async (req, res) => {
   try {
     // GET /api/try-on/status
     if (path === '/api/try-on/status' && req.method === 'GET') {
-      const available = ZAI_CONFIG !== null
+      // Actually test ZAI connectivity instead of just checking config exists
+      const statusResult = await getZAIStatus()
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ available }))
+      res.end(JSON.stringify(statusResult))
       return
     }
 
@@ -527,9 +585,23 @@ const server = createServer(async (req, res) => {
         progress: 'Analyzing your photo and product...',
       })
 
-      // Start background processing
+      // Start background processing with overall timeout (90 seconds max)
+      const BG_TIMEOUT_MS = 90_000
+      const bgTimeout = setTimeout(() => {
+        const j = jobs.get(jobId)
+        if (j && j.status === 'processing') {
+          console.warn(`[ai-proxy] Job ${jobId} timed out after ${BG_TIMEOUT_MS / 1000}s, forcing failure`)
+          j.status = 'failed'
+          j.error = 'Generation timed out — AI service took too long'
+        }
+      }, BG_TIMEOUT_MS)
+
       backgroundProcess(jobId, productName || 'Product', categorySlug || 'jewelry', selfieData, productImgB64)
-        .catch(err => console.error('[ai-proxy] Background job failed:', err))
+        .then(() => clearTimeout(bgTimeout))
+        .catch(err => {
+          clearTimeout(bgTimeout)
+          console.error('[ai-proxy] Background job failed:', err)
+        })
 
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({

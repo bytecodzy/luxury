@@ -362,7 +362,7 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
 
 // ── VLM Helpers ────────────────────────────────────────────────────
 
-async function vlmAnalyze(prompt: string, imageUrl: string, timeoutMs = 30000): Promise<string> {
+async function vlmAnalyze(prompt: string, imageUrl: string, timeoutMs = 15000): Promise<string> {
   try {
     const zai = await createZAI()
     const result = await Promise.race([
@@ -383,7 +383,7 @@ async function vlmAnalyze(prompt: string, imageUrl: string, timeoutMs = 30000): 
   }
 }
 
-async function vlmCompare(prompt: string, image1Url: string, image2Url: string, timeoutMs = 45000): Promise<string> {
+async function vlmCompare(prompt: string, image1Url: string, image2Url: string, timeoutMs = 15000): Promise<string> {
   try {
     const zai = await createZAI()
     const result = await Promise.race([
@@ -410,15 +410,19 @@ async function vlmCompare(prompt: string, image1Url: string, image2Url: string, 
 /**
  * Image edit with a SINGLE input image.
  * The ZAI API accepts `images: [{ url: string }]` array format.
+ * Wrapped with a 15-second per-strategy timeout.
  */
 async function safeImageEdit(prompt: string, imageUrl: string, size: ImageSize): Promise<string | null> {
   try {
     const zai = await createZAI()
-    const response = await zai.images.generations.edit({
-      prompt,
-      images: [{ url: imageUrl }],
-      size,
-    } as any)
+    const response = await Promise.race([
+      zai.images.generations.edit({
+        prompt,
+        images: [{ url: imageUrl }],
+        size,
+      } as any),
+      new Promise<null>(r => setTimeout(() => r(null), 15000)),
+    ])
 
     if (response?.data?.[0]?.base64) {
       return `data:image/png;base64,${response.data[0].base64}`
@@ -436,6 +440,7 @@ async function safeImageEdit(prompt: string, imageUrl: string, size: ImageSize):
  * This allows the model to SEE both the person AND the product,
  * dramatically improving color accuracy — the model doesn't need to
  * guess colors from a text description, it can see the actual product.
+ * Wrapped with a 15-second per-strategy timeout.
  */
 async function safeImageEditDual(
   prompt: string,
@@ -445,14 +450,17 @@ async function safeImageEditDual(
 ): Promise<string | null> {
   try {
     const zai = await createZAI()
-    const response = await zai.images.generations.edit({
-      prompt,
-      images: [
-        { url: selfieUrl },
-        { url: productUrl },
-      ],
-      size,
-    } as any)
+    const response = await Promise.race([
+      zai.images.generations.edit({
+        prompt,
+        images: [
+          { url: selfieUrl },
+          { url: productUrl },
+        ],
+        size,
+      } as any),
+      new Promise<null>(r => setTimeout(() => r(null), 15000)),
+    ])
 
     if (response?.data?.[0]?.base64) {
       return `data:image/png;base64,${response.data[0].base64}`
@@ -467,10 +475,13 @@ async function safeImageEditDual(
 async function safeImageCreate(prompt: string, size: ImageSize): Promise<string | null> {
   try {
     const zai = await createZAI()
-    const response = await zai.images.generations.create({
-      prompt,
-      size,
-    })
+    const response = await Promise.race([
+      zai.images.generations.create({
+        prompt,
+        size,
+      }),
+      new Promise<null>(r => setTimeout(() => r(null), 15000)),
+    ])
 
     if (response?.data?.[0]?.base64) {
       return `data:image/png;base64,${response.data[0].base64}`
@@ -865,6 +876,11 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
   const job = jobs.get(jobId)
   if (!job) return
 
+  // Total pipeline timeout — if the entire pipeline takes > 45s, fail fast
+  const PIPELINE_TIMEOUT_MS = 45_000
+  const pipelineStart = Date.now()
+  const pipelineTimedOut = () => Date.now() - pipelineStart > PIPELINE_TIMEOUT_MS
+
   try {
     const config = getCategoryConfig(categorySlug, productName)
 
@@ -882,6 +898,9 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
     if (job) job.suggestions = formattedSuggestions
 
     // ── Phase 1: Product Analysis ─────────────────────────────────
+    if (pipelineTimedOut()) {
+      throw new Error('Pipeline timed out during product analysis')
+    }
     if (job) { job.progress = 'AI is analyzing the product...'; job.pipelinePhase = 'product-analysis' }
     console.log(`[pipeline:${jobId}] Phase 1: Analyzing product "${productName}"`)
 
@@ -894,6 +913,12 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
       ),
     ])
 
+    // If both VLM calls returned empty, ZAI is likely unreachable — fail fast
+    if (!analysisRaw && !personDesc) {
+      console.log(`[pipeline:${jobId}] Both VLM calls returned empty — ZAI likely unreachable, failing fast`)
+      throw new Error('AI_STYLE_SERVICE_UNAVAILABLE')
+    }
+
     const productInfo = parseProductAnalysis(analysisRaw)
     console.log(`[pipeline:${jobId}] Product: ${productInfo.type}, Colors: ${productInfo.colorSummary}`)
     console.log(`[pipeline:${jobId}] Person: ${personDesc.substring(0, 100)}`)
@@ -901,6 +926,9 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
     await delay(API_CALL_DELAY)
 
     // ── Phase 2: Generate Multiple Strategies ─────────────────────
+    if (pipelineTimedOut()) {
+      throw new Error('Pipeline timed out before generation')
+    }
     if (job) { job.progress = 'Creating your virtual try-on...'; job.pipelinePhase = 'generation' }
     console.log(`[pipeline:${jobId}] Phase 2: Generating try-on images`)
 
@@ -908,30 +936,40 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
 
     // Strategy A (PRIMARY): Dual-image edit — pass BOTH selfie + product
     // This is the MOST ACCURATE strategy because the model can see the actual product
-    console.log(`[pipeline:${jobId}] Strategy A: Dual-image edit (selfie + product)`)
-    const dualPrompt = buildDualImagePrompt(config, productName, productInfo)
-    const sA = await safeImageEditDual(dualPrompt, selfieData, productImageBase64, config.size)
-    if (sA) {
-      results.push({ imageUrl: sA, strategy: 'dual-image-edit' })
-      console.log(`[pipeline:${jobId}] Strategy A succeeded`)
+    if (pipelineTimedOut()) {
+      console.log(`[pipeline:${jobId}] Pipeline timed out, skipping remaining strategies`)
     } else {
-      console.log(`[pipeline:${jobId}] Strategy A failed, trying fallback...`)
+      console.log(`[pipeline:${jobId}] Strategy A: Dual-image edit (selfie + product)`)
+      const dualPrompt = buildDualImagePrompt(config, productName, productInfo)
+      const sA = await safeImageEditDual(dualPrompt, selfieData, productImageBase64, config.size)
+      if (sA) {
+        results.push({ imageUrl: sA, strategy: 'dual-image-edit' })
+        console.log(`[pipeline:${jobId}] Strategy A succeeded`)
+      } else {
+        console.log(`[pipeline:${jobId}] Strategy A failed, trying fallback...`)
+      }
     }
 
     // Strategy B: Edit selfie with product description (preserves face, text-described colors)
-    await delay(API_CALL_DELAY)
-    console.log(`[pipeline:${jobId}] Strategy B: Selfie-edit with text description`)
-    const selfiePrompt = buildSelfieEditPrompt(config, productName, productInfo)
-    const sB = await safeImageEdit(selfiePrompt, selfieData, config.size)
-    if (sB) {
-      results.push({ imageUrl: sB, strategy: 'edit-selfie' })
-      console.log(`[pipeline:${jobId}] Strategy B succeeded`)
+    if (pipelineTimedOut()) {
+      console.log(`[pipeline:${jobId}] Pipeline timed out, skipping Strategy B`)
     } else {
-      console.log(`[pipeline:${jobId}] Strategy B failed`)
+      await delay(API_CALL_DELAY)
+      console.log(`[pipeline:${jobId}] Strategy B: Selfie-edit with text description`)
+      const selfiePrompt = buildSelfieEditPrompt(config, productName, productInfo)
+      const sB = await safeImageEdit(selfiePrompt, selfieData, config.size)
+      if (sB) {
+        results.push({ imageUrl: sB, strategy: 'edit-selfie' })
+        console.log(`[pipeline:${jobId}] Strategy B succeeded`)
+      } else {
+        console.log(`[pipeline:${jobId}] Strategy B failed`)
+      }
     }
 
     // Strategy C: Edit product image with person description (preserves product, text-described person)
-    if (config.useProductEdit) {
+    if (pipelineTimedOut()) {
+      console.log(`[pipeline:${jobId}] Pipeline timed out, skipping Strategy C`)
+    } else if (config.useProductEdit) {
       await delay(API_CALL_DELAY)
       console.log(`[pipeline:${jobId}] Strategy C: Product-edit with person description`)
       const productPrompt = buildProductEditPrompt(config, productName, productInfo, personDesc)
@@ -945,7 +983,9 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
     }
 
     // Strategy D: Text-to-image fallback
-    if (results.length === 0) {
+    if (pipelineTimedOut()) {
+      console.log(`[pipeline:${jobId}] Pipeline timed out, skipping Strategy D`)
+    } else if (results.length === 0) {
       await delay(API_CALL_DELAY)
       console.log(`[pipeline:${jobId}] Strategy D: Text-to-image fallback`)
       const createPrompt = buildTextToImagePrompt(config, productName, productInfo, personDesc)
@@ -972,13 +1012,17 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
     }
 
     // ── Phase 3: VLM Verification & Selection ─────────────────────
-    if (job) { job.progress = 'Verifying product match...'; job.pipelinePhase = 'verification' }
+    if (pipelineTimedOut()) {
+      console.log(`[pipeline:${jobId}] Pipeline timed out, skipping verification — using first result`)
+    }
+    if (job && !pipelineTimedOut()) { job.progress = 'Verifying product match...'; job.pipelinePhase = 'verification' }
     console.log(`[pipeline:${jobId}] Phase 3: Verifying ${results.length} results`)
 
     let bestResult: GenResult | null = null
     let bestVerification: VerificationResult | null = null
 
     for (const result of results) {
+      if (pipelineTimedOut()) break // Skip verification if pipeline timed out
       await delay(API_CALL_DELAY)
       const verifyRaw = await vlmCompare(VERIFICATION_PROMPT, result.imageUrl, productImageBase64)
       const verification = parseVerification(verifyRaw)
@@ -1006,7 +1050,7 @@ export async function runPipeline(input: PipelineInput): Promise<void> {
 
     // ── Phase 3.5: Face Preservation Check ────────────────────────
     // Before accepting, verify the person's face hasn't been significantly altered
-    if (bestResult && bestVerification.faceScore < 7) {
+    if (bestResult && bestVerification.faceScore < 7 && !pipelineTimedOut()) {
       console.log(`[pipeline:${jobId}] Face score is low (${bestVerification.faceScore}), running face preservation check`)
       await delay(API_CALL_DELAY)
       const faceCheckRaw = await vlmCompare(
@@ -1065,7 +1109,7 @@ CHANGES: [describe any facial changes, or "none" if identical]`,
     const isAutoRefinement = bestVerification.colorScore >= 6 && bestVerification.colorScore < 8 &&
       bestVerification.naturalWearScore >= 6 && bestVerification.skinToneScore >= 7
 
-    if (needsRefinement && bestResult) {
+    if (needsRefinement && bestResult && !pipelineTimedOut()) {
       if (job) { job.progress = isAutoRefinement ? 'Auto-refining color accuracy...' : 'Refining product colors and fit...'; job.pipelinePhase = 'refinement' }
       console.log(`[pipeline:${jobId}] Phase 4: Refinement needed (color=${bestVerification.colorScore}, naturalWear=${bestVerification.naturalWearScore}, skinTone=${bestVerification.skinToneScore}${isAutoRefinement ? ', auto-refinement for color 6-8' : ''})`)
 
@@ -1181,7 +1225,7 @@ Studio-quality photorealistic result, 8K quality.`
     // If color accuracy is still below 6 after refinement, try overlaying
     // the actual product image at partial opacity on the AI result,
     // then do a final image edit pass to blend it naturally.
-    if (bestVerification.colorScore < 6 && finalResult) {
+    if (bestVerification.colorScore < 6 && finalResult && !pipelineTimedOut()) {
       console.log(`[pipeline:${jobId}] Phase 4.5: Product-overlay composite (color still ${bestVerification.colorScore})`)
       if (job) { job.progress = 'Enhancing color accuracy with product overlay...'; job.pipelinePhase = 'composite' }
 

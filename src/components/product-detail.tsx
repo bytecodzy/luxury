@@ -351,8 +351,8 @@ function generateCanvasFallback(
             const drawX = overlayCX - drawW / 2;
             const drawY = overlayCY - drawH / 2;
 
-            // Draw with slight transparency for natural blending
-            ctx.globalAlpha = 0.92;
+            // Draw with semi-transparent overlay for natural blending
+            ctx.globalAlpha = 0.5;
 
             // Clip to rounded rectangle
             ctx.beginPath();
@@ -456,13 +456,28 @@ function generateCanvasFallback(
           resolved = true;
           renderProductOnPerson(img);
 
-          // Bottom watermark
+          // Bottom watermark — "AI Style Preview" label + "Powered by 3BOXES"
           ctx.save();
-          ctx.globalAlpha = 0.5;
+          ctx.globalAlpha = 0.7;
+          const wmFontSize = Math.max(10, Math.floor(width * 0.017));
+          const wmLabelFontSize = Math.max(8, Math.floor(width * 0.013));
+          // Background bar
+          const wmBarHeight = Math.max(wmFontSize + wmLabelFontSize + 16, 36);
+          const wmBarY = height - wmBarHeight - 8;
+          ctx.fillStyle = 'rgba(28,25,23,0.6)';
+          ctx.beginPath();
+          ctx.roundRect(width * 0.15, wmBarY, width * 0.7, wmBarHeight, 6);
+          ctx.fill();
+          // "AI Style Preview" label
           ctx.fillStyle = '#daa520';
-          ctx.font = `bold ${Math.max(10, Math.floor(width * 0.017))}px Arial, sans-serif`;
-          ctx.textAlign = 'right';
-          ctx.fillText('3BOXES GIFTS · AI Style Preview', width - 14, height - 14);
+          ctx.font = `bold ${wmFontSize}px Arial, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('AI Style Preview', width / 2, wmBarY + wmFontSize + 4);
+          // "Powered by 3BOXES" watermark
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = '#a8a29e';
+          ctx.font = `${wmLabelFontSize}px Arial, sans-serif`;
+          ctx.fillText('Powered by 3BOXES', width / 2, wmBarY + wmFontSize + wmLabelFontSize + 6);
           ctx.restore();
 
           resolve(canvas.toDataURL('image/png'));
@@ -880,11 +895,11 @@ function TryOnDialog({
     setGenerationProgress(10);
     onBackgroundJob('generating');
 
-    const GLOBAL_TIMEOUT_MS = 120_000; // 2 minutes — AI generation takes 30-90+ seconds
+    const GLOBAL_TIMEOUT_MS = 60_000; // 60 seconds — reduced from 2min for faster failure when ZAI is down
     let timedOut = false;
     const timeoutId = setTimeout(() => {
       timedOut = true;
-      console.warn('[try-on] Global timeout reached (2min), forcing canvas fallback');
+      console.warn('[try-on] Global timeout reached (60s), forcing canvas fallback');
       doCanvasFallback();
     }, GLOBAL_TIMEOUT_MS);
 
