@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { isZAIAvailable, isLocalProxyReachable } from '@/lib/zai'
-import { isExternalAIAvailable } from '@/lib/external-ai'
+import { isHFAvailable } from '@/lib/huggingface-tryon'
 
 // Cache the AI availability check for 30 seconds
 let statusCache: { available: boolean; mode: string; reason?: string; timestamp: number } | null = null
@@ -8,14 +8,14 @@ const STATUS_CACHE_TTL = 30_000
 
 export async function GET() {
   try {
-    // Check external AI first (instant, no network call needed)
-    const externalAI = isExternalAIAvailable()
-    if (externalAI.replicate || externalAI.openai) {
+    // Check HuggingFace first (instant, no network call needed)
+    const hfAvailable = isHFAvailable()
+    if (hfAvailable) {
       return NextResponse.json({
         available: true,
-        mode: externalAI.replicate ? 'replicate' : 'openai',
-        externalAI,
-        reason: 'External AI service configured',
+        mode: 'huggingface',
+        hfAvailable,
+        reason: 'HuggingFace free inference API configured',
       })
     }
 
@@ -27,7 +27,7 @@ export async function GET() {
         available: statusCache.available,
         mode: statusCache.mode,
         reason: statusCache.reason,
-        externalAI,
+        hfAvailable,
       })
     }
 
@@ -45,10 +45,10 @@ export async function GET() {
       available: check.available,
       mode: check.mode,
       reason: check.reason || undefined,
-      externalAI,
+      hfAvailable,
     })
   } catch (err) {
-    const externalAI = isExternalAIAvailable()
+    const hfAvailable = isHFAvailable()
 
     // As a last resort, try checking the local proxy directly
     if (!process.env.VERCEL) {
@@ -59,17 +59,17 @@ export async function GET() {
             available: true,
             mode: 'local-proxy',
             reason: 'Local ai-proxy is available (fallback check)',
-            externalAI,
+            hfAvailable,
           })
         }
       } catch {}
     }
 
     return NextResponse.json({
-      available: externalAI.replicate || externalAI.openai,
-      mode: externalAI.replicate ? 'replicate' : externalAI.openai ? 'openai' : 'unavailable',
-      reason: externalAI.replicate || externalAI.openai ? 'External AI available' : 'Health check failed',
-      externalAI,
+      available: hfAvailable,
+      mode: hfAvailable ? 'huggingface' : 'unavailable',
+      reason: hfAvailable ? 'HuggingFace free inference available' : 'Health check failed',
+      hfAvailable,
     })
   }
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import os from 'os'
-import { isExternalAIAvailable } from '@/lib/external-ai'
+import { isHFAvailable } from '@/lib/huggingface-tryon'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,14 +59,14 @@ export async function GET() {
       }
     }
 
-    const externalAI = isExternalAIAvailable()
+    const hfAvailable = isHFAvailable()
 
     return NextResponse.json({
       aiProxyUrl,
       isVercel,
-      externalAI,
+      hfAvailable,
       // Indicate the best available AI mode
-      aiMode: externalAI.replicate ? 'replicate' : externalAI.openai ? 'openai' : aiProxyUrl ? 'proxy' : 'none',
+      aiMode: hfAvailable ? 'huggingface' : aiProxyUrl ? 'proxy' : 'none',
     })
   } catch (error) {
     return NextResponse.json({ error: 'Config unavailable' }, { status: 500 })
