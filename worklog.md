@@ -144,3 +144,20 @@ Stage Summary:
 - ZAI API is currently unreachable from sandbox (internal-api.z.ai IPs timing out)
 - Try-on priority: HuggingFace → ZAI proxy → ZAI SDK → Canvas fallback
 - User needs to set HF_API_TOKEN env var for HuggingFace to work
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix Vercel build error - remove all external-ai references
+
+Work Log:
+- Found 2 more files importing from deleted external-ai.ts: api/config/route.ts and api/try-on/status/route.ts
+- Replaced isExternalAIAvailable() with isHFAvailable() in both files
+- Changed aiMode logic from replicate/openai to huggingface/proxy
+- Verified local build succeeds: npx next build compiles cleanly
+- Pushed fix to GitHub
+
+Stage Summary:
+- Vercel build should now succeed - all external-ai references removed
+- Build output: "✓ Compiled successfully in 8.6s"
+- All routes including /api/try-on, /api/try-on/status, /api/config are clean
