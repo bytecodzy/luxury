@@ -880,11 +880,11 @@ function TryOnDialog({
     setGenerationProgress(10);
     onBackgroundJob('generating');
 
-    const GLOBAL_TIMEOUT_MS = 15_000;
+    const GLOBAL_TIMEOUT_MS = 120_000; // 2 minutes — AI generation takes 30-90+ seconds
     let timedOut = false;
     const timeoutId = setTimeout(() => {
       timedOut = true;
-      console.warn('[try-on] Global timeout reached, forcing canvas fallback');
+      console.warn('[try-on] Global timeout reached (2min), forcing canvas fallback');
       doCanvasFallback();
     }, GLOBAL_TIMEOUT_MS);
 
@@ -900,7 +900,7 @@ function TryOnDialog({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ selfieData, categorySlug }),
-          signal: AbortSignal.timeout(8000), // 8s max for VLM analysis
+          signal: AbortSignal.timeout(15000), // 15s for VLM analysis
         });
         if (analyzeRes.ok) {
           const analyzeData = await analyzeRes.json();
@@ -921,7 +921,7 @@ function TryOnDialog({
         setProgressMessage('Checking AI availability...');
         setGenerationProgress(20);
         const statusRes = await fetch('/api/try-on/status', {
-          signal: AbortSignal.timeout(2000),
+          signal: AbortSignal.timeout(5000), // 5s for status check
         });
         if (statusRes.ok) {
           const statusData = await statusRes.json();
@@ -966,7 +966,7 @@ function TryOnDialog({
 
       if (timedOut) return;
 
-      // Step 1b: POST to create a try-on job — with a SHORT timeout
+      // Step 1b: POST to create a try-on job
       setProgressMessage('Creating style preview...');
       setGenerationProgress(30);
       const postRes = await fetch('/api/try-on', {
@@ -980,7 +980,7 @@ function TryOnDialog({
           productName,
           categorySlug,
         }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(30000), // 30s for POST (proxy may be slow)
       });
 
       if (timedOut) return;
@@ -1011,7 +1011,7 @@ function TryOnDialog({
       }
 
       // Step 2: Poll for job completion (only when server returned a valid jobId)
-      const maxPolls = 20;
+      const maxPolls = 40; // 40 polls × 3s = 120s max polling time
       let pollCount = 0;
 
       const pollJob = async (): Promise<void> => {
@@ -1021,7 +1021,7 @@ function TryOnDialog({
           throw new Error('Generation timed out');
         }
 
-        const pollRes = await fetch(`/api/try-on?jobId=${jobId}`, { signal: AbortSignal.timeout(8000) });
+        const pollRes = await fetch(`/api/try-on?jobId=${jobId}`, { signal: AbortSignal.timeout(15000) });
         const pollData = await pollRes.json();
 
         if (pollData.progress) {
@@ -1057,7 +1057,7 @@ function TryOnDialog({
           throw new Error(pollData.error || 'Generation failed');
         }
 
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 3000)); // Poll every 3 seconds
         return pollJob();
       };
 

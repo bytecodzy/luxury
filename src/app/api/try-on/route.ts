@@ -220,7 +220,7 @@ export async function POST(request: NextRequest) {
             method: 'POST',
             headers: proxyHeaders,
             body: JSON.stringify(proxyBody),
-            signal: AbortSignal.timeout(15000), // 15s timeout — fail fast, let client canvas fallback work
+            signal: AbortSignal.timeout(30000), // 30s timeout — proxy needs time to receive and start job
           })
 
           if (proxyResponse.ok) {
@@ -565,7 +565,7 @@ export async function GET(request: NextRequest) {
         const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on', { jobId: jobId })
         const proxyResponse = await fetch(proxyFetchUrl, {
           headers: proxyHeaders,
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(15000), // 15s for status polling
         })
         
         if (!proxyResponse.ok) {
