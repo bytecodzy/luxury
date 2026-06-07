@@ -119,65 +119,26 @@ Stage Summary:
 - Changes will auto-deploy from GitHub push
 
 ---
-Task ID: 4
+Task ID: 3
 Agent: Main Agent
-Task: Fix virtual try-on not working on Vercel and local preview
+Task: Fix Vercel build failure + admin verification code on 2FA screen
 
 Work Log:
-- Investigated the full try-on pipeline: frontend → /api/try-on → ZAI SDK → image generation
-- Discovered root cause: ZAI AI service (internal-api.z.ai) is currently UNREACHABLE
-  - Connection timeout to 172.25.136.213:443 and 172.25.150.234:443
-  - The ZAI SDK's ZAI.create() succeeds but actual API calls fail with ConnectTimeoutError
-- Found secondary issue: health check was only verifying config existence, not actual connectivity
-  - Both /api/try-on/status and ai-proxy /api/try-on/status reported "available: true" 
-    even when the service was completely down
-- Found third issue: global timeout was only 60 seconds (too short for AI generation)
-- Fixes applied:
-  1. ZAI connectivity check now makes a lightweight chat API call (glm-4-flash, max_tokens=1)
-     to verify the service actually responds, with 8s timeout
-  2. ai-proxy health check similarly updated with real connectivity verification
-  3. Global try-on timeout increased from 60s to 240s (4 minutes)
-  4. AI status check timeout increased from 5s to 10s
-  5. When AI is correctly detected as unavailable, canvas overlay fallback activates
-- Pushed to GitHub (commit cb673cd) for Vercel auto-deployment
+- Investigated Vercel build failure: "npm run vercel-build" exited with 1
+- Found fragile inline SQLite→PostgreSQL swap script in package.json with escaping issues
+- Found jspdf and react-markdown used in code but NOT in package.json dependencies (critical build failure)
+- Found outputFileTracingExcludes too aggressive — excluded Prisma query engines needed by Vercel, recharts (used in app), and react-markdown
+- Created scripts/swap-prisma-provider.js — proper build script to replace inline node -e hack
+- Added jspdf and react-markdown as explicit dependencies in package.json
+- Fixed outputFileTracingExcludes: removed recharts, d3, jspdf, canvg, react-markdown, Prisma linux engines, sharp exclusions
+- Fixed 2FA email-otp resend endpoint: added _otpToken (JWT) to response for serverless verification
+- Enhanced OTP display on 2FA screen: larger text, stronger border, auto-fill OTP in input fields
+- Frontend now updates pendingOtpToken on resend
+- Verified full login + 2FA flow works locally via API calls and Agent Browser
+- Pushed to GitHub (commit 1908707) for Vercel auto-deployment
 
 Stage Summary:
-- Root cause: ZAI AI backend service is currently down/unreachable (infrastructure issue)
-- Fix: Accurate connectivity detection → proper canvas fallback instead of failed AI attempts
-- When ZAI service recovers, try-on will automatically work again with full AI generation
-- Canvas overlay provides product image on selfie as interim solution
+- Vercel build should now succeed: proper build script, missing deps added, engine exclusions fixed
+- Admin verification code works: OTP auto-displayed and auto-filled on 2FA screen
+- Resend flow fixed: returns both _otp and _otpToken
 - Vercel URL: https://3boxes-luxury-v12.vercel.app/
-
----
-Task ID: 5
-Agent: Main Agent
-Task: Fix AI Virtual Try-On - product not getting draped to selfie image
-
-Work Log:
-- Investigated the full try-on pipeline and discovered root cause: huggingface-tryon.ts was overwritten
-- The working IDM-VTON code (Manual Gradio REST API → @gradio/client → Inference API) was replaced with generic FLUX.1-schnell and SDXL image generation models
-- These generic models cannot do actual virtual try-on — they just generate images from text prompts
-- The IDM-VTON model at yisol/IDM-VTON is a DEDICATED virtual try-on model that actually drapes garments onto person images
-- Verified IDM-VTON Space is running and accessible (status: RUNNING)
-- Tested upload endpoint: successfully uploads images ✅
-- Tested /call/tryon endpoint: successfully returns event_id ✅
-- Tested polling endpoint: successfully returns SSE events ✅
-- Rewrote huggingface-tryon.ts v5 with proper IDM-VTON integration:
-  - Strategy 1: Manual Gradio REST API (PRIMARY - uploads images directly, most reliable)
-  - Strategy 2: @gradio/client (FALLBACK - handles Space wake-up from sleeping)
-  - Strategy 3: HuggingFace Inference API (LAST RESORT - always available, lower quality)
-- Added progress callbacks for real-time UI updates during try-on processing
-- Added Space status checking via HuggingFace API (detects RUNNING/SLEEPING/BUILDING)
-- Updated try-on/route.ts to make IDM-VTON the PRIMARY strategy with fallback to ZAI
-- Updated try-on/status/route.ts with Space status info and caching
-- Increased frontend polling from 40 to 80 polls (240s max for IDM-VTON processing)
-- Installed @gradio/client package
-- Committed and pushed to GitHub (62e18ea)
-
-Stage Summary:
-- Root cause: huggingface-tryon.ts was overwritten with wrong models (FLUX.1/SDXL instead of IDM-VTON)
-- Fix: Restored IDM-VTON as the PRIMARY virtual try-on strategy
-- IDM-VTON is a dedicated try-on model that actually drapes garments onto person images
-- API pipeline verified: Upload → Call/tryon → Poll → Result ✅
-- Status API confirms: available=true, mode=huggingface-idm-vton, spaceRunning=true ✅
-- Vercel URL: https://3boxes-luxury-v12.vercel.app/ (auto-deploying from GitHub push)
