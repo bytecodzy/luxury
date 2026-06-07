@@ -700,3 +700,29 @@ model GeoCountry {
   languageCode String  @default("en")  // ISO 639-1, e.g. "en", "hi", "ar"
   flagEmoji    String?             // e.g. "🇺🇸", "🇮🇳"
 }
+
+// ─── Documentation Access Control Models ───
+
+model DocVaultPassword {
+  id          String   @id @default(cuid())
+  docId       String   @unique  // maps to documentation registry ID, e.g. "patent-documentation"
+  password    String              // bcrypt hashed password
+  setBy       String?             // userId of super admin who set it
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model DocAccessGrant {
+  id           String   @id @default(cuid())
+  docId        String               // documentation registry ID
+  userId       String               // user who was granted access
+  grantedBy    String               // admin who granted access
+  canView      Boolean   @default(true)
+  canDownload  Boolean   @default(true)
+  canShare     Boolean   @default(false)
+  expiresAt    DateTime?            // optional expiry for temporary access
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([docId, userId])
+}

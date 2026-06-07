@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
+import { db } from '@/lib/db'
+import bcrypt from 'bcryptjs'
 
 // ── Documentation Registry ──────────────────────────────────────────
 
@@ -14,6 +16,7 @@ interface DocMeta {
   lastUpdated: string
   filename: string
   allowedRoles: string[]
+  requiresVaultPassword: boolean
 }
 
 const DOCS_REGISTRY: DocMeta[] = [
@@ -27,6 +30,7 @@ const DOCS_REGISTRY: DocMeta[] = [
     lastUpdated: '2026-03-05',
     filename: '01-technical-documentation.md',
     allowedRoles: ['admin', 'team', 'agent'],
+    requiresVaultPassword: false,
   },
   {
     id: 'sop-documentation',
@@ -38,6 +42,7 @@ const DOCS_REGISTRY: DocMeta[] = [
     lastUpdated: '2026-03-05',
     filename: '02-sop-documentation.md',
     allowedRoles: ['admin', 'team', 'agent'],
+    requiresVaultPassword: false,
   },
   {
     id: 'ai-strategy-documentation',
@@ -49,6 +54,7 @@ const DOCS_REGISTRY: DocMeta[] = [
     lastUpdated: '2026-03-05',
     filename: '03-ai-strategy-documentation.md',
     allowedRoles: ['admin', 'team'],
+    requiresVaultPassword: false,
   },
   {
     id: 'deployment-documentation',
@@ -60,6 +66,7 @@ const DOCS_REGISTRY: DocMeta[] = [
     lastUpdated: '2026-03-05',
     filename: '04-deployment-documentation.md',
     allowedRoles: ['admin'],
+    requiresVaultPassword: false,
   },
   {
     id: 'patent-documentation',
@@ -70,24 +77,34 @@ const DOCS_REGISTRY: DocMeta[] = [
     version: '1.0.0',
     lastUpdated: '2026-03-05',
     filename: '05-patent-documentation.md',
-    allowedRoles: ['admin'], // Admin only - NOT in Git
+    allowedRoles: ['admin'],
+    requiresVaultPassword: true,  // Requires vault password to access
   },
 ]
 
 // ── Auth Helper ─────────────────────────────────────────────────────
 
-function getUserFromRequest(request: NextRequest): { role: string; email: string } | null {
+interface DecodedUser {
+  userId: string
+  email: string
+  role: string
+  adminRole?: string
+}
+
+function getUserFromRequest(request: NextRequest): DecodedUser | null {
   try {
     const authHeader = request.headers.get('authorization')
     if (!authHeader?.startsWith('Bearer ')) return null
-
-    // Simple JWT decode for role check (full verification happens in auth middleware)
     const token = authHeader.replace('Bearer ', '')
     const parts = token.split('.')
     if (parts.length !== 3) return null
-
     const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString())
-    return { role: payload.role || 'user', email: payload.email || '' }
+    return {
+      userId: payload.userId || payload.sub || '',
+      email: payload.email || '',
+      role: payload.role || 'user',
+      adminRole: payload.adminRole || undefined,
+    }
   } catch {
     return null
   }
@@ -123,11 +140,98 @@ export async function GET(
     return NextResponse.json({ error: 'Access denied — insufficient privileges' }, { status: 403 })
   }
 
+  // ── Vault Password Check for confidential docs ──
+  if (doc.requiresVaultPassword) {
+    const vaultPassword = request.nextUrl.searchParams.get('vaultKey')
+    if (!vaultPassword) {
+      return NextResponse.json(
+        { error: 'Vault password required', requiresVaultPassword: true },
+        { status: 403 }
+      )
+    }
+
+    // Verify vault password
+    try {
+      const vault = await db.docVaultPassword.findUnique({ where: { docId: doc.id } })
+      if (!vault) {
+        // No vault password set yet — super admin can access without one
+        // But we should inform the frontend that a password needs to be set
+        return NextResponse.json(
+          { error: 'Vault password not configured. Super admin must set a vault password first.', vaultNotConfigured: true },
+          { status: 403 }
+        )
+      }
+
+      const isValid = await bcrypt.compare(vaultPassword, vault.password)
+      if (!isValid) {
+        // Audit failed attempt
+        await db.auditLog.create({
+          data: {
+            userId: user.userId,
+            action: 'vault_access_failed',
+            entity: 'documentation',
+            entityId: doc.id,
+            details: JSON.stringify({ attemptedBy: user.email }),
+          },
+        })
+        return NextResponse.json({ error: 'Incorrect vault password' }, { status: 401 })
+      }
+
+      // Audit successful access
+      await db.auditLog.create({
+        data: {
+          userId: user.userId,
+          action: 'vault_access_granted',
+          entity: 'documentation',
+          entityId: doc.id,
+          details: JSON.stringify({ accessedBy: user.email }),
+        },
+      })
+    } catch (err) {
+      console.error('[docs/[id]] Vault check error:', err)
+      return NextResponse.json({ error: 'Vault verification failed' }, { status: 500 })
+    }
+  }
+
+  // ── Access Grant Check (non-admin users) ──
+  if (user.role !== 'admin') {
+    try {
+      const grant = await db.docAccessGrant.findUnique({
+        where: { docId_userId: { docId: doc.id, userId: user.userId } },
+      })
+
+      if (!grant || !grant.canView) {
+        return NextResponse.json({ error: 'Access denied — you have not been granted access to this document' }, { status: 403 })
+      }
+
+      // Check expiry
+      if (grant.expiresAt && new Date() > grant.expiresAt) {
+        return NextResponse.json({ error: 'Access expired — your access to this document has expired' }, { status: 403 })
+      }
+    } catch (err) {
+      console.error('[docs/[id]] Access grant check error:', err)
+      // If DB check fails, fall through to allow for admins
+    }
+  }
+
   // Read the markdown file
   try {
     const docsDir = join(process.cwd(), 'docs')
     const filePath = join(docsDir, doc.filename)
     const content = await readFile(filePath, 'utf-8')
+
+    // Check download permission for the canDownload flag
+    let canDownload = true
+    if (user.role !== 'admin') {
+      try {
+        const grant = await db.docAccessGrant.findUnique({
+          where: { docId_userId: { docId: doc.id, userId: user.userId } },
+        })
+        canDownload = grant?.canDownload ?? false
+      } catch {
+        canDownload = false
+      }
+    }
 
     return NextResponse.json({
       id: doc.id,
@@ -139,12 +243,11 @@ export async function GET(
       lastUpdated: doc.lastUpdated,
       content,
       filename: doc.filename,
+      requiresVaultPassword: doc.requiresVaultPassword,
+      canDownload,
     })
   } catch (err) {
     console.error(`[docs] Failed to read ${doc.filename}:`, err)
     return NextResponse.json({ error: 'Document file not found on server' }, { status: 500 })
   }
 }
-
-// ── GET /api/docs (list all) ────────────────────────────────────────
-// This is handled by the parent route
