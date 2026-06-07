@@ -25,6 +25,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
 import { PartnersTab } from '@/components/admin/partners-tab'
+import { DocumentationTab } from '@/components/admin/documentation-tab'
 import {
   LayoutDashboard, Package, Warehouse, ShoppingBag, FileText, Calculator,
   Truck, Users, BookOpen, Share2, Tag, Import, Plus, Pencil, Trash2,
@@ -183,6 +184,7 @@ export function AdminDashboard() {
     { value: 'users', icon: Users, label: 'Users & Perms' },
     { value: 'content', icon: BookOpen, label: 'Content' },
     { value: 'sharedocs', icon: Share2, label: 'Share Docs' },
+    { value: 'documentation', icon: BookOpen, label: 'Documentation' },
     { value: 'offers', icon: Tag, label: 'Offers' },
     { value: 'import', icon: Import, label: 'Import' },
     { value: 'reports', icon: BarChart3, label: 'Reports' },
@@ -214,6 +216,7 @@ export function AdminDashboard() {
       case 'integrations': return <IntegrationsTab token={authToken} onMutate={invalidateAll} />
       case 'partners': return <PartnersTab token={authToken} onMutate={invalidateAll} />
       case 'corporate': return <CorporateTab token={authToken} onMutate={invalidateAll} />
+      case 'documentation': return <DocumentationTab token={authToken} />
       case 'investor': return <InvestorKitTab token={authToken} />
       default: return <DashboardTab token={authToken} theme={theme} />
     }

@@ -53,3 +53,7 @@ server.log
 # Skills directory
 /skills/
 .env*.local
+
+# Confidential patent documentation - NOT for public repositories
+docs/05-patent-documentation.md
+docs/patent/
