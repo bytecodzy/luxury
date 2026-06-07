@@ -748,7 +748,8 @@ export function TryOnDialog({
         }
 
         // Update progress percentage based on pipeline phase
-        if (statusData.pipelinePhase === 'product-analysis') setProgressPercent(30);
+        if (statusData.pipelinePhase === 'hf-tryon') setProgressPercent(25);
+        else if (statusData.pipelinePhase === 'product-analysis') setProgressPercent(30);
         else if (statusData.pipelinePhase === 'generation') setProgressPercent(50);
         else if (statusData.pipelinePhase === 'verification') setProgressPercent(70);
         else if (statusData.pipelinePhase === 'refinement') setProgressPercent(80);
@@ -947,7 +948,8 @@ export function TryOnDialog({
             }
 
             // Update progress percentage based on pipeline phase
-            if (statusData.pipelinePhase === 'product-analysis') setProgressPercent(30);
+            if (statusData.pipelinePhase === 'hf-tryon') setProgressPercent(25);
+            else if (statusData.pipelinePhase === 'product-analysis') setProgressPercent(30);
             else if (statusData.pipelinePhase === 'generation') setProgressPercent(50);
             else if (statusData.pipelinePhase === 'verification') setProgressPercent(70);
             else if (statusData.pipelinePhase === 'refinement') setProgressPercent(80);

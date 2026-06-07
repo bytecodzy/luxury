@@ -1043,7 +1043,8 @@ function TryOnDialog({
           setProgressMessage(pollData.progress);
         }
 
-        if (pollData.pipelinePhase === 'product-analysis') setGenerationProgress(35);
+        if (pollData.pipelinePhase === 'hf-tryon') setGenerationProgress(25);
+        else if (pollData.pipelinePhase === 'product-analysis') setGenerationProgress(35);
         else if (pollData.pipelinePhase === 'generation') setGenerationProgress(50);
         else if (pollData.pipelinePhase === 'verification') setGenerationProgress(70);
         else if (pollData.pipelinePhase === 'refinement') setGenerationProgress(80);
