@@ -286,17 +286,23 @@ export async function isZAIAvailable(): Promise<{
     try {
       const testInstance = await ZAI.create()
       if (testInstance) {
-        const sdkBaseUrl = testInstance.config?.baseUrl
-        if (sdkBaseUrl) {
-          const reachable = await isAIReachable(sdkBaseUrl)
-          if (reachable) {
-            console.log('[ZAI] SDK auto-discovery succeeded AND API is reachable')
-            return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
-          }
-          console.log('[ZAI] SDK auto-discovery succeeded but API is NOT reachable at', sdkBaseUrl)
-        } else {
-          console.log('[ZAI] SDK auto-discovery succeeded (no base URL to check)')
+        // Actually verify the API is reachable with a lightweight chat call
+        try {
+          await Promise.race([
+            testInstance.chat.completions.create({
+              model: 'glm-4-flash',
+              messages: [{ role: 'user', content: 'ping' }],
+              max_tokens: 1,
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('connectivity check timed out')), 8000)
+            ),
+          ])
+          console.log('[ZAI] SDK auto-discovery succeeded — AI available and reachable')
           return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
+        } catch (connErr) {
+          console.log('[ZAI] SDK created but AI service is unreachable:', connErr instanceof Error ? connErr.message : String(connErr))
+          return { available: false, mode: 'unavailable', reason: 'AI service is configured but currently unreachable (connection timeout)' }
         }
       }
     } catch (sdkErr) {

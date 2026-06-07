@@ -895,11 +895,11 @@ function TryOnDialog({
     setGenerationProgress(10);
     onBackgroundJob('generating');
 
-    const GLOBAL_TIMEOUT_MS = 60_000; // 60 seconds — reduced from 2min for faster failure when ZAI is down
+    const GLOBAL_TIMEOUT_MS = 240_000; // 4 minutes — AI generation can take time
     let timedOut = false;
     const timeoutId = setTimeout(() => {
       timedOut = true;
-      console.warn('[try-on] Global timeout reached (60s), forcing canvas fallback');
+      console.warn('[try-on] Global timeout reached (4min), forcing canvas fallback');
       doCanvasFallback();
     }, GLOBAL_TIMEOUT_MS);
 
@@ -930,13 +930,13 @@ function TryOnDialog({
 
       if (timedOut) return;
 
-      // ── Step 1: Quick AI availability check (2 second timeout) ──
+      // ── Step 1: AI availability check (10 second timeout) ──
       let aiAvailable = false;
       try {
         setProgressMessage('Checking AI availability...');
         setGenerationProgress(20);
         const statusRes = await fetch('/api/try-on/status', {
-          signal: AbortSignal.timeout(5000), // 5s for status check
+          signal: AbortSignal.timeout(10000), // 10s — connectivity check can take time
         });
         if (statusRes.ok) {
           const statusData = await statusRes.json();
