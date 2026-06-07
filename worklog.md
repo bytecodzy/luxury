@@ -117,3 +117,33 @@ Stage Summary:
 - Admin login on Vercel now works: OTP displayed in UI, JWT token ensures verification works across serverless instances
 - Vercel URL: https://3boxes-luxury-v12.vercel.app/
 - Changes will auto-deploy from GitHub push
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Fix virtual try-on not working on Vercel and local preview
+
+Work Log:
+- Investigated the full try-on pipeline: frontend → /api/try-on → ZAI SDK → image generation
+- Discovered root cause: ZAI AI service (internal-api.z.ai) is currently UNREACHABLE
+  - Connection timeout to 172.25.136.213:443 and 172.25.150.234:443
+  - The ZAI SDK's ZAI.create() succeeds but actual API calls fail with ConnectTimeoutError
+- Found secondary issue: health check was only verifying config existence, not actual connectivity
+  - Both /api/try-on/status and ai-proxy /api/try-on/status reported "available: true" 
+    even when the service was completely down
+- Found third issue: global timeout was only 60 seconds (too short for AI generation)
+- Fixes applied:
+  1. ZAI connectivity check now makes a lightweight chat API call (glm-4-flash, max_tokens=1)
+     to verify the service actually responds, with 8s timeout
+  2. ai-proxy health check similarly updated with real connectivity verification
+  3. Global try-on timeout increased from 60s to 240s (4 minutes)
+  4. AI status check timeout increased from 5s to 10s
+  5. When AI is correctly detected as unavailable, canvas overlay fallback activates
+- Pushed to GitHub (commit cb673cd) for Vercel auto-deployment
+
+Stage Summary:
+- Root cause: ZAI AI backend service is currently down/unreachable (infrastructure issue)
+- Fix: Accurate connectivity detection → proper canvas fallback instead of failed AI attempts
+- When ZAI service recovers, try-on will automatically work again with full AI generation
+- Canvas overlay provides product image on selfie as interim solution
+- Vercel URL: https://3boxes-luxury-v12.vercel.app/
