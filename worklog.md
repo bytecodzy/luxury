@@ -60,3 +60,34 @@ Stage Summary:
 - All processing is now asynchronous (POST returns immediately, client polls)
 - Frontend timeouts extended to accommodate 30-90 second AI generation time
 - Key files modified: huggingface-tryon.ts, route.ts, product-detail.tsx
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix HuggingFace IDM-VTON virtual try-on integration
+
+Work Log:
+- Read and analyzed the full try-on flow: frontend → API route → pipeline → HuggingFace
+- Discovered the root causes of the virtual try-on not working:
+  1. `is_checked_crop` was set to `true` but API default is `false` (caused bad image cropping)
+  2. SSE poll timeout was only 15 seconds but IDM-VTON takes 30-90 seconds to generate
+  3. "terminated" errors were not treated as transient (no retry)
+- Confirmed the Gradio Space upload API works (tested directly)
+- Confirmed the full API flow works with proper person+garment images
+- Applied fixes to `src/lib/huggingface-tryon.ts`:
+  - Fixed `is_checked_crop` to `false` per API spec
+  - Increased poll timeout from 15s to 120s (model takes 30-90s)
+  - Reduced poll attempts from 60 to 10 (with longer timeout per attempt)
+  - Added retry logic (one retry with 10s delay for transient errors)
+  - Added "terminated" to transient error list
+  - Added "processing error" to transient error list
+  - Improved SSE parsing and error handling
+- Also updated `src/components/ProductDetail.tsx` to send `productName` and `categorySlug` in the try-on request
+- Verified the fix with multiple end-to-end API tests - strategy: idm-vton, image: 2.5MB
+
+Stage Summary:
+- HuggingFace IDM-VTON virtual try-on is now working correctly
+- The fix produces real AI-generated try-on images (not canvas overlays)
+- The `idm-vton` strategy is confirmed working in the pipeline
+- Key fix: poll timeout was too short (15s → 120s) causing "terminated" errors
+- Key fix: `is_checked_crop` was wrong (true → false) causing bad image processing
