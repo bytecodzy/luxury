@@ -1,5 +1,5 @@
 /**
- * HuggingFace IDM-VTON Virtual Try-On Integration v5
+ * HuggingFace IDM-VTON Virtual Try-On Integration v6
  *
  * Uses the yisol/IDM-VTON HuggingFace Space for REAL virtual try-on.
  * This is a dedicated virtual try-on model that AI-applies garments to person images.
@@ -9,11 +9,16 @@
  * 2. @gradio/client (FALLBACK — has session issues, but handles wake-up)
  * 3. HuggingFace Inference API (LAST RESORT — always available, lower quality)
  *
- * The Manual Gradio REST API directly uploads images to the Space's upload endpoint
- * and then submits the tryon job via the /call/tryon endpoint. This avoids the
- * "404: Session not found" errors that @gradio/client sometimes produces.
+ * IMPORTANT FORMAT NOTES:
+ * - The IDM-VTON /tryon endpoint's first parameter ("Human") is a Gradio ImageEditor
+ *   component (type "dict"). It MUST be sent in the ImageEditor format:
+ *   { background: { path, meta }, layers: [], composite: null }
+ * - The upload endpoint returns a JSON array of paths: ["/tmp/gradio/xxx/file.png"]
+ * - The /call/tryon endpoint returns: { "event_id": "xxx" }
+ * - The /call/tryon/{event_id} endpoint returns SSE events:
+ *   event: heartbeat / event: generating / event: complete / event: error
  *
- * IMPORTANT: Set HF_API_TOKEN environment variable for better queue priority.
+ * Set HF_API_TOKEN environment variable for better queue priority.
  * Get your free token at: https://huggingface.co/settings/tokens
  */
 
@@ -104,6 +109,66 @@ function getMimeType(dataUrl: string): string {
   return match ? match[1] : 'image/png'
 }
 
+// ── Upload Helper ──────────────────────────────────────────────────
+
+/**
+ * Upload an image to the IDM-VTON Space's /upload endpoint.
+ * Returns the server-side file path.
+ *
+ * The upload endpoint returns a JSON array of paths, e.g.:
+ * ["/tmp/gradio/abc123/person.png"]
+ */
+async function uploadImageToSpace(
+  imageDataUrl: string,
+  filename: string,
+  headers: Record<string, string>,
+): Promise<string> {
+  const buffer = dataUrlToBuffer(imageDataUrl)
+  const mime = getMimeType(imageDataUrl)
+  const ext = mime.split('/')[1] || 'png'
+
+  const formData = new FormData()
+  formData.append('files', new Blob([new Uint8Array(buffer)], { type: mime }), `${filename}.${ext}`)
+
+  const uploadRes = await fetch(`${IDM_VTON_URL}/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+    signal: AbortSignal.timeout(30000),
+  })
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text().catch(() => 'unknown')
+    throw new Error(`Upload failed (${uploadRes.status}): ${errText.substring(0, 200)}`)
+  }
+
+  // Parse the JSON array response — the endpoint returns ["/tmp/gradio/xxx/file.png"]
+  const contentType = uploadRes.headers.get('content-type') || ''
+  let paths: string[]
+
+  if (contentType.includes('json')) {
+    paths = await uploadRes.json()
+  } else {
+    // Fallback: try to parse the text as JSON
+    const responseText = await uploadRes.text()
+    try {
+      paths = JSON.parse(responseText)
+    } catch {
+      // If it's not JSON, it might be a plain path
+      if (responseText.startsWith('/tmp/') || responseText.startsWith('/')) {
+        return responseText
+      }
+      throw new Error(`Unexpected upload response: ${responseText.substring(0, 200)}`)
+    }
+  }
+
+  if (!Array.isArray(paths) || paths.length === 0) {
+    throw new Error(`Upload returned empty paths array`)
+  }
+
+  return paths[0]
+}
+
 // ── Category-specific garment descriptions ──────────────────────────
 
 function getGarmentDescription(categorySlug: string, productName: string): string {
@@ -135,7 +200,9 @@ function getGarmentDescription(categorySlug: string, productName: string): strin
 // 3. Calls /call/tryon with the uploaded file references
 // 4. Polls /call/tryon/{event_id} for the result
 //
-// No session management needed — avoids "404: Session not found" errors.
+// CRITICAL: The first parameter ("Human") is a Gradio ImageEditor component.
+// It MUST be sent in ImageEditor format: {background, layers, composite}
+// Sending just {path, meta} will cause "event: error" responses.
 
 async function manualGradioTryOn(
   input: HFTryOnInput,
@@ -152,69 +219,61 @@ async function manualGradioTryOn(
     if (token) headers['Authorization'] = `Bearer ${token}`
 
     // Step 1: Upload person image
-    const personBuffer = dataUrlToBuffer(input.selfieData)
-    const personMime = getMimeType(input.selfieData)
-    const personExt = personMime.split('/')[1] || 'png'
-
-    const personFormData = new FormData()
-    personFormData.append('files', new Blob([new Uint8Array(personBuffer)], { type: personMime }), `person.${personExt}`)
-
-    const uploadPersonRes = await fetch(`${IDM_VTON_URL}/upload`, {
-      method: 'POST',
-      headers,
-      body: personFormData,
-      signal: AbortSignal.timeout(30000),
-    })
-
-    if (!uploadPersonRes.ok) {
-      const errText = await uploadPersonRes.text().catch(() => 'unknown')
-      console.error(`[hf-tryon] Manual: Person upload failed ${uploadPersonRes.status}: ${errText.substring(0, 200)}`)
-      return { success: false, strategy: 'manual-gradio', error: `Person upload failed: ${uploadPersonRes.status}` }
+    let personPath: string
+    try {
+      personPath = await uploadImageToSpace(input.selfieData, 'person', headers)
+      console.log(`[hf-tryon] Manual: Person uploaded to: ${personPath}`)
+    } catch (uploadErr) {
+      const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
+      console.error(`[hf-tryon] Manual: Person upload failed: ${errMsg}`)
+      return { success: false, strategy: 'manual-gradio', error: `Person upload failed: ${errMsg.substring(0, 100)}` }
     }
-
-    const personPath = await uploadPersonRes.text()
-    console.log(`[hf-tryon] Manual: Person uploaded to: ${personPath}`)
 
     // Step 2: Upload garment image
     onProgress?.('Uploading product image to AI...')
-    const garmentBuffer = dataUrlToBuffer(input.productImageBase64)
-    const garmentMime = getMimeType(input.productImageBase64)
-    const garmentExt = garmentMime.split('/')[1] || 'png'
-
-    const garmentFormData = new FormData()
-    garmentFormData.append('files', new Blob([new Uint8Array(garmentBuffer)], { type: garmentMime }), `garment.${garmentExt}`)
-
-    const uploadGarmentRes = await fetch(`${IDM_VTON_URL}/upload`, {
-      method: 'POST',
-      headers,
-      body: garmentFormData,
-      signal: AbortSignal.timeout(30000),
-    })
-
-    if (!uploadGarmentRes.ok) {
-      const errText = await uploadGarmentRes.text().catch(() => 'unknown')
-      console.error(`[hf-tryon] Manual: Garment upload failed ${uploadGarmentRes.status}: ${errText.substring(0, 200)}`)
-      return { success: false, strategy: 'manual-gradio', error: `Garment upload failed: ${uploadGarmentRes.status}` }
+    let garmentPath: string
+    try {
+      garmentPath = await uploadImageToSpace(input.productImageBase64, 'garment', headers)
+      console.log(`[hf-tryon] Manual: Garment uploaded to: ${garmentPath}`)
+    } catch (uploadErr) {
+      const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr)
+      console.error(`[hf-tryon] Manual: Garment upload failed: ${errMsg}`)
+      return { success: false, strategy: 'manual-gradio', error: `Garment upload failed: ${errMsg.substring(0, 100)}` }
     }
-
-    const garmentPath = await uploadGarmentRes.text()
-    console.log(`[hf-tryon] Manual: Garment uploaded to: ${garmentPath}`)
 
     // Step 3: Call the tryon endpoint
     onProgress?.('AI is generating your try-on...')
     const garmentDes = getGarmentDescription(input.categorySlug, input.productName)
 
+    // CRITICAL: The "Human" parameter is an ImageEditor component (type "dict").
+    // It MUST be formatted as: { background: FileData, layers: [], composite: null }
+    // Sending just { path, meta } will cause "event: error" from the Space.
     const callBody = {
       data: [
-        { path: personPath, meta: { _type: 'gradio.FileData' } },
+        // Human (ImageEditor format) — background is the person image
+        {
+          background: { path: personPath, meta: { _type: 'gradio.FileData' } },
+          layers: [],
+          composite: null,
+        },
+        // Garment (simple Image component) — just path + meta
         { path: garmentPath, meta: { _type: 'gradio.FileData' } },
+        // garment description
         garmentDes,
-        true,   // is_checked (auto-masking)
-        false,  // is_checked_crop
-        30,     // denoise_steps
-        42,     // seed
+        // is_checked (auto-masking)
+        true,
+        // is_checked_crop
+        false,
+        // denoise_steps
+        30,
+        // seed
+        42,
       ],
     }
+
+    console.log(`[hf-tryon] Manual: Calling /call/tryon with ImageEditor format`)
+    console.log(`[hf-tryon] Manual: Person path: ${personPath}`)
+    console.log(`[hf-tryon] Manual: Garment path: ${garmentPath}`)
 
     const callRes = await fetch(`${IDM_VTON_URL}/call/tryon`, {
       method: 'POST',
@@ -229,20 +288,14 @@ async function manualGradioTryOn(
     if (!callRes.ok) {
       const errText = await callRes.text().catch(() => 'unknown')
       console.error(`[hf-tryon] Manual: Call tryon failed ${callRes.status}: ${errText.substring(0, 300)}`)
-
-      // If "No person detected" or similar error, fail quickly
-      if (errText.includes('No person') || errText.includes('no person') || errText.includes('event: error')) {
-        return { success: false, strategy: 'manual-gradio', error: 'No person detected in the image. Please use a clear selfie with a visible person.' }
-      }
-
       return { success: false, strategy: 'manual-gradio', error: `Tryon call failed: ${callRes.status}` }
     }
 
     // Parse the event_id from the response
     const callResponseText = await callRes.text()
+    console.log(`[hf-tryon] Manual: Call response: ${callResponseText.substring(0, 300)}`)
     let eventId: string | null = null
 
-    // The response can be either JSON {"event_id": "..."} or SSE format "event: complete\ndata: ..."
     try {
       const callJson = JSON.parse(callResponseText)
       eventId = callJson.event_id
@@ -255,17 +308,6 @@ async function manualGradioTryOn(
     }
 
     if (!eventId) {
-      // The response might contain the result directly (SSE format)
-      if (callResponseText.includes('event: complete') || callResponseText.includes('event:complete')) {
-        // Try to extract the image URL from the SSE data
-        const urlMatch = callResponseText.match(/"url":\s*"([^"]+)"/)
-        if (urlMatch) {
-          const imageUrl = urlMatch[1]
-          console.log('[hf-tryon] Manual: Got result directly from call response')
-          return await downloadResultImage(imageUrl, 'manual-gradio')
-        }
-      }
-
       console.error(`[hf-tryon] Manual: Could not parse event_id from response: ${callResponseText.substring(0, 300)}`)
       return { success: false, strategy: 'manual-gradio', error: 'Could not parse tryon response' }
     }
@@ -311,37 +353,32 @@ async function manualGradioTryOn(
 
         // Check for complete event with result
         if (pollText.includes('event: complete') || pollText.includes('event:complete')) {
+          console.log(`[hf-tryon] Manual: Got complete event! Response length: ${pollText.length}`)
+
           // Extract image URL from the response
           // Format: event: complete\ndata: [{"path": "...", "url": "..."}, ...]
-          const urlMatch = pollText.match(/"url":\s*"([^"]+)"/g)
-          if (urlMatch && urlMatch.length > 0) {
+          const urlMatches = [...pollText.matchAll(/"url":\s*"([^"]+)"/g)]
+          if (urlMatches.length > 0) {
             // First URL is the try-on result, second is the masked image
-            const firstUrlMatch = urlMatch[0].match(/"url":\s*"([^"]+)"/)
-            if (firstUrlMatch) {
-              const imageUrl = firstUrlMatch[1]
-              console.log(`[hf-tryon] Manual: Got result image URL: ${imageUrl.substring(0, 100)}...`)
-              return await downloadResultImage(imageUrl, 'manual-gradio')
-            }
+            const imageUrl = urlMatches[0][1]
+            console.log(`[hf-tryon] Manual: Got result image URL: ${imageUrl.substring(0, 100)}...`)
+            return await downloadResultImage(imageUrl, 'manual-gradio')
           }
 
           // Try path-based URL
-          const pathMatch = pollText.match(/"path":\s*"([^"]+)"/g)
-          if (pathMatch && pathMatch.length > 0) {
-            const firstPathMatch = pathMatch[0].match(/"path":\s*"([^"]+)"/)
-            if (firstPathMatch) {
-              const imagePath = firstPathMatch[1]
-              const fullUrl = `${IDM_VTON_URL}/file=${imagePath}`
-              console.log(`[hf-tryon] Manual: Got result image path: ${imagePath}`)
-              return await downloadResultImage(fullUrl, 'manual-gradio')
-            }
+          const pathMatches = [...pollText.matchAll(/"path":\s*"([^"]+)"/g)]
+          if (pathMatches.length > 0) {
+            const imagePath = pathMatches[0][1]
+            const fullUrl = `${IDM_VTON_URL}/file=${imagePath}`
+            console.log(`[hf-tryon] Manual: Got result image path: ${imagePath}`)
+            return await downloadResultImage(fullUrl, 'manual-gradio')
           }
 
           console.error(`[hf-tryon] Manual: Could not extract image from complete event: ${pollText.substring(0, 500)}`)
           return { success: false, strategy: 'manual-gradio', error: 'Could not extract result image from tryon response' }
         }
 
-        // Still processing — heartbeat or generating event
-        // Continue polling
+        // Still processing — heartbeat or generating event, continue polling
       } catch (pollErr) {
         const errMsg = pollErr instanceof Error ? pollErr.message : String(pollErr)
         // ECONNRESET or socket errors are common during long polls — retry
@@ -407,6 +444,9 @@ async function downloadResultImage(url: string, strategy: string): Promise<HFTry
 // Uses the official @gradio/client library to connect to the Space.
 // This handles Space wake-up (sleeping → running) automatically.
 // However, it can produce "404: Session not found" errors.
+//
+// CRITICAL: The @gradio/client library handles the ImageEditor format
+// automatically when we pass the person image as a Blob for the first parameter.
 
 async function gradioClientTryOn(
   input: HFTryOnInput,
@@ -436,19 +476,25 @@ async function gradioClientTryOn(
     const garmentDes = getGarmentDescription(input.categorySlug, input.productName)
 
     // Call the tryon endpoint
+    // The @gradio/client library will handle the ImageEditor format
+    // automatically when we pass the blob for the first parameter.
     const result = await client.predict('/tryon', [
-      { data: personBlob, path: 'person.png', meta: { _type: 'gradio.FileData' } },
-      { data: garmentBlob, path: 'garment.png', meta: { _type: 'gradio.FileData' } },
-      garmentDes,
-      true,   // is_checked (auto-masking)
-      false,  // is_checked_crop
-      30,     // denoise_steps
-      42,     // seed
+      personBlob,    // Human image — client library handles ImageEditor format
+      garmentBlob,   // Garment image
+      garmentDes,    // Garment description
+      true,          // is_checked (auto-masking)
+      false,         // is_checked_crop
+      30,            // denoise_steps
+      42,            // seed
     ])
 
     // Extract the result image
     if (result?.data && Array.isArray(result.data) && result.data.length > 0) {
       const firstResult = result.data[0]
+      // The result can be a URL string, an object with url/path, or a FileData object
+      if (typeof firstResult === 'string') {
+        return await downloadResultImage(firstResult, 'gradio-client')
+      }
       if (firstResult?.url) {
         return await downloadResultImage(firstResult.url, 'gradio-client')
       }
@@ -456,8 +502,17 @@ async function gradioClientTryOn(
         const fullUrl = `${IDM_VTON_URL}/file=${firstResult.path}`
         return await downloadResultImage(fullUrl, 'gradio-client')
       }
+      // Check for image field (some versions return { image: { url: "..." } })
+      if (firstResult?.image?.url) {
+        return await downloadResultImage(firstResult.image.url, 'gradio-client')
+      }
+      if (firstResult?.image?.path) {
+        const fullUrl = `${IDM_VTON_URL}/file=${firstResult.image.path}`
+        return await downloadResultImage(fullUrl, 'gradio-client')
+      }
     }
 
+    console.error('[hf-tryon] Gradio client: Unexpected result format:', JSON.stringify(result?.data)?.substring(0, 300))
     return { success: false, strategy: 'gradio-client', error: 'No result image in response' }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
