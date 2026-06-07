@@ -206,40 +206,79 @@ export async function POST(request: NextRequest) {
     }
     const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64 || null
 
-    // ── Strategy 0: HuggingFace Free Inference (works from both sandbox and Vercel) ──
-    // This is a FREE fallback when ZAI is unavailable
+    // ── Strategy 0 (PRIMARY): HuggingFace IDM-VTON Virtual Try-On ──
+    // This is the PRIMARY strategy — a dedicated virtual try-on model that
+    // actually drapes the garment onto the person's image.
+    // Works from both sandbox and Vercel (no ZAI dependency).
+    // Always available since the Space is public.
     if (isHFAvailable() && finalProductImageBase64) {
-      console.log('[try-on] HuggingFace free inference available, trying as strategy')
+      console.log('[try-on] IDM-VTON virtual try-on available — PRIMARY strategy')
       try {
         const jobId = `hf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
         createJob(jobId, {
           categorySlug: clientCategorySlug || '',
           productName: clientProductName || '',
-          progress: 'Generating AI try-on with HuggingFace (free)...',
+          progress: 'Starting AI virtual try-on with IDM-VTON...',
+          pipelinePhase: 'hf-tryon',
         })
 
-        // Run HuggingFace in background
+        // Run HuggingFace IDM-VTON in background with progress callbacks
         ;(async () => {
           const job = getJob(jobId)
           if (!job) return
           try {
-            const result = await hfTryOn({
-              selfieData,
-              productImageBase64: finalProductImageBase64,
-              productName: clientProductName || 'Product',
-              categorySlug: clientCategorySlug || '',
-            })
+            const result = await hfTryOn(
+              {
+                selfieData,
+                productImageBase64: finalProductImageBase64,
+                productName: clientProductName || 'Product',
+                categorySlug: clientCategorySlug || '',
+              },
+              // Progress callback — updates the job for client polling
+              (message: string) => {
+                const j = getJob(jobId)
+                if (j) {
+                  j.progress = message
+                }
+              }
+            )
 
             if (result.success && result.imageUrl) {
               job.status = 'completed'
               job.imageUrl = result.imageUrl
               job.strategy = result.strategy
               job.progress = 'Complete!'
+              job.pipelinePhase = 'complete'
             } else {
-              // HF failed, try ZAI as next strategy
-              console.log('[try-on] HuggingFace failed, will try ZAI next:', result.error)
-              job.status = 'failed'
-              job.error = result.error || 'HuggingFace generation failed'
+              // IDM-VTON failed
+              console.log('[try-on] IDM-VTON failed:', result.error)
+
+              // If on Vercel or ZAI not available, fail with the error
+              // The client will fall back to canvas mode
+              if (isVercel || !(await isZAIAvailable()).available) {
+                job.status = 'failed'
+                job.error = result.error || 'IDM-VTON generation failed'
+              } else {
+                // Try ZAI pipeline as fallback
+                console.log('[try-on] IDM-VTON failed, falling back to ZAI pipeline')
+                job.progress = 'IDM-VTON unavailable, trying alternative AI...'
+                job.pipelinePhase = 'generation'
+
+                try {
+                  const { runPipeline } = await import('@/lib/try-on-pipeline')
+                  await runPipeline({
+                    jobId,
+                    productName: clientProductName || 'Product',
+                    categorySlug: clientCategorySlug || '',
+                    selfieData,
+                    productImageBase64: finalProductImageBase64,
+                    suggestionsPromise: Promise.resolve([]),
+                  })
+                } catch (pipelineErr) {
+                  job.status = 'failed'
+                  job.error = 'All AI strategies failed'
+                }
+              }
             }
           } catch (err) {
             job.status = 'failed'
@@ -255,7 +294,7 @@ export async function POST(request: NextRequest) {
           categorySlug: clientCategorySlug,
         })
       } catch (hfErr) {
-        console.error('[try-on] HuggingFace error:', hfErr)
+        console.error('[try-on] HuggingFace IDM-VTON error:', hfErr)
       }
     }
 

@@ -1026,7 +1026,7 @@ function TryOnDialog({
       }
 
       // Step 2: Poll for job completion (only when server returned a valid jobId)
-      const maxPolls = 40; // 40 polls × 3s = 120s max polling time
+      const maxPolls = 80; // 80 polls × 3s = 240s max polling time (IDM-VTON can take 3-4 min)
       let pollCount = 0;
 
       const pollJob = async (): Promise<void> => {
@@ -1050,7 +1050,8 @@ function TryOnDialog({
         else if (pollData.pipelinePhase === 'refinement') setGenerationProgress(80);
         else if (pollData.pipelinePhase === 'composite') setGenerationProgress(85);
         else if (pollData.pipelinePhase === 'watermark') setGenerationProgress(90);
-        else if (pollCount > 1) setGenerationProgress(Math.min(90, 30 + pollCount * 4));
+        else if (pollData.pipelinePhase === 'complete') setGenerationProgress(100);
+        else if (pollCount > 1) setGenerationProgress(Math.min(90, 25 + pollCount * 3));
 
         if (pollData.status === 'completed') {
           if (!pollData.imageUrl || pollData.strategy === 'canvas-fallback') {
