@@ -192,6 +192,7 @@ export function AuthDialog() {
             // Always show the OTP since email delivery may not work on Vercel
             if (data._otp) {
               setDisplayedOtp(data._otp)
+              setTwoFACode(data._otp) // Auto-fill the OTP for convenience
               showToast('info', `🔐 Your verification code: ${data._otp}`)
             }
           } else {
@@ -567,10 +568,10 @@ export function AuthDialog() {
 
                   {/* Show OTP code directly when available (email delivery may fail on cloud) */}
                   {displayedOtp && (
-                    <div className="w-full rounded-lg border border-amber-600/40 bg-amber-900/20 p-3 text-center">
-                      <p className="text-xs text-amber-200/50 mb-1">Your verification code:</p>
-                      <p className="text-2xl font-bold tracking-[0.3em] text-amber-400 font-mono">{displayedOtp}</p>
-                      <p className="text-[10px] text-amber-200/30 mt-1">Enter this code above to verify</p>
+                    <div className="w-full rounded-lg border-2 border-amber-500/60 bg-amber-900/30 p-4 text-center shadow-lg shadow-amber-900/20">
+                      <p className="text-xs text-amber-200/60 mb-1.5 font-medium uppercase tracking-wider">Your Verification Code</p>
+                      <p className="text-3xl font-bold tracking-[0.4em] text-amber-300 font-mono">{displayedOtp}</p>
+                      <p className="text-[11px] text-amber-200/40 mt-2">Enter this 6-digit code in the fields above to verify your identity</p>
                     </div>
                   )}
 
@@ -664,7 +665,11 @@ export function AuthDialog() {
                           const data = await res.json()
                           if (data._otp) {
                             setDisplayedOtp(data._otp)
+                            setTwoFACode(data._otp) // Auto-fill the new OTP
                             showToast('info', `🔐 Your new verification code: ${data._otp}`)
+                          }
+                          if (data._otpToken) {
+                            setPendingOtpToken(data._otpToken)
                           }
                           if (data.success) {
                             showToast('success', 'A new verification code has been sent to your email.')

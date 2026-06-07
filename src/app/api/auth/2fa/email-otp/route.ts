@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import jwt from 'jsonwebtoken';
 import { db } from '@/lib/db';
 import { setOtp, DEMO_USER_MAP } from '@/lib/demo-otp-store';
 import { send2FAEmailWithDetails } from '@/lib/email';
+
+const JWT_SECRET = process.env.JWT_SECRET || '3boxes-secret-key';
 
 /**
  * Send (or resend) an email-based OTP for 2FA verification.
@@ -86,6 +89,14 @@ export async function POST(request: NextRequest) {
       ? targetEmail.replace(/(.{2})(.*)(@.*)/, '$1***$3')
       : 'your email';
 
+    // Generate a short-lived JWT that carries the OTP so verification
+    // works even on Vercel serverless (where in-memory store is wiped between invocations)
+    const otpToken = jwt.sign(
+      { type: 'otp-verify', userId: userId || email, otp, role: 'admin' },
+      JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+
     return NextResponse.json({
       success: true,
       message: `A verification code has been sent to ${maskedEmail}`,
@@ -93,6 +104,7 @@ export async function POST(request: NextRequest) {
       // Always include OTP in response since email delivery
       // may not be configured on Vercel/cloud environments
       _otp: otp,
+      _otpToken: otpToken,
     });
   } catch (error) {
     console.error('Email OTP send error:', error);
