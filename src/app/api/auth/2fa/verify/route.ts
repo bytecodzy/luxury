@@ -64,7 +64,7 @@ function base32Decode(str: string): Buffer {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { code, enable, userId, method } = body;
+    const { code, enable, userId, method, otpToken } = body;
 
     if (!code) {
       return NextResponse.json(
@@ -82,14 +82,31 @@ export async function POST(request: NextRequest) {
         let verified = false;
         let user: Awaited<ReturnType<typeof db.user.findUnique>> = null;
 
-        // For demo users: check in-memory OTP store first
-        if (userId.startsWith('demo-')) {
+        // Method 1: Check OTP token (JWT-based — works on Vercel serverless)
+        // This is the primary method for Vercel since in-memory store
+        // doesn't persist across serverless invocations
+        if (otpToken) {
+          try {
+            const decoded = jwt.verify(otpToken, JWT_SECRET) as { type: string; userId: string; otp: string; role: string };
+            if (decoded.type === 'otp-verify' && decoded.userId === userId && decoded.otp === code) {
+              verified = true;
+              console.log('[2FA Verify] ✅ Verified via OTP token for:', userId);
+            }
+          } catch (tokenErr) {
+            console.warn('[2FA Verify] OTP token verification failed:', tokenErr instanceof Error ? tokenErr.message : tokenErr);
+          }
+        }
+
+        // Method 2: For demo users: check in-memory OTP store
+        if (!verified && userId.startsWith('demo-')) {
           const result = verifyOtp(userId, code);
           if (result.valid) {
             verified = true;
           }
-        } else {
-          // For real DB users: check DB for OTP
+        }
+
+        // Method 3: For real DB users: check DB for OTP
+        if (!verified && !userId.startsWith('demo-')) {
           try {
             user = await db.user.findUnique({ where: { id: userId } });
             if (user && user.otpCode && user.otpExpiry) {
@@ -117,6 +134,15 @@ export async function POST(request: NextRequest) {
             { error: 'Invalid or expired verification code. Please try again.' },
             { status: 401 }
           );
+        }
+
+        // If verified via OTP token but user not yet fetched from DB, fetch now
+        if (!user && !userId.startsWith('demo-')) {
+          try {
+            user = await db.user.findUnique({ where: { id: userId } });
+          } catch (dbErr) {
+            console.warn('[2FA Verify] DB lookup after token verify failed:', dbErr);
+          }
         }
 
         // If user found in DB, use DB user data for session creation

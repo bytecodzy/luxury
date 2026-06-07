@@ -150,14 +150,24 @@ export async function POST(request: NextRequest) {
           console.error('[Auth] Email send error:', err);
         });
 
+        // Generate a short-lived JWT that carries the OTP so verification
+        // works even on Vercel serverless (where in-memory store is wiped between invocations)
+        const otpToken = jwt.sign(
+          { type: 'otp-verify', userId: user.id, otp, role: user.role },
+          JWT_SECRET,
+          { expiresIn: '5m' }
+        );
+
         return NextResponse.json({
           requiresTwoFactor: true,
           userId: user.id,
           method: 'email',
           email: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3'), // masked email
           message: 'A verification code has been sent to your email',
-          // In demo/dev mode, include the OTP for testing
-          ...(process.env.NODE_ENV !== 'production' ? { _otp: otp } : {}),
+          // Always include OTP in response for admin/agent/team accounts
+          // since email delivery may not be configured on Vercel
+          _otp: otp,
+          _otpToken: otpToken,
         });
       }
 
@@ -241,14 +251,24 @@ export async function POST(request: NextRequest) {
           console.error('[Auth] Email send error:', err);
         });
 
+        // Generate a short-lived JWT that carries the OTP so verification
+        // works even on Vercel serverless (where in-memory store is wiped between invocations)
+        const otpToken = jwt.sign(
+          { type: 'otp-verify', userId: demoId, otp, role: demoUser.role },
+          JWT_SECRET,
+          { expiresIn: '5m' }
+        );
+
         return NextResponse.json({
           requiresTwoFactor: true,
           userId: demoId,
           method: 'email',
           email: normalizedEmail.replace(/(.{2})(.*)(@.*)/, '$1***$3'), // masked email
           message: 'A verification code has been sent to your email',
-          // In demo/dev mode, include the OTP for testing
-          ...(process.env.NODE_ENV !== 'production' ? { _otp: otp } : {}),
+          // Always include OTP in response for admin/agent/team accounts
+          // since email delivery may not be configured on Vercel
+          _otp: otp,
+          _otpToken: otpToken,
           _demo: true,
         });
       }

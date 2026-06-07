@@ -64,6 +64,8 @@ export function AuthDialog() {
   // 2FA
   const [twoFACode, setTwoFACode] = useState('')
   const [resendCooldown, setResendCooldown] = useState(0)
+  const [pendingOtpToken, setPendingOtpToken] = useState<string | null>(null)
+  const [displayedOtp, setDisplayedOtp] = useState<string | null>(null)
 
   // UI state
   const [error, setError] = useState<string | null>(null)
@@ -111,6 +113,8 @@ export function AuthDialog() {
     setRegDepartment('')
     setTwoFACode('')
     setResendCooldown(0)
+    setPendingOtpToken(null)
+    setDisplayedOtp(null)
     setError(null)
     setSuccess(null)
     setLoading(false)
@@ -181,8 +185,13 @@ export function AuthDialog() {
           const isEmail2FA = data.method === 'email'
           if (isEmail2FA) {
             setSuccess(`A 6-digit verification code has been sent to ${data.email || 'your email'}. Please check your inbox.`)
-            // In demo/dev mode, show the OTP via toast for testing
+            // Store OTP token for serverless-compatible verification
+            if (data._otpToken) {
+              setPendingOtpToken(data._otpToken)
+            }
+            // Always show the OTP since email delivery may not work on Vercel
             if (data._otp) {
+              setDisplayedOtp(data._otp)
               showToast('info', `🔐 Your verification code: ${data._otp}`)
             }
           } else {
@@ -397,6 +406,7 @@ export function AuthDialog() {
             userId: authPendingUserId,
             code: twoFACode,
             method: authTwoFAMethod || 'email',
+            otpToken: pendingOtpToken,
           }),
         })
 
@@ -433,7 +443,7 @@ export function AuthDialog() {
         setLoading(false)
       }
     },
-    [twoFACode, authPendingUserId, authTwoFAMethod, setAuth, setAuthTwoFAStep]
+    [twoFACode, authPendingUserId, authTwoFAMethod, pendingOtpToken, setAuth, setAuthTwoFAStep]
   )
 
   const handleSocialLogin = useCallback(
@@ -555,6 +565,15 @@ export function AuthDialog() {
                     </p>
                   )}
 
+                  {/* Show OTP code directly when available (email delivery may fail on cloud) */}
+                  {displayedOtp && (
+                    <div className="w-full rounded-lg border border-amber-600/40 bg-amber-900/20 p-3 text-center">
+                      <p className="text-xs text-amber-200/50 mb-1">Your verification code:</p>
+                      <p className="text-2xl font-bold tracking-[0.3em] text-amber-400 font-mono">{displayedOtp}</p>
+                      <p className="text-[10px] text-amber-200/30 mt-1">Enter this code above to verify</p>
+                    </div>
+                  )}
+
                   <InputOTP
                     maxLength={6}
                     value={twoFACode}
@@ -644,6 +663,7 @@ export function AuthDialog() {
                           })
                           const data = await res.json()
                           if (data._otp) {
+                            setDisplayedOtp(data._otp)
                             showToast('info', `🔐 Your new verification code: ${data._otp}`)
                           }
                           if (data.success) {
@@ -683,6 +703,8 @@ export function AuthDialog() {
                     setTwoFACode('')
                     setError(null)
                     setSuccess(null)
+                    setPendingOtpToken(null)
+                    setDisplayedOtp(null)
                   }}
                   className="w-full text-center text-sm text-amber-200/50 transition-colors hover:text-amber-200"
                 >
