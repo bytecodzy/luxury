@@ -34,6 +34,7 @@ import {
   Zap,
   ShieldCheck,
   Clock,
+  Share2,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 
@@ -1173,17 +1174,32 @@ export function TryOnDialog({
                   </Button>
                 </div>
 
-                {/* Share to Influencer Section */}
-                {onShareToInfluencer && watermarkedResult && (
+                {/* Share to AI Style Gallery — ALWAYS visible after generation */}
+                <div className="rounded-xl border border-amber-600/30 bg-gradient-to-r from-amber-900/20 via-rose-900/15 to-amber-900/20 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Share2 className="h-4 w-4 text-amber-400" />
+                    <p className="text-sm font-semibold text-amber-200">Share Your Style</p>
+                  </div>
+                  <p className="text-xs text-amber-200/50">
+                    Love this look? Share it to the AI Style Gallery so other shoppers can see how it looks!
+                  </p>
                   <Button
-                    onClick={() => onShareToInfluencer(watermarkedResult)}
-                    variant="outline"
-                    className="w-full border-amber-600/30 text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 gap-2"
+                    onClick={() => {
+                      const imageToShare = watermarkedResult || resultImage;
+                      if (imageToShare && onShareToInfluencer) {
+                        onShareToInfluencer(imageToShare);
+                      }
+                    }}
+                    className="w-full bg-amber-600 hover:bg-amber-500 text-stone-950 font-semibold gap-2"
+                    size="sm"
                   >
-                    <Sparkles className="h-4 w-4" />
+                    <Share2 className="h-4 w-4" />
                     Share to AI Style Gallery
                   </Button>
-                )}
+                  <p className="text-[10px] text-amber-200/30 text-center">
+                    By sharing, you consent to your AI-generated image being visible to other shoppers
+                  </p>
+                </div>
 
                 {/* Disclaimer */}
                 <p className="text-center text-xs text-amber-200/30">

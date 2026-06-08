@@ -155,9 +155,9 @@ async function tryZAIImageEdit(
     let bodyType = 'Professional fashion photograph, upper body'
     let placement = 'wearing the product'
 
-    if (cat.includes('saree')) {
-      bodyType = 'Full-body professional fashion photograph'
-      placement = 'draped in the saree in traditional Indian style with pallu over the left shoulder'
+    if (cat.includes('saree') || cat.includes('lehenga')) {
+      bodyType = 'Full-body professional fashion photograph of an Indian woman, standing pose, well-lit studio'
+      placement = 'wearing the saree draped elegantly in traditional Indian style with pallu gracefully draped over the left shoulder, pleats at the waist, the saree fabric flowing naturally. The person\'s face, skin tone, and hair MUST remain exactly the same as the original photo'
     } else if (cat.includes('fashion') || cat.includes('dress')) {
       bodyType = 'Full-body professional fashion photograph'
       placement = 'wearing the outfit'
@@ -288,58 +288,128 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // ── Strategy 1: HuggingFace IDM-VTON (all 3 sub-strategies) ────────
-  const hfTimeout = Math.min(HF_TRYON_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 5000)
-  if (hfTimeout > 10000) {
-    console.log(`[try-on] Strategy 1: HuggingFace (timeout: ${hfTimeout}ms)`)
+  // ── Category-aware strategy selection ────────────────────────────
+  // IDM-VTON only works with FLAT garment images (shirts, tops, etc).
+  // For sarees, lehengas, and full-body outfits, the product image is
+  // typically a model wearing the garment — IDM-VTON cannot process these.
+  // So for saree/full-body categories, we try ZAI FIRST (it uses LLM-based
+  // image generation which understands "drape this saree").
+  const cat = (categorySlug || '').toLowerCase()
+  const isFullBodyCategory = cat.includes('saree') || cat.includes('lehenga') || cat.includes('women-fashion') || cat.includes('dress') || cat.includes('gown') || cat.includes('salwar') || cat.includes('kurta')
 
-    const hfResult = await tryHuggingFace(
-      selfieData,
-      finalProductImageBase64,
-      productName || 'Product',
-      categorySlug || '',
-      hfTimeout,
-    )
+  if (isFullBodyCategory) {
+    // ── For sarees/full-body: ZAI first, HuggingFace second ────────
+    console.log(`[try-on] Full-body category detected (${categorySlug}): trying ZAI first`)
 
-    if (hfResult) {
-      console.log(`[try-on] HuggingFace success! Strategy: ${hfResult.strategy} (${Date.now() - pipelineStart}ms)`)
-      return NextResponse.json({
-        success: true,
-        imageUrl: hfResult.imageUrl,
-        strategy: hfResult.strategy,
-        productName,
-        categorySlug,
-      })
+    // Strategy 1 (for sarees): ZAI Image Edit
+    const zaiTimeout = Math.min(ZAI_EDIT_TIMEOUT_MS + 10000, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 5000)
+    if (zaiTimeout > 5000) {
+      console.log(`[try-on] Strategy 1 (saree): ZAI Image Edit (timeout: ${zaiTimeout}ms)`)
+
+      const zaiResult = await tryZAIImageEdit(
+        selfieData,
+        finalProductImageBase64,
+        productName || 'Product',
+        categorySlug || '',
+        zaiTimeout,
+      )
+
+      if (zaiResult) {
+        console.log(`[try-on] ZAI success! Strategy: ${zaiResult.strategy} (${Date.now() - pipelineStart}ms)`)
+        return NextResponse.json({
+          success: true,
+          imageUrl: zaiResult.imageUrl,
+          strategy: zaiResult.strategy,
+          productName,
+          categorySlug,
+        })
+      }
+
+      console.log(`[try-on] ZAI failed (${Date.now() - pipelineStart}ms elapsed)`)
     }
 
-    console.log(`[try-on] HuggingFace failed (${Date.now() - pipelineStart}ms elapsed)`)
-  }
+    // Strategy 2 (for sarees): HuggingFace IDM-VTON
+    const hfTimeout = Math.min(HF_TRYON_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 3000)
+    if (hfTimeout > 10000) {
+      console.log(`[try-on] Strategy 2 (saree): HuggingFace (timeout: ${hfTimeout}ms)`)
 
-  // ── Strategy 2: ZAI Image Edit ──────────────────────────────────
-  const zaiTimeout = Math.min(ZAI_EDIT_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 3000)
-  if (zaiTimeout > 5000) {
-    console.log(`[try-on] Strategy 2: ZAI Image Edit (timeout: ${zaiTimeout}ms)`)
+      const hfResult = await tryHuggingFace(
+        selfieData,
+        finalProductImageBase64,
+        productName || 'Product',
+        categorySlug || '',
+        hfTimeout,
+      )
 
-    const zaiResult = await tryZAIImageEdit(
-      selfieData,
-      finalProductImageBase64,
-      productName || 'Product',
-      categorySlug || '',
-      zaiTimeout,
-    )
+      if (hfResult) {
+        console.log(`[try-on] HuggingFace success! Strategy: ${hfResult.strategy} (${Date.now() - pipelineStart}ms)`)
+        return NextResponse.json({
+          success: true,
+          imageUrl: hfResult.imageUrl,
+          strategy: hfResult.strategy,
+          productName,
+          categorySlug,
+        })
+      }
 
-    if (zaiResult) {
-      console.log(`[try-on] ZAI success! Strategy: ${zaiResult.strategy} (${Date.now() - pipelineStart}ms)`)
-      return NextResponse.json({
-        success: true,
-        imageUrl: zaiResult.imageUrl,
-        strategy: zaiResult.strategy,
-        productName,
-        categorySlug,
-      })
+      console.log(`[try-on] HuggingFace failed (${Date.now() - pipelineStart}ms elapsed)`)
+    }
+  } else {
+    // ── For shirts/jewelry/etc: HuggingFace first, ZAI second ───────
+
+    // Strategy 1: HuggingFace IDM-VTON (all 3 sub-strategies)
+    const hfTimeout = Math.min(HF_TRYON_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 5000)
+    if (hfTimeout > 10000) {
+      console.log(`[try-on] Strategy 1: HuggingFace (timeout: ${hfTimeout}ms)`)
+
+      const hfResult = await tryHuggingFace(
+        selfieData,
+        finalProductImageBase64,
+        productName || 'Product',
+        categorySlug || '',
+        hfTimeout,
+      )
+
+      if (hfResult) {
+        console.log(`[try-on] HuggingFace success! Strategy: ${hfResult.strategy} (${Date.now() - pipelineStart}ms)`)
+        return NextResponse.json({
+          success: true,
+          imageUrl: hfResult.imageUrl,
+          strategy: hfResult.strategy,
+          productName,
+          categorySlug,
+        })
+      }
+
+      console.log(`[try-on] HuggingFace failed (${Date.now() - pipelineStart}ms elapsed)`)
     }
 
-    console.log(`[try-on] ZAI failed (${Date.now() - pipelineStart}ms elapsed)`)
+    // Strategy 2: ZAI Image Edit
+    const zaiTimeout = Math.min(ZAI_EDIT_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 3000)
+    if (zaiTimeout > 5000) {
+      console.log(`[try-on] Strategy 2: ZAI Image Edit (timeout: ${zaiTimeout}ms)`)
+
+      const zaiResult = await tryZAIImageEdit(
+        selfieData,
+        finalProductImageBase64,
+        productName || 'Product',
+        categorySlug || '',
+        zaiTimeout,
+      )
+
+      if (zaiResult) {
+        console.log(`[try-on] ZAI success! Strategy: ${zaiResult.strategy} (${Date.now() - pipelineStart}ms)`)
+        return NextResponse.json({
+          success: true,
+          imageUrl: zaiResult.imageUrl,
+          strategy: zaiResult.strategy,
+          productName,
+          categorySlug,
+        })
+      }
+
+      console.log(`[try-on] ZAI failed (${Date.now() - pipelineStart}ms elapsed)`)
+    }
   }
 
   // ── All AI strategies failed — return canvas mode ────────────────
