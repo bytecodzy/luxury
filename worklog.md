@@ -142,3 +142,29 @@ Stage Summary:
 - Admin verification code works: OTP auto-displayed and auto-filled on 2FA screen
 - Resend flow fixed: returns both _otp and _otpToken
 - Vercel URL: https://3boxes-luxury-v12.vercel.app/
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix HMR errors, try-on 60s timeout, friendly "try later" message, extract TryOnDialog to standalone component
+
+Work Log:
+- Identified root cause of HMR errors: 2467-line product-detail.tsx with massive inline TryOnDialog (1665 lines)
+- Created enhanced standalone try-on-dialog.tsx with all features from inline version
+- Added 60-second global timeout with friendly "try later" message (timeout step)
+- Added "Show Style Overlay" button as fallback option in timeout view
+- Enhanced canvas fallback with multiply blend mode for clothing categories
+- Added disclaimer acceptance flow, camera capture, image moderation
+- Added elapsed time display during generation
+- Added educational facts auto-rotation during generation
+- Refactored product-detail.tsx to use standalone TryOnDialog component
+- Reduced product-detail.tsx from 2464 to 799 lines (removed 1665 lines of duplicate code)
+- Fixed HMR module factory errors by reducing file complexity
+- Pushed all changes to GitHub for Vercel deployment
+- Verified with Agent Browser: page loads, product detail works, try-on dialog opens, no errors
+
+Stage Summary:
+- HMR errors FIXED by extracting TryOnDialog to standalone component
+- 60-second timeout with friendly "try later" message IMPLEMENTED
+- Canvas fallback IMPROVED with multiply blend mode for clothing
+- Changes PUSHED to GitHub (commit 6f19572) for Vercel deployment
+- Browser verification: 0 errors, dialog works correctly
