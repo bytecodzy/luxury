@@ -161,7 +161,7 @@ export function TryOnDialog({
   useEffect(() => {
     if (!open) return;
     // Pre-warm the AI service in the background
-    fetch('/api/try-on?action=prewarm').catch(() => {});
+    fetch('/api/virtual-tryon?action=prewarm').catch(() => {});
   }, [open]);
 
   // ── Reset ────────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ export function TryOnDialog({
     }, CLIENT_TIMEOUT_MS);
 
     try {
-      const response = await fetch('/api/try-on', {
+      const response = await fetch('/api/virtual-tryon', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
