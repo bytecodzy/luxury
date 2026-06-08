@@ -4,9 +4,9 @@ import { NextRequest, NextResponse } from 'next/server'
 export const maxDuration = 60
 
 // ── Hard timeout constants ──────────────────────────────────────────
-const TOTAL_HARD_TIMEOUT_MS = 50_000 // 50 seconds — hard server timeout (leaves 10s buffer for Vercel)
-const IDM_VTON_TIMEOUT_MS = 30_000  // 30 seconds for IDM-VTON (most of the time it takes 15-25s)
-const ZAI_EDIT_TIMEOUT_MS = 20_000  // 20 seconds for ZAI image edit
+const TOTAL_HARD_TIMEOUT_MS = 55_000 // 55 seconds — hard server timeout (leaves 5s buffer for Vercel)
+const IDM_VTON_TIMEOUT_MS = 35_000  // 35 seconds for IDM-VTON (most of the time it takes 15-25s)
+const ZAI_EDIT_TIMEOUT_MS = 25_000  // 25 seconds for ZAI image edit
 
 // ── Product image helpers ──────────────────────────────────────────
 
@@ -450,7 +450,7 @@ async function tryZAIImageEdit(
           { url: selfieData },
           { url: productImageBase64 },
         ],
-        size: '768x1344',
+        size: '1024x1536',
       } as any),
       new Promise<null>(r => setTimeout(() => r(null), hardTimeoutMs)),
     ])
@@ -470,7 +470,7 @@ async function tryZAIImageEdit(
       zai.images.generations.edit({
         prompt,
         images: [{ url: selfieData }],
-        size: '768x1344',
+        size: '1024x1536',
       } as any),
       new Promise<null>(r => setTimeout(() => r(null), 15000)),
     ])

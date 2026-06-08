@@ -35,7 +35,6 @@ import {
   ShieldCheck,
   Clock,
 } from 'lucide-react';
-import Image from 'next/image';
 import { Checkbox } from '@/components/ui/checkbox';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -935,12 +934,10 @@ export function TryOnDialog({
                 {/* Product Preview */}
                 <div className="flex items-center gap-3 rounded-lg border border-amber-900/20 bg-stone-900/60 p-3">
                   <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md">
-                    <Image
+                    <img
                       src={productImage}
                       alt={productName}
-                      fill
-                      className="object-cover"
-                      sizes="56px"
+                      className="absolute inset-0 h-full w-full object-cover"
                     />
                   </div>
                   <div>
@@ -999,12 +996,10 @@ export function TryOnDialog({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
                     {selfiePreview && (
-                      <Image
+                      <img
                         src={selfiePreview}
                         alt="Your selfie"
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 640px) 50vw, 240px"
+                        className="absolute inset-0 h-full w-full object-cover"
                       />
                     )}
                     <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
@@ -1012,12 +1007,10 @@ export function TryOnDialog({
                     </div>
                   </div>
                   <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
-                    <Image
+                    <img
                       src={productImage}
                       alt={productName}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 640px) 50vw, 240px"
+                      className="absolute inset-0 h-full w-full object-cover"
                     />
                     <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
                       Product
@@ -1143,12 +1136,10 @@ export function TryOnDialog({
               >
                 {/* Result image — show watermarked version */}
                 <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
-                  <Image
+                  <img
                     src={watermarkedResult || resultImage!}
                     alt={`${productName} virtual try-on`}
-                    fill
-                    className="object-cover"
-                    sizes="(max-width: 640px) 100vw, 480px"
+                    className="absolute inset-0 h-full w-full object-contain"
                   />
                   <div className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-amber-300 flex items-center gap-1">
                     <Sparkles className="h-3 w-3" /> AI Try-On

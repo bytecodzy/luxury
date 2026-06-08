@@ -37,3 +37,27 @@ Stage Summary:
 - Selfie preview: Instant (no 30-second delay)
 - Timeout: 55s client-side hard limit with friendly message
 - Full body output: IDM-VTON uses is_checked_crop=false to preserve full image
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix AI Virtual Try-On feature bugs
+
+Work Log:
+- Cleared .next cache to fix progress.tsx HMR "module factory not available" error
+- Read all key files: progress.tsx, product-detail.tsx, try-on-dialog.tsx, route.ts, huggingface-tryon.ts, zai.ts
+- Identified that Next.js `<Image>` component doesn't work reliably with data URLs (selfie preview, result images)
+- Replaced all `<Image>` usages with native `<img>` tags for data URL images in try-on-dialog.tsx
+- Changed result image from `object-cover` to `object-contain` to prevent cropping (half-image fix)
+- Increased IDM-VTON timeout from 30s to 35s for better success rate
+- Increased ZAI edit timeout from 20s to 25s
+- Increased total hard timeout from 50s to 55s
+- Changed ZAI image size from 768x1344 to 1024x1536 for higher quality full-body output
+- Verified with Agent Browser: dialog opens, disclaimer one-click flow works, instant selfie preview, try-on generates result, download/try-again buttons work
+- No console errors during the try-on flow
+
+Stage Summary:
+- Fixed HMR error by clearing .next cache (not a code issue, was cache corruption)
+- Fixed image rendering by switching from Next.js `<Image>` to native `<img>` for data URLs
+- All requested features already implemented: instant selfie preview, one-click disclaimer flow, 55s timeout with friendly message, 3BOXES watermark on all output, canvas fallback
+- Improved timeout values and image dimensions for better results
+- Try-on verified working end-to-end via Agent Browser
