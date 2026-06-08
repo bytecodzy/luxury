@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { hfTryOn, type HFTryOnInput } from '@/lib/huggingface-tryon'
 
 // Maximum duration for Vercel serverless function (Pro plan = 60s)
 export const maxDuration = 60
 
 // ── Hard timeout constants ──────────────────────────────────────────
 const TOTAL_HARD_TIMEOUT_MS = 55_000 // 55 seconds — hard server timeout (leaves 5s buffer for Vercel)
-const IDM_VTON_TIMEOUT_MS = 35_000  // 35 seconds for IDM-VTON (most of the time it takes 15-25s)
+const HF_TRYON_TIMEOUT_MS = 35_000  // 35 seconds for HuggingFace try-on (includes all 3 strategies)
 const ZAI_EDIT_TIMEOUT_MS = 25_000  // 25 seconds for ZAI image edit
 
 // ── Product image helpers ──────────────────────────────────────────
@@ -93,308 +94,45 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
   }
 }
 
-// ── Data URL Helpers ────────────────────────────────────────────────
+// ── Strategy 1: HuggingFace IDM-VTON (all 3 sub-strategies) ──────────
+// Uses hfTryOn() from huggingface-tryon.ts which tries:
+//   1. Manual Gradio REST API (most reliable)
+//   2. @gradio/client (handles Space wake-up)
+//   3. HuggingFace Inference API (always available, lower quality)
 
-function dataUrlToBase64(dataUrl: string): string {
-  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
-  return match ? match[1] : dataUrl
-}
-
-function getMimeType(dataUrl: string): string {
-  const match = dataUrl.match(/^data:(image\/[^;]+);base64,/)
-  return match ? match[1] : 'image/png'
-}
-
-// ── Strategy 1: IDM-VTON HuggingFace Space ─────────────────────────
-
-const IDM_VTON_URL = 'https://yisol-idm-vton.hf.space'
-
-function getGarmentDescription(categorySlug: string, productName: string): string {
-  const cat = (categorySlug || '').toLowerCase()
-  const name = (productName || '').toLowerCase()
-
-  if (cat.includes('saree') || cat.includes('women-saree'))
-    return `A beautiful saree - ${productName}. Traditional Indian garment with elegant drape.`
-  if (cat.includes('jewel') || cat.includes('women-jewel')) {
-    if (name.includes('earring') || name.includes('jhumka')) return `Elegant earrings - ${productName}`
-    if (name.includes('necklace') || name.includes('pendant') || name.includes('choker')) return `Beautiful necklace - ${productName}`
-    if (name.includes('bracelet') || name.includes('bangle') || name.includes('kada')) return `Elegant bracelet - ${productName}`
-    if (name.includes('ring')) return `Beautiful ring - ${productName}`
-    return `Jewelry piece - ${productName}`
-  }
-  if (cat.includes('watch')) return `Luxury watch - ${productName}`
-  if (cat.includes('shirt') || cat.includes('tshirt') || cat.includes('t-shirt'))
-    return `A shirt - ${productName}. Well-fitted casual wear.`
-  if (cat.includes('fashion') || cat.includes('dress') || cat.includes('women-fashion'))
-    return `A fashion outfit - ${productName}. Stylish and well-fitted.`
-  return `A garment - ${productName}`
-}
-
-async function uploadImageToSpace(
-  imageDataUrl: string,
-  filename: string,
-  headers: Record<string, string>,
-): Promise<string> {
-  const base64 = dataUrlToBase64(imageDataUrl)
-  const mime = getMimeType(imageDataUrl)
-  const ext = mime.split('/')[1] || 'png'
-  const buffer = Buffer.from(base64, 'base64')
-
-  const formData = new FormData()
-  formData.append('files', new Blob([new Uint8Array(buffer)], { type: mime }), `${filename}.${ext}`)
-
-  const uploadRes = await fetch(`${IDM_VTON_URL}/upload`, {
-    method: 'POST',
-    headers,
-    body: formData,
-    signal: AbortSignal.timeout(30000),
-  })
-
-  if (!uploadRes.ok) {
-    const errText = await uploadRes.text().catch(() => 'unknown')
-    throw new Error(`Upload failed (${uploadRes.status}): ${errText.substring(0, 200)}`)
-  }
-
-  const contentType = uploadRes.headers.get('content-type') || ''
-  let paths: string[]
-
-  if (contentType.includes('json')) {
-    paths = await uploadRes.json()
-  } else {
-    const responseText = await uploadRes.text()
-    try {
-      paths = JSON.parse(responseText)
-    } catch {
-      if (responseText.startsWith('/tmp/') || responseText.startsWith('/')) {
-        return responseText
-      }
-      throw new Error(`Unexpected upload response: ${responseText.substring(0, 200)}`)
-    }
-  }
-
-  if (!Array.isArray(paths) || paths.length === 0) {
-    throw new Error('Upload returned empty paths array')
-  }
-
-  return paths[0]
-}
-
-async function downloadResultImage(url: string): Promise<string | null> {
-  try {
-    const headers: Record<string, string> = {
-      'User-Agent': '3BOXES-IDM-VTON/1.0',
-    }
-    const token = process.env.HF_API_TOKEN
-    if (token) headers['Authorization'] = `Bearer ${token}`
-
-    const downloadRes = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(30000),
-    })
-
-    if (!downloadRes.ok) return null
-
-    const contentType = downloadRes.headers.get('content-type') || 'image/png'
-    const mimeType = contentType.split(';')[0].trim()
-
-    if (mimeType.startsWith('image/')) {
-      const buffer = Buffer.from(await downloadRes.arrayBuffer())
-      return `data:${mimeType};base64,${buffer.toString('base64')}`
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-/**
- * Strategy 1: IDM-VTON virtual try-on with HARD timeout.
- * Returns the result image as base64 data URL, or null if it fails/times out.
- */
-async function tryIDMVTON(
+async function tryHuggingFace(
   selfieData: string,
   productImageBase64: string,
   productName: string,
   categorySlug: string,
   hardTimeoutMs: number,
 ): Promise<{ imageUrl: string; strategy: string } | null> {
-  const startTime = Date.now()
-
-  const token = process.env.HF_API_TOKEN
-  const headers: Record<string, string> = {
-    'User-Agent': '3BOXES-IDM-VTON/1.0',
-  }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-
   try {
-    // Step 1: Upload person image
-    let personPath: string
-    try {
-      personPath = await uploadImageToSpace(selfieData, 'person', headers)
-      console.log(`[try-on] IDM-VTON: Person uploaded to: ${personPath}`)
-    } catch (uploadErr) {
-      console.error(`[try-on] IDM-VTON: Person upload failed:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr))
-      return null
+    console.log(`[try-on] HuggingFace: Starting with ${hardTimeoutMs}ms timeout`)
+
+    const input: HFTryOnInput = {
+      selfieData,
+      productImageBase64,
+      productName,
+      categorySlug,
     }
 
-    if (Date.now() - startTime > hardTimeoutMs) {
-      console.log('[try-on] IDM-VTON: Timed out after person upload')
-      return null
+    // Race hfTryOn against the hard timeout
+    const result = await Promise.race([
+      hfTryOn(input, (msg) => console.log(`[try-on] HuggingFace: ${msg}`)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), hardTimeoutMs)),
+    ])
+
+    if (result?.success && result.imageUrl) {
+      console.log(`[try-on] HuggingFace success! Strategy: ${result.strategy}`)
+      return { imageUrl: result.imageUrl, strategy: result.strategy }
     }
 
-    // Step 2: Upload garment image
-    let garmentPath: string
-    try {
-      garmentPath = await uploadImageToSpace(productImageBase64, 'garment', headers)
-      console.log(`[try-on] IDM-VTON: Garment uploaded to: ${garmentPath}`)
-    } catch (uploadErr) {
-      console.error(`[try-on] IDM-VTON: Garment upload failed:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr))
-      return null
-    }
-
-    if (Date.now() - startTime > hardTimeoutMs) {
-      console.log('[try-on] IDM-VTON: Timed out after garment upload')
-      return null
-    }
-
-    // Step 3: Call the tryon endpoint
-    const garmentDes = getGarmentDescription(categorySlug, productName)
-
-    const callBody = {
-      data: [
-        // Human (ImageEditor format) — background is the person image
-        {
-          background: { path: personPath, meta: { _type: 'gradio.FileData' } },
-          layers: [],
-          composite: null,
-        },
-        // Garment (simple Image component)
-        { path: garmentPath, meta: { _type: 'gradio.FileData' } },
-        // garment description
-        garmentDes,
-        // is_checked (auto-masking)
-        true,
-        // is_checked_crop — FALSE to preserve full body
-        false,
-        // denoise_steps
-        30,
-        // seed
-        42,
-      ],
-    }
-
-    console.log(`[try-on] IDM-VTON: Calling /call/tryon`)
-
-    const callRes = await fetch(`${IDM_VTON_URL}/call/tryon`, {
-      method: 'POST',
-      headers: {
-        ...headers,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(callBody),
-      signal: AbortSignal.timeout(30000),
-    })
-
-    if (!callRes.ok) {
-      const errText = await callRes.text().catch(() => 'unknown')
-      console.error(`[try-on] IDM-VTON: Call tryon failed ${callRes.status}: ${errText.substring(0, 300)}`)
-      return null
-    }
-
-    // Parse event_id
-    const callResponseText = await callRes.text()
-    let eventId: string | null = null
-
-    try {
-      const callJson = JSON.parse(callResponseText)
-      eventId = callJson.event_id
-    } catch {
-      const eventIdMatch = callResponseText.match(/event_id["\s:]+([a-f0-9-]+)/i)
-      if (eventIdMatch) {
-        eventId = eventIdMatch[1]
-      }
-    }
-
-    if (!eventId) {
-      console.error(`[try-on] IDM-VTON: Could not parse event_id: ${callResponseText.substring(0, 300)}`)
-      return null
-    }
-
-    console.log(`[try-on] IDM-VTON: Event ID: ${eventId}`)
-
-    // Step 4: Poll for the result with remaining time
-    const maxPollTime = hardTimeoutMs - (Date.now() - startTime) - 3000 // Leave 3s buffer
-    const pollStart = Date.now()
-
-    while (Date.now() - pollStart < maxPollTime) {
-      await new Promise(r => setTimeout(r, 2000))
-
-      try {
-        const pollRes = await fetch(`${IDM_VTON_URL}/call/tryon/${eventId}`, {
-          headers,
-          signal: AbortSignal.timeout(15000),
-        })
-
-        if (!pollRes.ok) {
-          if (pollRes.status === 404) continue
-          continue
-        }
-
-        const pollText = await pollRes.text()
-
-        // Check for error event
-        if (pollText.includes('event: error') || pollText.includes('event:error')) {
-          console.error(`[try-on] IDM-VTON: Error event: ${pollText.substring(0, 500)}`)
-          return null
-        }
-
-        // Check for complete event
-        if (pollText.includes('event: complete') || pollText.includes('event:complete')) {
-          console.log(`[try-on] IDM-VTON: Got complete event!`)
-
-          // Extract image URL
-          const urlMatches = [...pollText.matchAll(/"url":\s*"([^"]+)"/g)]
-          if (urlMatches.length > 0) {
-            const imageUrl = urlMatches[0][1]
-            console.log(`[try-on] IDM-VTON: Got result image URL: ${imageUrl.substring(0, 100)}`)
-            const result = await downloadResultImage(imageUrl)
-            if (result) {
-              return { imageUrl: result, strategy: 'idm-vton' }
-            }
-          }
-
-          // Try path-based URL
-          const pathMatches = [...pollText.matchAll(/"path":\s*"([^"]+)"/g)]
-          if (pathMatches.length > 0) {
-            const imagePath = pathMatches[0][1]
-            const fullUrl = `${IDM_VTON_URL}/file=${imagePath}`
-            const result = await downloadResultImage(fullUrl)
-            if (result) {
-              return { imageUrl: result, strategy: 'idm-vton' }
-            }
-          }
-
-          console.error(`[try-on] IDM-VTON: Could not extract image from complete event`)
-          return null
-        }
-
-        // Still processing
-        const elapsed = Math.floor((Date.now() - startTime) / 1000)
-        console.log(`[try-on] IDM-VTON: Still processing... (${elapsed}s)`)
-      } catch (pollErr) {
-        const errMsg = pollErr instanceof Error ? pollErr.message : String(pollErr)
-        if (errMsg.includes('ECONNRESET') || errMsg.includes('socket')) {
-          continue
-        }
-        console.error(`[try-on] IDM-VTON: Poll error: ${errMsg.substring(0, 200)}`)
-      }
-    }
-
-    console.log(`[try-on] IDM-VTON: Timed out after ${Math.floor((Date.now() - startTime) / 1000)}s`)
+    console.log(`[try-on] HuggingFace failed: ${result?.error || 'timed out'}`)
     return null
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
-    console.error('[try-on] IDM-VTON error:', errMsg.substring(0, 300))
+    console.error('[try-on] HuggingFace error:', errMsg.substring(0, 300))
     return null
   }
 }
@@ -550,31 +288,31 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // ── Strategy 1: IDM-VTON HuggingFace Space ──────────────────────
-  const idmVtonTimeout = Math.min(IDM_VTON_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 5000)
-  if (idmVtonTimeout > 10000) {
-    console.log(`[try-on] Strategy 1: IDM-VTON (timeout: ${idmVtonTimeout}ms)`)
+  // ── Strategy 1: HuggingFace IDM-VTON (all 3 sub-strategies) ────────
+  const hfTimeout = Math.min(HF_TRYON_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 5000)
+  if (hfTimeout > 10000) {
+    console.log(`[try-on] Strategy 1: HuggingFace (timeout: ${hfTimeout}ms)`)
 
-    const idmResult = await tryIDMVTON(
+    const hfResult = await tryHuggingFace(
       selfieData,
       finalProductImageBase64,
       productName || 'Product',
       categorySlug || '',
-      idmVtonTimeout,
+      hfTimeout,
     )
 
-    if (idmResult) {
-      console.log(`[try-on] IDM-VTON success! Strategy: ${idmResult.strategy} (${Date.now() - pipelineStart}ms)`)
+    if (hfResult) {
+      console.log(`[try-on] HuggingFace success! Strategy: ${hfResult.strategy} (${Date.now() - pipelineStart}ms)`)
       return NextResponse.json({
         success: true,
-        imageUrl: idmResult.imageUrl,
-        strategy: idmResult.strategy,
+        imageUrl: hfResult.imageUrl,
+        strategy: hfResult.strategy,
         productName,
         categorySlug,
       })
     }
 
-    console.log(`[try-on] IDM-VTON failed (${Date.now() - pipelineStart}ms elapsed)`)
+    console.log(`[try-on] HuggingFace failed (${Date.now() - pipelineStart}ms elapsed)`)
   }
 
   // ── Strategy 2: ZAI Image Edit ──────────────────────────────────

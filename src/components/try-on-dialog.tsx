@@ -242,6 +242,7 @@ export function TryOnDialog({
   rawProductImage,
   onBackgroundJob,
   onResetBackground,
+  onShareToInfluencer,
 }: TryOnDialogProps) {
   const [step, setStep] = useState<Step>('upload');
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
@@ -406,6 +407,13 @@ export function TryOnDialog({
     async (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
+
+      // Must accept disclaimer first
+      if (!disclaimerAccepted) {
+        setShowDisclaimer(true);
+        return;
+      }
+
       const file = e.dataTransfer.files?.[0];
       if (!file || !file.type.startsWith('image/')) {
         setErrorMessage('Please drop an image file');
@@ -432,13 +440,162 @@ export function TryOnDialog({
       };
       reader.readAsDataURL(file);
     },
-    []
+    [disclaimerAccepted]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
   }, []);
+
+  // ── Category-aware overlay positioning ──
+  const getCategoryOverlayPosition = useCallback((categorySlug: string): { x: number; y: number; w: number; h: number } => {
+    const cat = (categorySlug || '').toLowerCase();
+
+    if (cat.includes('jewel') || cat.includes('necklace') || cat.includes('pendant') || cat.includes('earring')) {
+      return { x: 0.5, y: 0.38, w: 0.5, h: 0.2 };
+    }
+    if (cat.includes('watch')) {
+      return { x: 0.3, y: 0.6, w: 0.25, h: 0.25 };
+    }
+    if (cat.includes('saree') || cat.includes('fashion') || cat.includes('shirt') || cat.includes('kurta') || cat.includes('dress')) {
+      return { x: 0.5, y: 0.5, w: 0.5, h: 0.4 };
+    }
+    if (cat.includes('fragrance') || cat.includes('perfume')) {
+      return { x: 0.55, y: 0.4, w: 0.25, h: 0.35 };
+    }
+    if (cat.includes('leather') || cat.includes('bag') || cat.includes('wallet')) {
+      return { x: 0.4, y: 0.45, w: 0.35, h: 0.35 };
+    }
+    // Default — center upper body
+    return { x: 0.5, y: 0.45, w: 0.45, h: 0.35 };
+  }, []);
+
+  // ── Canvas overlay fallback ──────────────────────────────────────
+  const generateCanvasOverlay = useCallback(async (
+    selfieDataUrl: string,
+    prodImage: string,
+    prodName: string,
+    prodImageBase64?: string,
+    catSlug?: string,
+  ): Promise<string> => {
+    return new Promise((resolve) => {
+      try {
+        const selfieImg = document.createElement('img');
+        selfieImg.onload = () => {
+          const canvas = document.createElement('canvas');
+          // Use FULL dimensions — never crop
+          const width = selfieImg.naturalWidth || 512;
+          const height = selfieImg.naturalHeight || 680;
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(selfieDataUrl);
+            return;
+          }
+
+          // Draw the selfie at FULL size
+          ctx.drawImage(selfieImg, 0, 0, width, height);
+
+          // Subtle vignette
+          const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
+          vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+          vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.12)');
+          ctx.fillStyle = vignetteGrad;
+          ctx.fillRect(0, 0, width, height);
+
+          // Get overlay position based on category
+          const pos = getCategoryOverlayPosition(catSlug || '');
+          const overlayW = Math.floor(pos.w * width);
+          const overlayH = Math.floor(pos.h * height);
+          const overlayCX = pos.x * width;
+          const overlayCY = pos.y * height;
+
+          const renderProduct = (productImg?: HTMLImageElement) => {
+            if (productImg) {
+              ctx.save();
+              const imgAspect = productImg.naturalWidth / productImg.naturalHeight;
+              const slotAspect = overlayW / overlayH;
+              let drawW = overlayW;
+              let drawH = overlayH;
+
+              if (imgAspect > slotAspect) {
+                drawH = drawW / imgAspect;
+              } else {
+                drawW = drawH * imgAspect;
+              }
+
+              const drawX = overlayCX - drawW / 2;
+              const drawY = overlayCY - drawH / 2;
+
+              // Shadow for depth
+              ctx.shadowColor = 'rgba(0,0,0,0.35)';
+              ctx.shadowBlur = 12;
+              ctx.shadowOffsetX = 2;
+              ctx.shadowOffsetY = 2;
+
+              // Semi-transparent blend
+              ctx.globalAlpha = 0.55;
+
+              // Rounded clip
+              ctx.beginPath();
+              const radius = Math.min(10, drawW * 0.06, drawH * 0.06);
+              ctx.roundRect(drawX, drawY, drawW, drawH, radius);
+              ctx.clip();
+              ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
+              ctx.restore();
+
+              // Gold border
+              ctx.save();
+              ctx.globalAlpha = 0.4;
+              ctx.strokeStyle = '#daa520';
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.roundRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2, radius + 1);
+              ctx.stroke();
+              ctx.restore();
+            }
+
+            resolve(canvas.toDataURL('image/png'));
+          };
+
+          // Try loading product image
+          const productImg = document.createElement('img');
+          productImg.crossOrigin = 'anonymous';
+          let resolved = false;
+
+          const finish = (img?: HTMLImageElement) => {
+            if (resolved) return;
+            resolved = true;
+            renderProduct(img);
+          };
+
+          productImg.onload = () => finish(productImg);
+          productImg.onerror = () => finish();
+
+          // Timeout for product image loading
+          setTimeout(() => finish(), 5000);
+
+          if (prodImageBase64 && prodImageBase64.startsWith('data:')) {
+            productImg.src = prodImageBase64;
+          } else {
+            let imgSrc = prodImage;
+            if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
+              imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
+            } else if (imgSrc.startsWith('//')) {
+              imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
+            }
+            productImg.src = imgSrc;
+          }
+        };
+        selfieImg.onerror = () => resolve(selfieDataUrl);
+        selfieImg.src = selfieDataUrl;
+      } catch {
+        resolve(selfieDataUrl);
+      }
+    });
+  }, [getCategoryOverlayPosition]);
 
   // ── Generate Try-On ──────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
@@ -593,156 +750,7 @@ export function TryOnDialog({
           : 'Network error. Please check your connection and try again.'
       );
     }
-  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob]);
-
-  // ── Canvas overlay fallback ──────────────────────────────────────
-  const generateCanvasOverlay = useCallback(async (
-    selfieDataUrl: string,
-    prodImage: string,
-    prodName: string,
-    prodImageBase64?: string,
-    catSlug?: string,
-  ): Promise<string> => {
-    return new Promise((resolve) => {
-      try {
-        const selfieImg = document.createElement('img');
-        selfieImg.onload = () => {
-          const canvas = document.createElement('canvas');
-          // Use FULL dimensions — never crop
-          const width = selfieImg.naturalWidth || 512;
-          const height = selfieImg.naturalHeight || 680;
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(selfieDataUrl);
-            return;
-          }
-
-          // Draw the selfie at FULL size
-          ctx.drawImage(selfieImg, 0, 0, width, height);
-
-          // Subtle vignette
-          const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
-          vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-          vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.12)');
-          ctx.fillStyle = vignetteGrad;
-          ctx.fillRect(0, 0, width, height);
-
-          // Get overlay position based on category
-          const pos = getCategoryOverlayPosition(catSlug || '');
-          const overlayW = Math.floor(pos.w * width);
-          const overlayH = Math.floor(pos.h * height);
-          const overlayCX = pos.x * width;
-          const overlayCY = pos.y * height;
-
-          const renderProduct = (productImg?: HTMLImageElement) => {
-            if (productImg) {
-              ctx.save();
-              const imgAspect = productImg.naturalWidth / productImg.naturalHeight;
-              const slotAspect = overlayW / overlayH;
-              let drawW = overlayW;
-              let drawH = overlayH;
-
-              if (imgAspect > slotAspect) {
-                drawH = drawW / imgAspect;
-              } else {
-                drawW = drawH * imgAspect;
-              }
-
-              const drawX = overlayCX - drawW / 2;
-              const drawY = overlayCY - drawH / 2;
-
-              // Shadow for depth
-              ctx.shadowColor = 'rgba(0,0,0,0.35)';
-              ctx.shadowBlur = 12;
-              ctx.shadowOffsetX = 2;
-              ctx.shadowOffsetY = 2;
-
-              // Semi-transparent blend
-              ctx.globalAlpha = 0.55;
-
-              // Rounded clip
-              ctx.beginPath();
-              const radius = Math.min(10, drawW * 0.06, drawH * 0.06);
-              ctx.roundRect(drawX, drawY, drawW, drawH, radius);
-              ctx.clip();
-              ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
-              ctx.restore();
-
-              // Gold border
-              ctx.save();
-              ctx.globalAlpha = 0.4;
-              ctx.strokeStyle = '#daa520';
-              ctx.lineWidth = 2;
-              ctx.beginPath();
-              ctx.roundRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2, radius + 1);
-              ctx.stroke();
-              ctx.restore();
-            }
-
-            resolve(canvas.toDataURL('image/png'));
-          };
-
-          // Try loading product image
-          const productImg = document.createElement('img');
-          productImg.crossOrigin = 'anonymous';
-          let resolved = false;
-
-          const finish = (img?: HTMLImageElement) => {
-            if (resolved) return;
-            resolved = true;
-            renderProduct(img);
-          };
-
-          productImg.onload = () => finish(productImg);
-          productImg.onerror = () => finish();
-
-          // Timeout for product image loading
-          setTimeout(() => finish(), 5000);
-
-          if (prodImageBase64 && prodImageBase64.startsWith('data:')) {
-            productImg.src = prodImageBase64;
-          } else {
-            let imgSrc = prodImage;
-            if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
-              imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
-            } else if (imgSrc.startsWith('//')) {
-              imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
-            }
-            productImg.src = imgSrc;
-          }
-        };
-        selfieImg.onerror = () => resolve(selfieDataUrl);
-        selfieImg.src = selfieDataUrl;
-      } catch {
-        resolve(selfieDataUrl);
-      }
-    });
-  }, []);
-
-  // ── Category-aware overlay positioning ──
-  function getCategoryOverlayPosition(categorySlug: string): { x: number; y: number; w: number; h: number } {
-    const cat = (categorySlug || '').toLowerCase();
-
-    if (cat.includes('jewel') || cat.includes('necklace') || cat.includes('pendant') || cat.includes('earring')) {
-      return { x: 0.5, y: 0.38, w: 0.5, h: 0.2 };
-    }
-    if (cat.includes('watch')) {
-      return { x: 0.3, y: 0.6, w: 0.25, h: 0.25 };
-    }
-    if (cat.includes('saree') || cat.includes('fashion') || cat.includes('shirt') || cat.includes('kurta') || cat.includes('dress')) {
-      return { x: 0.5, y: 0.5, w: 0.5, h: 0.4 };
-    }
-    if (cat.includes('fragrance') || cat.includes('perfume')) {
-      return { x: 0.55, y: 0.4, w: 0.25, h: 0.35 };
-    }
-    if (cat.includes('leather') || cat.includes('bag') || cat.includes('wallet')) {
-      return { x: 0.4, y: 0.45, w: 0.35, h: 0.35 };
-    }
-    // Default — center upper body
-    return { x: 0.5, y: 0.45, w: 0.45, h: 0.35 };
-  }
+  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob, generateCanvasOverlay]);
 
   // ── Retry ────────────────────────────────────────────────────────
   const handleRetry = useCallback(async () => {
@@ -1164,6 +1172,18 @@ export function TryOnDialog({
                     Try Again
                   </Button>
                 </div>
+
+                {/* Share to Influencer Section */}
+                {onShareToInfluencer && watermarkedResult && (
+                  <Button
+                    onClick={() => onShareToInfluencer(watermarkedResult)}
+                    variant="outline"
+                    className="w-full border-amber-600/30 text-amber-300 hover:bg-amber-900/30 hover:text-amber-200 gap-2"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Share to AI Style Gallery
+                  </Button>
+                )}
 
                 {/* Disclaimer */}
                 <p className="text-center text-xs text-amber-200/30">
