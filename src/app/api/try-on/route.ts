@@ -1,33 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isZAIAvailable, getZAIConfig } from '@/lib/zai'
-import { createJob, getJob, runPipeline } from '@/lib/try-on-pipeline'
-import { hfTryOn, isHFAvailable } from '@/lib/huggingface-tryon'
+
+// Maximum duration for Vercel serverless function (Pro plan = 60s)
+export const maxDuration = 60
 
 // ── Product image helpers ──────────────────────────────────────────
-
-/**
- * Fetch a local (public-dir) image via HTTP so it works on both
- * local dev (Next.js serves /public) and Vercel (CDN serves assets).
- */
-async function getProductImageBase64ViaHttp(imagePath: string): Promise<string | null> {
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
-    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-  try {
-    const response = await fetch(`${baseUrl}${imagePath}`, {
-      signal: AbortSignal.timeout(10000),
-      headers: { 'User-Agent': '3BOXES-Internal/1.0' },
-    })
-    if (!response.ok) return null
-    const contentType = response.headers.get('content-type') || 'image/jpeg'
-    if (!contentType.startsWith('image/')) return null
-    const mimeType = contentType.split(';')[0].trim()
-    const buffer = Buffer.from(await response.arrayBuffer())
-    return `data:${mimeType};base64,${buffer.toString('base64')}`
-  } catch (err) {
-    console.error('[try-on] Failed to fetch product image via HTTP:', err)
-    return null
-  }
-}
 
 async function getProductImageBase64(imagePath: string): Promise<string | null> {
   if (!imagePath) return null
@@ -74,111 +50,342 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
       const mimeType = contentType.split(';')[0].trim()
       const buffer = Buffer.from(await response.arrayBuffer())
       return `data:${mimeType};base64,${buffer.toString('base64')}`
-    } catch (err) {
-      console.error('[try-on] Failed to fetch proxied product image:', err)
+    } catch {
       return null
     }
   }
-  // Local path — fetch via HTTP (works on both local and Vercel)
-  const httpResult = await getProductImageBase64ViaHttp(imagePath)
-  if (httpResult) return httpResult
-
-  // Last resort: try reading from filesystem directly (local dev only)
-  if (!process.env.VERCEL) {
-    try {
-      const { existsSync, readFileSync } = await import('fs')
-      const { join } = await import('path')
-      const fullPath = join(process.cwd(), 'public', imagePath)
-      if (!existsSync(fullPath)) return null
-      const buffer = readFileSync(fullPath)
-      const ext = imagePath.split('.').pop()?.toLowerCase() || 'jpg'
-      const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
-      return `data:${mimeType};base64,${buffer.toString('base64')}`
-    } catch (err) {
-      console.error('[try-on] Failed to read local product image from filesystem:', err)
-    }
-  }
-
-  return null
-}
-
-// ── Proxy helper ────────────────────────────────────────────────────
-
-function getProxyHeaders(proxyUrl: string): Record<string, string> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
+  // Local path — fetch via HTTP
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL
+    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
   try {
-    const proxyHost = new URL(proxyUrl).hostname
-    if (proxyHost.includes('.space-z.ai')) {
-      headers['Abc'] = proxyHost.split('.')[0]
-    }
-  } catch {}
-  return headers
-}
-
-function isSpaceZaiGateway(urlStr: string): boolean {
-  try {
-    const hostname = new URL(urlStr).hostname
-    return hostname.includes('.space-z.ai')
+    const response = await fetch(`${baseUrl}${imagePath}`, {
+      signal: AbortSignal.timeout(10000),
+      headers: { 'User-Agent': '3BOXES-Internal/1.0' },
+    })
+    if (!response.ok) return null
+    const contentType = response.headers.get('content-type') || 'image/jpeg'
+    if (!contentType.startsWith('image/')) return null
+    const mimeType = contentType.split(';')[0].trim()
+    const buffer = Buffer.from(await response.arrayBuffer())
+    return `data:${mimeType};base64,${buffer.toString('base64')}`
   } catch {
-    return false
+    // Try filesystem as fallback (local dev only)
+    if (!process.env.VERCEL) {
+      try {
+        const { existsSync, readFileSync } = await import('fs')
+        const { join } = await import('path')
+        const fullPath = join(process.cwd(), 'public', imagePath)
+        if (!existsSync(fullPath)) return null
+        const buffer = readFileSync(fullPath)
+        const ext = imagePath.split('.').pop()?.toLowerCase() || 'jpg'
+        const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg'
+        return `data:${mimeType};base64,${buffer.toString('base64')}`
+      } catch {
+        return null
+      }
+    }
+    return null
   }
 }
 
-function buildProxyUrl(proxyUrl: string, path: string, queryParams?: Record<string, string>): string {
-  const base = proxyUrl.replace(/\/+$/, '')
-  const params = new URLSearchParams(queryParams || {})
+// ── IDM-VTON Integration ─────────────────────────────────────────
 
-  // For .space-z.ai gateway URLs, add XTransformPort=3030
-  // to route to the ai-proxy service on the sandbox
-  if (isSpaceZaiGateway(proxyUrl)) {
-    params.set('XTransformPort', '3030')
-  }
+const IDM_VTON_URL = 'https://yisol-idm-vton.hf.space'
 
-  const paramStr = params.toString()
-  return paramStr ? `${base}${path}?${paramStr}` : `${base}${path}`
+function dataUrlToBase64(dataUrl: string): string {
+  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
+  return match ? match[1] : dataUrl
 }
 
-// ── Category pairing for suggestions ───────────────────────────────
-
-function getPairingCategory(categorySlug: string): string[] {
-  const pairs: Record<string, string[]> = {
-    'sarees': ['jewelry'],
-    'jewelry': ['sarees', 'fashion'],
-    'watches': ['mens-shirts', 'leather-goods'],
-    'mens-shirts': ['watches', 'leather-goods'],
-    'fashion': ['jewelry', 'watches'],
-    'fragrances': ['jewelry', 'fashion'],
-    'leather-goods': ['watches', 'fashion'],
-  }
-  return pairs[categorySlug] || ['jewelry']
+function getMimeType(dataUrl: string): string {
+  const match = dataUrl.match(/^data:(image\/[^;]+);base64,/)
+  return match ? match[1] : 'image/png'
 }
 
-// ── Canvas fallback helper (ALWAYS returns 200, never shows errors to user) ──
+function getGarmentDescription(categorySlug: string, productName: string): string {
+  const cat = (categorySlug || '').toLowerCase()
+  if (cat.includes('saree')) return `A beautiful saree - ${productName}. Traditional Indian garment with elegant drape.`
+  if (cat.includes('jewel')) return `Elegant jewelry - ${productName}`
+  if (cat.includes('watch')) return `Luxury watch - ${productName}`
+  if (cat.includes('shirt') || cat.includes('tshirt')) return `A shirt - ${productName}. Well-fitted casual wear.`
+  if (cat.includes('fashion') || cat.includes('dress')) return `A fashion outfit - ${productName}. Stylish and well-fitted.`
+  return `A garment - ${productName}`
+}
 
-function returnCanvasMode(
-  productImageUrl: string | null | undefined,
-  productImageBase64: string | null | undefined,
-  productName: string | null | undefined,
-  categorySlug: string | null | undefined,
-  message?: string,
-): NextResponse {
-  return NextResponse.json({
-    mode: 'canvas',
-    message: message || 'AI style preview is temporarily unavailable. Showing style overlay with product image instead.',
-    code: 'AI_CANVAS_MODE',
-    productName: productName || null,
-    categorySlug: categorySlug || null,
-    productImageBase64: productImageBase64 || null,
-    productImageUrl: productImageUrl || null,
-  }, { status: 200 })
+/**
+ * Upload an image to the IDM-VTON Space.
+ */
+async function uploadImageToSpace(
+  imageDataUrl: string,
+  filename: string,
+  headers: Record<string, string>,
+): Promise<string> {
+  const base64 = dataUrlToBase64(imageDataUrl)
+  const mime = getMimeType(imageDataUrl)
+  const ext = mime.split('/')[1] || 'png'
+  const buffer = Buffer.from(base64, 'base64')
+
+  const formData = new FormData()
+  formData.append('files', new Blob([new Uint8Array(buffer)], { type: mime }), `${filename}.${ext}`)
+
+  const uploadRes = await fetch(`${IDM_VTON_URL}/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+    signal: AbortSignal.timeout(30000),
+  })
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text().catch(() => 'unknown')
+    throw new Error(`Upload failed (${uploadRes.status}): ${errText.substring(0, 200)}`)
+  }
+
+  const contentType = uploadRes.headers.get('content-type') || ''
+  let paths: string[]
+
+  if (contentType.includes('json')) {
+    paths = await uploadRes.json()
+  } else {
+    const responseText = await uploadRes.text()
+    try {
+      paths = JSON.parse(responseText)
+    } catch {
+      if (responseText.startsWith('/tmp/') || responseText.startsWith('/')) {
+        return responseText
+      }
+      throw new Error(`Unexpected upload response: ${responseText.substring(0, 200)}`)
+    }
+  }
+
+  if (!Array.isArray(paths) || paths.length === 0) {
+    throw new Error('Upload returned empty paths array')
+  }
+
+  return paths[0]
+}
+
+/**
+ * Download a result image and convert to base64 data URL.
+ */
+async function downloadResultImage(url: string): Promise<string | null> {
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': '3BOXES-IDM-VTON/1.0',
+    }
+    const token = process.env.HF_API_TOKEN
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const downloadRes = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(30000),
+    })
+
+    if (!downloadRes.ok) return null
+
+    const contentType = downloadRes.headers.get('content-type') || 'image/png'
+    const mimeType = contentType.split(';')[0].trim()
+
+    if (mimeType.startsWith('image/')) {
+      const buffer = Buffer.from(await downloadRes.arrayBuffer())
+      return `data:${mimeType};base64,${buffer.toString('base64')}`
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Try IDM-VTON virtual try-on with a HARD 50-second timeout.
+ * Returns the result image as a base64 data URL, or null if it fails/times out.
+ */
+async function tryIDMVTON(
+  selfieData: string,
+  productImageBase64: string,
+  productName: string,
+  categorySlug: string,
+  onProgress?: (msg: string) => void,
+): Promise<{ imageUrl: string; strategy: string } | null> {
+  const HARD_TIMEOUT_MS = 50_000 // 50 seconds — hard server timeout
+  const startTime = Date.now()
+
+  const token = process.env.HF_API_TOKEN
+  const headers: Record<string, string> = {
+    'User-Agent': '3BOXES-IDM-VTON/1.0',
+  }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  try {
+    // Step 1: Upload person image
+    onProgress?.('Uploading your photo to AI...')
+    let personPath: string
+    try {
+      personPath = await uploadImageToSpace(selfieData, 'person', headers)
+      console.log(`[try-on] Person uploaded to: ${personPath}`)
+    } catch (uploadErr) {
+      console.error(`[try-on] Person upload failed:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr))
+      return null
+    }
+
+    if (Date.now() - startTime > HARD_TIMEOUT_MS) return null
+
+    // Step 2: Upload garment image
+    onProgress?.('Uploading product image to AI...')
+    let garmentPath: string
+    try {
+      garmentPath = await uploadImageToSpace(productImageBase64, 'garment', headers)
+      console.log(`[try-on] Garment uploaded to: ${garmentPath}`)
+    } catch (uploadErr) {
+      console.error(`[try-on] Garment upload failed:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr))
+      return null
+    }
+
+    if (Date.now() - startTime > HARD_TIMEOUT_MS) return null
+
+    // Step 3: Call the tryon endpoint
+    onProgress?.('AI is generating your try-on...')
+    const garmentDes = getGarmentDescription(categorySlug, productName)
+
+    const callBody = {
+      data: [
+        // Human (ImageEditor format)
+        {
+          background: { path: personPath, meta: { _type: 'gradio.FileData' } },
+          layers: [],
+          composite: null,
+        },
+        // Garment
+        { path: garmentPath, meta: { _type: 'gradio.FileData' } },
+        // garment description
+        garmentDes,
+        // is_checked (auto-masking)
+        true,
+        // is_checked_crop — FALSE to preserve full body
+        false,
+        // denoise_steps
+        30,
+        // seed
+        42,
+      ],
+    }
+
+    const callRes = await fetch(`${IDM_VTON_URL}/call/tryon`, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(callBody),
+      signal: AbortSignal.timeout(30000),
+    })
+
+    if (!callRes.ok) {
+      const errText = await callRes.text().catch(() => 'unknown')
+      console.error(`[try-on] Call tryon failed ${callRes.status}: ${errText.substring(0, 300)}`)
+      return null
+    }
+
+    // Parse event_id
+    const callResponseText = await callRes.text()
+    let eventId: string | null = null
+
+    try {
+      const callJson = JSON.parse(callResponseText)
+      eventId = callJson.event_id
+    } catch {
+      const eventIdMatch = callResponseText.match(/event_id["\s:]+([a-f0-9-]+)/i)
+      if (eventIdMatch) {
+        eventId = eventIdMatch[1]
+      }
+    }
+
+    if (!eventId) {
+      console.error(`[try-on] Could not parse event_id: ${callResponseText.substring(0, 300)}`)
+      return null
+    }
+
+    console.log(`[try-on] Event ID: ${eventId}`)
+
+    // Step 4: Poll for the result with remaining time
+    const maxPollTime = HARD_TIMEOUT_MS - (Date.now() - startTime) - 5000 // Leave 5s buffer
+    const pollStart = Date.now()
+
+    while (Date.now() - pollStart < maxPollTime) {
+      await new Promise(r => setTimeout(r, 2000))
+
+      try {
+        const pollRes = await fetch(`${IDM_VTON_URL}/call/tryon/${eventId}`, {
+          headers,
+          signal: AbortSignal.timeout(15000),
+        })
+
+        if (!pollRes.ok) {
+          if (pollRes.status === 404) continue
+          continue
+        }
+
+        const pollText = await pollRes.text()
+
+        // Check for error event
+        if (pollText.includes('event: error') || pollText.includes('event:error')) {
+          console.error(`[try-on] Error event: ${pollText.substring(0, 500)}`)
+          return null
+        }
+
+        // Check for complete event
+        if (pollText.includes('event: complete') || pollText.includes('event:complete')) {
+          console.log(`[try-on] Got complete event!`)
+
+          // Extract image URL
+          const urlMatches = [...pollText.matchAll(/"url":\s*"([^"]+)"/g)]
+          if (urlMatches.length > 0) {
+            const imageUrl = urlMatches[0][1]
+            console.log(`[try-on] Got result image URL: ${imageUrl.substring(0, 100)}`)
+            const result = await downloadResultImage(imageUrl)
+            if (result) {
+              return { imageUrl: result, strategy: 'idm-vton' }
+            }
+          }
+
+          // Try path-based URL
+          const pathMatches = [...pollText.matchAll(/"path":\s*"([^"]+)"/g)]
+          if (pathMatches.length > 0) {
+            const imagePath = pathMatches[0][1]
+            const fullUrl = `${IDM_VTON_URL}/file=${imagePath}`
+            const result = await downloadResultImage(fullUrl)
+            if (result) {
+              return { imageUrl: result, strategy: 'idm-vton' }
+            }
+          }
+
+          console.error(`[try-on] Could not extract image from complete event`)
+          return null
+        }
+
+        // Still processing — update progress
+        const elapsed = Math.floor((Date.now() - startTime) / 1000)
+        onProgress?.(`AI is processing... (${elapsed}s)`)
+      } catch (pollErr) {
+        const errMsg = pollErr instanceof Error ? pollErr.message : String(pollErr)
+        if (errMsg.includes('ECONNRESET') || errMsg.includes('socket')) {
+          continue
+        }
+        console.error(`[try-on] Poll error: ${errMsg.substring(0, 200)}`)
+      }
+    }
+
+    console.log(`[try-on] IDM-VTON timed out after ${Math.floor((Date.now() - startTime) / 1000)}s`)
+    return null
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.error('[try-on] IDM-VTON error:', errMsg.substring(0, 300))
+    return null
+  }
 }
 
 // ── POST /api/try-on ───────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  // Parse body outside try so it's available in catch for canvas fallback
   let body: any
   try {
     body = await request.json()
@@ -186,581 +393,89 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
-  // PERMANENT FIX: The entire handler is wrapped so that ANY error
-  // falls back to canvas mode. The user should NEVER see "AI unavailable".
-  try {
-    const isVercel = !!process.env.VERCEL
-    const proxyUrl = process.env.ZAI_PROXY_URL
-
-    const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
-
-    if (!productId || !selfieData) {
-      return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
-    }
-
-    // ── Resolve product image base64 (used by multiple strategies) ──
-    const clientProvidedBase64 = body.productImageBase64 as string | undefined
-    let resolvedBase64: string | null = null
-    if (productImageUrl && !clientProvidedBase64) {
-      resolvedBase64 = await getProductImageBase64(productImageUrl)
-    }
-    const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64 || null
-
-    // ── Strategy 0 (PRIMARY): HuggingFace IDM-VTON Virtual Try-On ──
-    // This is the PRIMARY strategy — a dedicated virtual try-on model that
-    // actually drapes the garment onto the person's image.
-    // Works from both sandbox and Vercel (no ZAI dependency).
-    // Always available since the Space is public.
-    if (isHFAvailable() && finalProductImageBase64) {
-      console.log('[try-on] IDM-VTON virtual try-on available — PRIMARY strategy')
-      try {
-        const jobId = `hf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
-        createJob(jobId, {
-          categorySlug: clientCategorySlug || '',
-          productName: clientProductName || '',
-          progress: 'Starting AI virtual try-on with IDM-VTON...',
-          pipelinePhase: 'hf-tryon',
-        })
-
-        // Run HuggingFace IDM-VTON in background with progress callbacks
-        ;(async () => {
-          const job = getJob(jobId)
-          if (!job) return
-          try {
-            const result = await hfTryOn(
-              {
-                selfieData,
-                productImageBase64: finalProductImageBase64,
-                productName: clientProductName || 'Product',
-                categorySlug: clientCategorySlug || '',
-              },
-              // Progress callback — updates the job for client polling
-              (message: string) => {
-                const j = getJob(jobId)
-                if (j) {
-                  j.progress = message
-                }
-              }
-            )
-
-            if (result.success && result.imageUrl) {
-              job.status = 'completed'
-              job.imageUrl = result.imageUrl
-              job.strategy = result.strategy
-              job.progress = 'Complete!'
-              job.pipelinePhase = 'complete'
-            } else {
-              // IDM-VTON failed
-              console.log('[try-on] IDM-VTON failed:', result.error)
-
-              // If on Vercel or ZAI not available, fail with the error
-              // The client will fall back to canvas mode
-              if (isVercel || !(await isZAIAvailable()).available) {
-                job.status = 'failed'
-                job.error = result.error || 'IDM-VTON generation failed'
-              } else {
-                // Try ZAI pipeline as fallback
-                console.log('[try-on] IDM-VTON failed, falling back to ZAI pipeline')
-                job.progress = 'IDM-VTON unavailable, trying alternative AI...'
-                job.pipelinePhase = 'generation'
-
-                try {
-                  const { runPipeline } = await import('@/lib/try-on-pipeline')
-                  await runPipeline({
-                    jobId,
-                    productName: clientProductName || 'Product',
-                    categorySlug: clientCategorySlug || '',
-                    selfieData,
-                    productImageBase64: finalProductImageBase64,
-                    suggestionsPromise: Promise.resolve([]),
-                  })
-                } catch (pipelineErr) {
-                  job.status = 'failed'
-                  job.error = 'All AI strategies failed'
-                }
-              }
-            }
-          } catch (err) {
-            job.status = 'failed'
-            job.error = err instanceof Error ? err.message : 'HuggingFace error'
-          }
-        })()
-
-        // Return jobId for polling
-        return NextResponse.json({
-          jobId,
-          status: 'processing',
-          productName: clientProductName,
-          categorySlug: clientCategorySlug,
-        })
-      } catch (hfErr) {
-        console.error('[try-on] HuggingFace IDM-VTON error:', hfErr)
-      }
-    }
-
-    // ── On Vercel: try proxy first, then direct SDK, then canvas mode ──
-    if (isVercel) {
-      // Strategy 1: Try proxy if URL is configured and reachable
-      if (proxyUrl) {
-        console.log('[try-on] Vercel: attempting proxy to AI service:', proxyUrl)
-        try {
-          // Product image base64 already resolved above
-
-          const proxyHeaders = getProxyHeaders(proxyUrl)
-
-          const proxyBody: Record<string, unknown> = {
-            productId,
-            selfieData,
-            productName: clientProductName || body.productName,
-            categorySlug: clientCategorySlug || body.categorySlug,
-          }
-
-          if (finalProductImageBase64) {
-            proxyBody.productImageBase64 = finalProductImageBase64
-            console.log('[try-on] Proxying with productImageBase64 (source:', clientProvidedBase64 ? 'client' : 'resolved', ', length:', finalProductImageBase64.length, ')')
-          } else if (productImageUrl) {
-            proxyBody.productImageUrl = productImageUrl
-            console.log('[try-on] Could not resolve image on Vercel, passing URL to proxy:', productImageUrl)
-          }
-          
-          const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on')
-          console.log('[try-on] Proxy fetch URL:', proxyFetchUrl)
-          const proxyResponse = await fetch(proxyFetchUrl, {
-            method: 'POST',
-            headers: proxyHeaders,
-            body: JSON.stringify(proxyBody),
-            signal: AbortSignal.timeout(30000), // 30s timeout — proxy needs time to receive and start job
-          })
-
-          if (proxyResponse.ok) {
-            const proxyResult = await proxyResponse.json()
-            console.log('[try-on] Proxy success, jobId:', proxyResult.jobId, 'status:', proxyResult.status)
-            return NextResponse.json({
-              ...proxyResult,
-              jobId: proxyResult.jobId,
-              status: proxyResult.status || 'processing',
-              productName: proxyResult.productName || clientProductName,
-              categorySlug: proxyResult.categorySlug || clientCategorySlug,
-            })
-          } else {
-            const errorText = await proxyResponse.text().catch(() => 'unknown error')
-            console.error(`[try-on] Proxy returned ${proxyResponse.status}: ${errorText.substring(0, 300)}`)
-          }
-        } catch (proxyError) {
-          const errMsg = proxyError instanceof Error ? proxyError.message : String(proxyError)
-          console.error('[try-on] Proxy failed:', errMsg)
-        }
-      } else {
-        console.log('[try-on] No ZAI_PROXY_URL configured on Vercel')
-      }
-
-      // Strategy 2: Try direct ZAI SDK if ZAI_BASE_URL and ZAI_API_KEY are configured
-      const zaiConfig = getZAIConfig()
-      if (zaiConfig?.baseUrl && zaiConfig?.apiKey) {
-        console.log('[try-on] Vercel: checking if direct ZAI SDK is reachable at', zaiConfig.baseUrl)
-        try {
-          const aiCheck = await isZAIAvailable()
-          if (aiCheck.available) {
-            console.log('[try-on] Vercel: ZAI SDK available! Processing AI generation directly')
-            return await handleLocalAIGeneration(body, isVercel)
-          } else {
-            console.log('[try-on] Vercel: ZAI SDK not reachable:', aiCheck.reason)
-          }
-        } catch (directError) {
-          console.error('[try-on] Direct ZAI SDK check failed:', directError)
-        }
-      }
-
-      // Strategy 3: Canvas fallback — AI service unavailable
-      console.log('[try-on] All AI strategies unavailable on Vercel, returning canvas mode')
-
-      let canvasProductImageBase64: string | null = null
-      try {
-        if (productImageUrl) {
-          canvasProductImageBase64 = await getProductImageBase64(productImageUrl)
-        }
-      } catch (imgErr) {
-        console.error('[try-on] Failed to resolve product image base64 for canvas mode:', imgErr)
-      }
-
-      // Also try client-provided base64 (already resolved above as clientProvidedBase64)
-      const finalBase64 = clientProvidedBase64 || canvasProductImageBase64
-
-      return returnCanvasMode(productImageUrl, finalBase64, clientProductName, clientCategorySlug)
-    }
-
-    // ── Non-Vercel: local AI processing ──
-    // First try the local ai-proxy service on port 3030 (dedicated AI service)
-    // If that fails, try direct ZAI SDK, then canvas fallback
-    return await handleLocalAIGeneration(body, isVercel)
-  } catch (error) {
-    console.error('[try-on] API error (falling back to canvas mode):', error)
-    
-    // PERMANENT FIX: ANY error falls back to canvas mode.
-    // The user should NEVER see "AI unavailable" or any other error.
-    // Only truly invalid requests (missing body) get error responses.
-    if (error instanceof SyntaxError) {
-      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
-    }
-
-    // For ALL other errors — return canvas mode so the client can
-    // generate a style preview overlay. This ensures the user ALWAYS
-    // gets a visual result, never a broken error message.
-    let errorProductImageBase64: string | null = null
-    try {
-      const imgUrl = body?.productImageUrl
-      if (imgUrl) {
-        errorProductImageBase64 = await getProductImageBase64(imgUrl)
-      }
-    } catch {}
-
-    // Also try client-provided base64
-    const clientBase64 = body?.productImageBase64 as string | undefined
-
-    return returnCanvasMode(
-      body?.productImageUrl || null,
-      clientBase64 || errorProductImageBase64,
-      body?.productName || body?.productName || null,
-      body?.categorySlug || null,
-    )
-  }
-}
-
-// ── Local AI Generation Handler ────────────────────────────────────
-
-async function handleLocalAIGeneration(body: any, isVercel: boolean) {
-  // ── Strategy 0: Try local ai-proxy service on port 3030 ──
-  // The ai-proxy is a dedicated service with the ZAI SDK that may have
-  // better connectivity than the Next.js app. Try it first.
-  if (!isVercel) {
-    try {
-      const proxyCheck = await fetch('http://localhost:3030/api/try-on/status', {
-        signal: AbortSignal.timeout(3000),
-      })
-      if (proxyCheck.ok) {
-        const proxyStatus = await proxyCheck.json()
-        // Only use proxy if BOTH available AND zaiReachable are true
-        if (proxyStatus.available && proxyStatus.zaiReachable !== false) {
-          console.log('[try-on] Local ai-proxy (port 3030) is available and ZAI is reachable, routing through it')
-          const proxyRes = await fetch('http://localhost:3030/api/try-on', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(15000),
-          })
-          if (proxyRes.ok) {
-            const proxyResult = await proxyRes.json()
-            console.log('[try-on] ai-proxy accepted job:', proxyResult.jobId)
-            return NextResponse.json(proxyResult)
-          }
-          console.warn('[try-on] ai-proxy POST returned', proxyRes.status)
-        } else {
-          console.log('[try-on] Local ai-proxy reports ZAI unreachable (available=' + proxyStatus.available + ', zaiReachable=' + proxyStatus.zaiReachable + '), skipping proxy')
-        }
-      }
-    } catch (proxyErr) {
-      console.log('[try-on] Local ai-proxy not reachable:', proxyErr instanceof Error ? proxyErr.message : String(proxyErr))
-    }
-  }
-
-  // ── Strategy 1: Direct ZAI SDK with fast-fail ──
-  // Add an overall 30-second timeout for the entire AI generation attempt.
-  // If ZAI is unreachable, we skip to canvas fallback quickly instead of
-  // waiting 2+ minutes for all 4 strategies to time out.
-  const aiCheck = await isZAIAvailable()
-
-  if (!aiCheck.available) {
-    console.log('[try-on] AI unavailable:', aiCheck.reason, '— skipping to canvas fallback immediately')
-    const fallbackProductImage = body.productImageUrl
-      ? await getProductImageBase64(body.productImageUrl).catch(() => null)
-      : null
-    // Also try client-provided base64
-    const clientBase64 = body.productImageBase64 as string | undefined
-    return returnCanvasMode(
-      body.productImageUrl || null,
-      clientBase64 || fallbackProductImage,
-      body.productName || null,
-      body.categorySlug || null,
-    )
-  }
-
-  const { productId, selfieData, productImageUrl, productName: clientProductName, categorySlug: clientCategorySlug } = body
+  const { productId, selfieData, productImageUrl, productName, categorySlug } = body
 
   if (!productId || !selfieData) {
     return NextResponse.json({ error: 'Product ID and selfie are required' }, { status: 400 })
   }
-  if (!selfieData.startsWith('data:image/')) {
-    return NextResponse.json({ error: 'Invalid image format' }, { status: 400 })
-  }
 
-  // Resolve product info
-  interface TryOnProduct {
-    id: string
-    name: string
-    images: string
-    category: { name: string; slug: string }
-  }
-  let product: TryOnProduct | null = null
+  console.log(`[try-on] POST request for product: ${productName} (${productId})`)
 
-  // Use dynamic import for db to avoid top-level crash on Vercel
-  if (!isVercel) {
-    try {
-      const { db } = await import('@/lib/db')
-      const dbProduct = await db.product.findUnique({
-        where: { id: productId },
-        include: { category: true },
-      })
-      if (dbProduct) {
-        product = {
-          id: dbProduct.id,
-          name: dbProduct.name,
-          images: dbProduct.images,
-          category: { name: dbProduct.category.name, slug: dbProduct.category.slug },
-        }
-      }
-    } catch (dbError) {
-      console.log('[try-on] Database unavailable, trying other sources...')
-    }
-  }
-
-  if (!product && clientProductName && clientCategorySlug) {
-    console.log('[try-on] Using client-provided product details')
-    product = {
-      id: productId,
-      name: clientProductName,
-      images: JSON.stringify(productImageUrl ? [productImageUrl] : []),
-      category: { name: clientCategorySlug, slug: clientCategorySlug },
-    }
-  }
-
-  if (!product) {
-    try {
-      const { fetchShopifyProducts } = await import('@/lib/shopify')
-      const shopifyProducts = await fetchShopifyProducts()
-      const sp = shopifyProducts.find(p => p.id === productId)
-      if (sp) {
-        product = {
-          id: sp.id,
-          name: sp.name,
-          images: JSON.stringify(sp.images),
-          category: { name: sp.category, slug: sp.categorySlug },
-        }
-      }
-    } catch (shopifyError) {
-      console.error('[try-on] Shopify fallback also failed:', shopifyError)
-    }
-  }
-
-  if (!product) {
-    // Try static products (Corporate Gifts, Office, New Arrivals)
-    try {
-      const { getStaticProductById } = await import('@/lib/static-products')
-      const staticProduct = getStaticProductById(productId)
-      if (staticProduct) {
-        product = {
-          id: staticProduct.id,
-          name: staticProduct.name,
-          images: JSON.stringify(staticProduct.images),
-          category: { name: staticProduct.category, slug: staticProduct.categorySlug },
-        }
-      }
-    } catch {}
-  }
-
-  if (!product) {
-    // PERMANENT FIX: Instead of returning 404, fall back to canvas mode
-    // The user should still get a visual preview even if the product isn't found in DB
-    console.log('[try-on] Product not found in any source, falling back to canvas mode')
-    const clientBase64 = body.productImageBase64 as string | undefined
-    let fallbackBase64: string | null = null
-    try {
-      if (productImageUrl) {
-        fallbackBase64 = await getProductImageBase64(productImageUrl)
-      }
-    } catch {}
-    return returnCanvasMode(
-      productImageUrl || null,
-      clientBase64 || fallbackBase64,
-      clientProductName || null,
-      clientCategorySlug || null,
-      'Product details not found. Showing style overlay with product image instead.',
-    )
-  }
-
-  const productImages: string[] = JSON.parse(product.images || '[]')
-  const productImageToUse = productImageUrl || (productImages.length > 0 ? productImages[0] : null)
-
-  // Use client-provided base64 if available, otherwise resolve server-side
+  // Resolve product image base64
   const clientProvidedBase64 = body.productImageBase64 as string | undefined
   let resolvedBase64: string | null = null
-  if (!clientProvidedBase64 && productImageToUse) {
-    resolvedBase64 = await getProductImageBase64(productImageToUse)
-  }
-  const productImageBase64 = clientProvidedBase64 || resolvedBase64 || null
 
-  if (!productImageBase64) {
-    // PERMANENT FIX: Instead of returning 400, fall back to canvas mode
-    // The client-side canvas can still work with just the product image URL
-    console.log('[try-on] Could not resolve product image base64, falling back to canvas mode')
-    return returnCanvasMode(
-      productImageUrl || productImageToUse || null,
-      null,
-      product.name,
-      product.category?.slug || null,
-      'Product image could not be processed. Showing style overlay instead.',
-    )
+  if (!clientProvidedBase64 && productImageUrl) {
+    resolvedBase64 = await getProductImageBase64(productImageUrl)
   }
 
-  // Fetch AI suggestions in parallel
-  const pairingCategories = getPairingCategory(product.category?.slug || '')
-  let suggestionsPromise: Promise<any[]>
+  const finalProductImageBase64 = clientProvidedBase64 || resolvedBase64
 
-  if (isVercel) {
-    suggestionsPromise = (async () => {
-      try {
-        const { fetchShopifyProducts } = await import('@/lib/shopify')
-        const allProducts = await fetchShopifyProducts()
-        return allProducts
-          .filter(p => pairingCategories.includes(p.categorySlug) && p.id !== productId)
-          .slice(0, 4)
-          .map(p => ({
-            id: p.id,
-            name: p.name,
-            price: p.price,
-            images: JSON.stringify(p.images),
-            category: { name: p.category, slug: p.categorySlug },
-          }))
-      } catch {
-        return []
-      }
-    })()
-  } else {
-    try {
-      const { db } = await import('@/lib/db')
-      suggestionsPromise = db.product.findMany({
-        where: {
-          category: { slug: { in: pairingCategories } },
-          id: { not: productId },
-          stock: { gt: 0 },
-        },
-        include: { category: true },
-        take: 4,
-        orderBy: { rating: 'desc' },
-      })
-    } catch {
-      suggestionsPromise = (async () => {
-        try {
-          const { fetchShopifyProducts } = await import('@/lib/shopify')
-          const allProducts = await fetchShopifyProducts()
-          return allProducts
-            .filter(p => pairingCategories.includes(p.categorySlug) && p.id !== productId)
-            .slice(0, 4)
-            .map(p => ({
-              id: p.id,
-              name: p.name,
-              price: p.price,
-              images: JSON.stringify(p.images),
-              category: { name: p.category, slug: p.categorySlug },
-            }))
-        } catch {
-          return []
-        }
-      })()
-    }
+  if (!finalProductImageBase64) {
+    console.log('[try-on] No product image available, returning canvas mode')
+    return NextResponse.json({
+      mode: 'canvas',
+      code: 'AI_CANVAS_MODE',
+      message: 'Product image not available for AI processing.',
+      productImageBase64: null,
+      productImageUrl: productImageUrl || null,
+      productName: productName || null,
+      categorySlug: categorySlug || null,
+    })
   }
 
-  const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  // ── PRIMARY STRATEGY: IDM-VTON HuggingFace Space ──
+  // This is the ONLY strategy — a dedicated virtual try-on model.
+  // Hard 50-second timeout ensures we never exceed Vercel's 60s limit.
+  console.log('[try-on] Attempting IDM-VTON virtual try-on...')
 
-  // Create job using the pipeline module
-  createJob(jobId, {
-    categorySlug: product.category.slug,
-    productName: product.name,
-  })
-
-  // Start the pipeline in the background
-  runPipeline({
-    jobId,
-    productName: product.name,
-    categorySlug: product.category.slug,
+  const result = await tryIDMVTON(
     selfieData,
-    productImageBase64,
-    suggestionsPromise,
-  }).catch((err) => console.error('[try-on] Pipeline failed:', err))
+    finalProductImageBase64,
+    productName || 'Product',
+    categorySlug || '',
+  )
 
+  if (result) {
+    console.log(`[try-on] IDM-VTON success! Strategy: ${result.strategy}`)
+    return NextResponse.json({
+      success: true,
+      imageUrl: result.imageUrl,
+      strategy: result.strategy,
+      productName,
+      categorySlug,
+    })
+  }
+
+  // ── IDM-VTON failed — return canvas mode ──
+  console.log('[try-on] IDM-VTON failed, returning canvas mode')
   return NextResponse.json({
-    jobId,
-    status: 'processing',
-    productName: product.name,
-    categorySlug: product.category.slug,
+    mode: 'canvas',
+    code: 'AI_CANVAS_MODE',
+    message: 'AI virtual try-on is currently busy. A style overlay preview will be shown instead.',
+    productImageBase64: finalProductImageBase64,
+    productImageUrl: productImageUrl || null,
+    productName: productName || null,
+    categorySlug: categorySlug || null,
   })
 }
 
 // ── GET /api/try-on?jobId=xxx ──────────────────────────────────────
+// Kept for backward compatibility with polling clients
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const jobId = searchParams.get('jobId')
-  if (!jobId) return NextResponse.json({ error: 'Job ID required' }, { status: 400 })
 
-  const job = getJob(jobId)
-
-  if (!job) {
-    // Job not found locally — might be on the local ai-proxy or the remote proxy
-
-    // Try local ai-proxy first (same sandbox)
-    if (!process.env.VERCEL) {
-      try {
-        const localProxyRes = await fetch(`http://localhost:3030/api/try-on?jobId=${jobId}`, {
-          signal: AbortSignal.timeout(5000),
-        })
-        if (localProxyRes.ok) {
-          const localResult = await localProxyRes.json()
-          if (localResult.status && localResult.status !== 'failed') {
-            return NextResponse.json(localResult, { status: 200 })
-          }
-        }
-      } catch {}
-    }
-
-    // Try remote proxy (for Vercel → sandbox routing)
-    const proxyUrl = process.env.ZAI_PROXY_URL
-    if (proxyUrl) {
-      try {
-        const proxyHeaders = getProxyHeaders(proxyUrl)
-        const proxyFetchUrl = buildProxyUrl(proxyUrl, '/api/try-on', { jobId: jobId })
-        const proxyResponse = await fetch(proxyFetchUrl, {
-          headers: proxyHeaders,
-          signal: AbortSignal.timeout(15000), // 15s for status polling
-        })
-        
-        if (!proxyResponse.ok) {
-          const errorData = await proxyResponse.json().catch(() => ({ error: 'Proxy returned error' }))
-          return NextResponse.json(errorData, { status: proxyResponse.status })
-        }
-        
-        const proxyResult = await proxyResponse.json()
-        return NextResponse.json(proxyResult, { status: 200 })
-      } catch (proxyError) {
-        console.error('[try-on] GET proxy failed:', proxyError)
-        return NextResponse.json({ error: 'Job not found and proxy unavailable' }, { status: 404 })
-      }
-    }
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 })
+  if (!jobId) {
+    return NextResponse.json({ error: 'Job ID required' }, { status: 400 })
   }
 
+  // No job storage in the simplified route — return not found
+  // The client should use the synchronous POST approach instead
   return NextResponse.json({
+    status: 'failed',
+    error: 'Job polling is no longer supported. Please use the synchronous API.',
     jobId,
-    status: job.status,
-    imageUrl: job.imageUrl,
-    productName: job.productName,
-    categorySlug: job.categorySlug,
-    error: job.error,
-    strategy: job.strategy,
-    colorAccuracy: job.colorAccuracy,
-    faceAccuracy: job.faceAccuracy,
-    pipelinePhase: job.pipelinePhase,
-    totalPasses: job.totalPasses,
-    suggestions: job.suggestions,
-    progress: job.progress,
   })
 }
