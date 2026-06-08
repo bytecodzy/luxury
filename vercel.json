@@ -1,6 +1,10 @@
 {
   "framework": "nextjs",
   "functions": {
+    "src/app/api/try-on/**/*.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
     "src/app/api/**/*.ts": {
       "memory": 1024,
       "maxDuration": 30
