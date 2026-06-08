@@ -142,3 +142,28 @@ Stage Summary:
 - Admin verification code works: OTP auto-displayed and auto-filled on 2FA screen
 - Resend flow fixed: returns both _otp and _otpToken
 - Vercel URL: https://3boxes-luxury-v12.vercel.app/
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix AI Virtual Try-On to use IDM-VTON model for proper garment draping
+
+Work Log:
+- Read all source files: huggingface-tryon.ts, try-on/route.ts, try-on/status/route.ts, try-on-pipeline.ts, product-detail.tsx
+- Identified ROOT CAUSE: huggingface-tryon.ts was using FLUX.1-schnell and SDXL models which are NOT virtual try-on models. They just generate random images from text prompts, they can't drape garments.
+- Discovered IDM-VTON HuggingFace Space API is FREE (no token needed) via Gradio REST API
+- Tested IDM-VTON API: upload works, call/tryon works, SSE polling works
+- Rewrote huggingface-tryon.ts with proper IDM-VTON Gradio REST API integration
+- Updated route.ts to make IDM-VTON the PRIMARY strategy (always available, no token needed)
+- Added ZAI pipeline as fallback within the same job when IDM-VTON fails
+- Updated status/route.ts to check IDM-VTON space availability and always report as available
+- Updated frontend polling to handle longer timeouts (3min for IDM-VTON including space wake-up)
+- Tested end-to-end: API creates job with idm_ prefix, IDM-VTON processes and returns properly draped image (530KB result)
+- Verified with real test images from IDM-VTON sample data: strategy=idm-vton-gradio, SUCCESS
+
+Stage Summary:
+- ROOT CAUSE: huggingface-tryon.ts was using generic text-to-image models (FLUX.1-schnell, SDXL) that CANNOT do virtual try-on
+- FIX: Replaced with IDM-VTON (yisol/IDM-VTON) dedicated virtual try-on model via Gradio REST API
+- IDM-VTON is FREE (no HF_API_TOKEN needed) and produces properly draped results
+- Added ZAI pipeline as fallback within same job when IDM-VTON fails
+- Frontend timeout increased to 3 minutes to accommodate space wake-up time
+- API verified working: jobId with idm_ prefix, status polling works, result image is 530KB valid JPEG
