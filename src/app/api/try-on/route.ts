@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { performVirtualTryOn, preWarmSpace, isSpaceAwake } from '@/lib/virtual-tryon'
+import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/lib/virtual-tryon'
 
 export const maxDuration = 60
 
@@ -169,7 +169,8 @@ export async function GET(request: NextRequest) {
       message: awake ? 'IDM-VTON ready' : 'IDM-VTON warming up — try-on will use alternative AI',
     })
   }
-  const awake = await isSpaceAwake()
+  const statusResult = await checkIDMVTONSpaceStatus()
+  const awake = statusResult.awake
   return NextResponse.json({
     available: true,
     spaceAwake: awake,

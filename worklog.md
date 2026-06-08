@@ -78,3 +78,21 @@ Stage Summary:
 - Key improvements: instant selfie preview, 55s max timeout, multi-strategy backend, canvas fallback never fails
 - Files modified: src/lib/virtual-tryon.ts (new), src/app/api/try-on/route.ts (rewrite), src/components/try-on-dialog.tsx (rewrite), src/components/product-detail.tsx (cleanup)
 - Verified: Homepage loads, product detail renders, try-on dialog opens with upload area
+---
+Task ID: 6
+Agent: Main Agent
+Task: Fix build errors - isSpaceAwake export missing and Video icon HMR issue
+
+Work Log:
+- Fixed /api/try-on/route.ts import: changed `isSpaceAwake` (doesn't exist) to `checkIDMVTONSpaceStatus` (valid export)
+- Updated GET handler to use `checkIDMVTONSpaceStatus()` instead of `isSpaceAwake()`
+- Cleared .next cache to resolve stale HMR module error for lucide-react Video icon
+- Verified: Homepage loads, product detail renders, try-on dialog opens with upload area
+- Verified: API endpoints respond correctly (GET /api/try-on returns space status)
+- Verified: IDM-VTON Space is currently awake and ready
+- Zero lint errors on all modified files
+
+Stage Summary:
+- Build errors fixed: isSpaceAwake → checkIDMVTONSpaceStatus, HMR cache cleared
+- Try-on dialog fully functional: opens, shows upload area, no console errors
+- API health check: IDM-VTON Space is awake and ready
