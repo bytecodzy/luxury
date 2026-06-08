@@ -1,16 +1,17 @@
 'use client';
 
 /**
- * TryOnDialog v2.0 — Fast, Reliable AI Virtual Try-On
+ * TryOnDialog v3.0 — Fast, Reliable AI Virtual Try-On
  *
  * KEY PRINCIPLES:
- * 1. Instant selfie preview (show raw image BEFORE compression)
- * 2. Disclaimer → immediately opens file picker (no double-click needed)
+ * 1. Instant selfie preview (show raw image IMMEDIATELY on upload)
+ * 2. Disclaimer → auto-opens file picker (one-click flow)
  * 3. Hard 55-second client timeout with friendly "try later" message
- * 4. 3BOXES watermark on ALL generated/saved images
- * 5. Full-body output (not half image)
+ * 4. 3BOXES watermark on ALL generated/saved/downloaded images
+ * 5. Full-body output (never half image)
  * 6. Works on both preview and Vercel
  * 7. NEVER frustrate the user — clear progress, honest timeouts
+ * 8. 60-second golden rule — if not done, show friendly message
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -27,10 +28,8 @@ import {
   Camera,
   Sparkles,
   Loader2,
-  X,
   RotateCcw,
   Download,
-  AlertCircle,
   RefreshCw,
   Zap,
   ShieldCheck,
@@ -59,7 +58,7 @@ type Step = 'upload' | 'preview' | 'generating' | 'result' | 'timeout';
 
 // ── Constants ──────────────────────────────────────────────────────
 
-const CLIENT_TIMEOUT_MS = 55_000; // 55 seconds — hard client timeout
+const CLIENT_TIMEOUT_MS = 55_000; // 55 seconds — hard client timeout (golden rule: max 60s total)
 const GENERATE_TIMEOUT_MSG = 'The AI service is currently busy. Please try again in a few minutes — it usually works on the second attempt!';
 
 // ── Helper: Compress image ─────────────────────────────────────────
@@ -131,76 +130,88 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
 }
 
 // ── Helper: Add 3BOXES watermark to image ─────────────────────────
+// This is CRITICAL — every saved/downloaded image MUST have the 3BOXES logo
 
 function add3BoxesWatermark(imageDataUrl: string, productName: string): Promise<string> {
   return new Promise((resolve) => {
     try {
       const img = document.createElement('img');
+      img.crossOrigin = 'anonymous';
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
+        try {
+          const canvas = document.createElement('canvas');
+          // Use the FULL image dimensions — never crop
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(imageDataUrl);
+            return;
+          }
+
+          // Draw the original image at FULL size
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          const w = canvas.width;
+          const h = canvas.height;
+
+          // ── Top-right "3BOXES AI TRY-ON" badge ──
+          ctx.save();
+          ctx.globalAlpha = 0.88;
+          const badgeW = Math.max(Math.floor(w * 0.34), 120);
+          const badgeH = Math.max(Math.floor(h * 0.04), 28);
+          const badgeX = w - badgeW - 12;
+          const badgeY = 12;
+          ctx.fillStyle = '#1c1917';
+          ctx.beginPath();
+          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+          ctx.fill();
+          // Gold border
+          ctx.strokeStyle = 'rgba(218,165,32,0.6)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+          ctx.stroke();
+          // Text
+          ctx.fillStyle = '#daa520';
+          const badgeFontSize = Math.max(10, Math.floor(badgeH * 0.52));
+          ctx.font = `bold ${badgeFontSize}px Arial, Helvetica, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('3BOXES AI TRY-ON', badgeX + badgeW / 2, badgeY + badgeH / 2);
+          ctx.restore();
+
+          // ── Bottom watermark bar ──
+          ctx.save();
+          ctx.globalAlpha = 0.82;
+          const barH = Math.max(40, Math.floor(h * 0.06));
+          const barY = h - barH - 8;
+          ctx.fillStyle = 'rgba(28,25,23,0.75)';
+          ctx.beginPath();
+          ctx.roundRect(w * 0.08, barY, w * 0.84, barH, 8);
+          ctx.fill();
+
+          // Product name (gold)
+          const nameFontSize = Math.max(12, Math.floor(barH * 0.36));
+          ctx.fillStyle = '#daa520';
+          ctx.font = `bold ${nameFontSize}px Arial, Helvetica, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const displayName = (productName || 'Product').substring(0, 40);
+          ctx.fillText(displayName, w / 2, barY + barH * 0.38);
+
+          // "3BOXES GIFTS • AI Style Preview" branding
+          const brandFontSize = Math.max(9, Math.floor(barH * 0.26));
+          ctx.globalAlpha = 0.65;
+          ctx.fillStyle = '#a8a29e';
+          ctx.font = `${brandFontSize}px Arial, Helvetica, sans-serif`;
+          ctx.fillText('3BOXES GIFTS \u2022 AI Style Preview', w / 2, barY + barH * 0.72);
+          ctx.restore();
+
+          resolve(canvas.toDataURL('image/png'));
+        } catch {
           resolve(imageDataUrl);
-          return;
         }
-
-        // Draw the original image
-        ctx.drawImage(img, 0, 0);
-
-        const w = canvas.width;
-        const h = canvas.height;
-
-        // ── Top-right "3BOXES" badge ──
-        ctx.save();
-        ctx.globalAlpha = 0.85;
-        const badgeW = Math.floor(w * 0.32);
-        const badgeH = Math.floor(h * 0.038);
-        const badgeX = w - badgeW - 12;
-        const badgeY = 12;
-        ctx.fillStyle = '#1c1917';
-        ctx.beginPath();
-        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(218,165,32,0.5)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
-        ctx.stroke();
-        ctx.fillStyle = '#daa520';
-        ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.5))}px Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('✨ 3BOXES AI TRY-ON', badgeX + badgeW / 2, badgeY + badgeH * 0.7);
-        ctx.restore();
-
-        // ── Bottom watermark bar ──
-        ctx.save();
-        ctx.globalAlpha = 0.75;
-        const barH = Math.max(32, Math.floor(h * 0.05));
-        const barY = h - barH - 6;
-        ctx.fillStyle = 'rgba(28,25,23,0.65)';
-        ctx.beginPath();
-        ctx.roundRect(w * 0.1, barY, w * 0.8, barH, 6);
-        ctx.fill();
-
-        // Product name
-        const nameFontSize = Math.max(10, Math.floor(barH * 0.35));
-        ctx.fillStyle = '#daa520';
-        ctx.font = `bold ${nameFontSize}px Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        const displayName = (productName || 'Product').substring(0, 35);
-        ctx.fillText(displayName, w / 2, barY + nameFontSize + 4);
-
-        // "3BOXES GIFTS" branding
-        const brandFontSize = Math.max(8, Math.floor(barH * 0.28));
-        ctx.globalAlpha = 0.6;
-        ctx.fillStyle = '#a8a29e';
-        ctx.font = `${brandFontSize}px Arial, sans-serif`;
-        ctx.fillText('3BOXES GIFTS • AI Style Preview', w / 2, barY + nameFontSize + brandFontSize + 6);
-        ctx.restore();
-
-        resolve(canvas.toDataURL('image/png'));
       };
       img.onerror = () => resolve(imageDataUrl);
       img.src = imageDataUrl;
@@ -318,6 +329,8 @@ export function TryOnDialog({
   }, [onResetBackground]);
 
   // ── Disclaimer handlers ──────────────────────────────────────────
+  // KEY FIX: After accepting disclaimer, IMMEDIATELY open file picker
+  // so the user doesn't have to click "Upload" again
   const handleUploadClick = useCallback(() => {
     if (!disclaimerAccepted) {
       setShowDisclaimer(true);
@@ -330,8 +343,13 @@ export function TryOnDialog({
     setDisclaimerAccepted(true);
     setShowDisclaimer(false);
     setDisclaimerChecked(false);
-    // KEY FIX: Immediately open file picker after accepting — NO second click needed!
-    setTimeout(() => fileInputRef.current?.click(), 100);
+    // CRITICAL: Immediately open file picker after accepting — NO second click needed!
+    // Use requestAnimationFrame for more reliable cross-browser behavior
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        fileInputRef.current?.click();
+      }, 50);
+    });
   }, []);
 
   const handleDisclaimerCancel = useCallback(() => {
@@ -363,11 +381,11 @@ export function TryOnDialog({
         const originalDataUrl = ev.target?.result as string;
         if (!originalDataUrl) return;
 
-        // Show preview IMMEDIATELY with the original image — no 30 second wait!
+        // Show preview IMMEDIATELY with the original image — no waiting!
         setSelfiePreview(originalDataUrl);
         setStep('preview');
 
-        // Compress in the background (smaller = faster upload)
+        // Compress in the background (smaller = faster upload to API)
         try {
           const compressed = await compressImage(originalDataUrl, 1024, 0.85);
           setSelfieData(compressed);
@@ -377,6 +395,9 @@ export function TryOnDialog({
         }
       };
       reader.readAsDataURL(file);
+
+      // Reset the file input so the same file can be re-selected
+      e.target.value = '';
     },
     []
   );
@@ -385,6 +406,7 @@ export function TryOnDialog({
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
+      e.stopPropagation();
       const file = e.dataTransfer.files?.[0];
       if (!file || !file.type.startsWith('image/')) {
         setErrorMessage('Please drop an image file');
@@ -416,6 +438,7 @@ export function TryOnDialog({
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
   }, []);
 
   // ── Generate Try-On ──────────────────────────────────────────────
@@ -436,12 +459,15 @@ export function TryOnDialog({
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Pre-resolve product image to base64
+    // Pre-resolve product image to base64 (with timeout)
     let productImageBase64: string | undefined;
     try {
       const imgToFetch = rawProductImage || productImage;
       if (imgToFetch) {
-        productImageBase64 = await fetchImageAsBase64(imgToFetch) || undefined;
+        productImageBase64 = await Promise.race([
+          fetchImageAsBase64(imgToFetch),
+          new Promise<null>(r => setTimeout(() => r(null), 5000)),
+        ]) || undefined;
       }
     } catch {}
 
@@ -460,7 +486,7 @@ export function TryOnDialog({
       });
     }, 1500);
 
-    // HARD 55-second timeout — never make user wait more than 60 seconds total
+    // HARD 55-second timeout — golden rule: never make user wait more than 60s
     const timeoutId = setTimeout(() => {
       if (abortRef.current) {
         abortRef.current.abort();
@@ -469,6 +495,10 @@ export function TryOnDialog({
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
+      }
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current);
+        elapsedIntervalRef.current = null;
       }
       setStep('timeout');
       setErrorMessage(GENERATE_TIMEOUT_MSG);
@@ -500,7 +530,6 @@ export function TryOnDialog({
 
       // Canvas mode — AI unavailable, generate client-side overlay
       if (data.mode === 'canvas' || data.code === 'AI_CANVAS_MODE') {
-        // Try to generate a canvas overlay with 3BOXES watermark
         try {
           const canvasResult = await generateCanvasOverlay(
             selfieData,
@@ -528,7 +557,7 @@ export function TryOnDialog({
         setProgressText('Done!');
         setResultImage(data.imageUrl);
 
-        // Add 3BOXES watermark
+        // Add 3BOXES watermark — CRITICAL for branding
         try {
           const watermarked = await add3BoxesWatermark(data.imageUrl, productName);
           setWatermarkedResult(watermarked);
@@ -538,11 +567,8 @@ export function TryOnDialog({
 
         setStep('result');
         onBackgroundJob?.('result');
-      } else if (data.jobId) {
-        // Polling mode — server returned a job ID
-        await pollForJobResult(data.jobId, timeoutId, controller, productImageBase64);
       } else {
-        // FAILED
+        // FAILED — show timeout/error
         setStep('timeout');
         setErrorMessage(data.error || GENERATE_TIMEOUT_MSG);
       }
@@ -551,6 +577,10 @@ export function TryOnDialog({
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
+      }
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current);
+        elapsedIntervalRef.current = null;
       }
 
       if (controller.signal.aborted) {
@@ -566,105 +596,6 @@ export function TryOnDialog({
     }
   }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob]);
 
-  // ── Poll for job result ──────────────────────────────────────────
-  const pollForJobResult = useCallback(async (
-    jobId: string,
-    timeoutId: NodeJS.Timeout,
-    controller: AbortController,
-    productImageBase64?: string,
-  ) => {
-    const pollStartTime = Date.now();
-    const maxPollTime = CLIENT_TIMEOUT_MS - 5000; // Leave 5s buffer
-    let pollCount = 0;
-
-    const poll = async (): Promise<void> => {
-      if (controller.signal.aborted) return;
-      if (Date.now() - pollStartTime > maxPollTime) {
-        clearTimeout(timeoutId);
-        setStep('timeout');
-        setErrorMessage(GENERATE_TIMEOUT_MSG);
-        return;
-      }
-
-      pollCount++;
-      try {
-        const pollRes = await fetch(`/api/try-on?jobId=${jobId}`, {
-          signal: AbortSignal.timeout(10000),
-        });
-        const pollData = await pollRes.json();
-
-        if (pollData.progress) {
-          setProgressText(pollData.progress);
-        }
-
-        // Update progress based on phase
-        if (pollData.pipelinePhase === 'hf-tryon') setProgressPercent(30);
-        else if (pollData.pipelinePhase === 'generation') setProgressPercent(50);
-        else if (pollData.pipelinePhase === 'complete') setProgressPercent(90);
-        else if (pollCount > 1) setProgressPercent(Math.min(85, 25 + pollCount * 4));
-
-        if (pollData.status === 'completed' && pollData.imageUrl) {
-          clearTimeout(timeoutId);
-          setProgressPercent(100);
-          setResultImage(pollData.imageUrl);
-
-          // Add 3BOXES watermark
-          try {
-            const watermarked = await add3BoxesWatermark(pollData.imageUrl, productName);
-            setWatermarkedResult(watermarked);
-          } catch {
-            setWatermarkedResult(pollData.imageUrl);
-          }
-
-          setStep('result');
-          onBackgroundJob?.('result');
-          return;
-        }
-
-        if (pollData.status === 'failed') {
-          clearTimeout(timeoutId);
-
-          // Try canvas overlay as fallback
-          try {
-            const canvasResult = await generateCanvasOverlay(
-              selfieData!,
-              productImage,
-              productName,
-              productImageBase64,
-              categorySlug,
-            );
-            const watermarked = await add3BoxesWatermark(canvasResult, productName);
-            setResultImage(canvasResult);
-            setWatermarkedResult(watermarked);
-            setProgressPercent(100);
-            setStep('result');
-            onBackgroundJob?.('result');
-          } catch {
-            setStep('timeout');
-            setErrorMessage(GENERATE_TIMEOUT_MSG);
-          }
-          return;
-        }
-
-        // Still processing — poll again after 2 seconds
-        await new Promise(r => setTimeout(r, 2000));
-        return poll();
-      } catch (err) {
-        if (controller.signal.aborted) return;
-        // Connection reset — retry
-        if (pollCount < 30) {
-          await new Promise(r => setTimeout(r, 2000));
-          return poll();
-        }
-        clearTimeout(timeoutId);
-        setStep('timeout');
-        setErrorMessage(GENERATE_TIMEOUT_MSG);
-      }
-    };
-
-    await poll();
-  }, [selfieData, productImage, productName, categorySlug, onBackgroundJob]);
-
   // ── Canvas overlay fallback ──────────────────────────────────────
   const generateCanvasOverlay = useCallback(async (
     selfieDataUrl: string,
@@ -678,8 +609,9 @@ export function TryOnDialog({
         const selfieImg = document.createElement('img');
         selfieImg.onload = () => {
           const canvas = document.createElement('canvas');
-          const width = Math.max(selfieImg.naturalWidth, 512);
-          const height = Math.max(selfieImg.naturalHeight, 680);
+          // Use FULL dimensions — never crop
+          const width = selfieImg.naturalWidth || 512;
+          const height = selfieImg.naturalHeight || 680;
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
@@ -688,7 +620,7 @@ export function TryOnDialog({
             return;
           }
 
-          // Draw the selfie
+          // Draw the selfie at FULL size
           ctx.drawImage(selfieImg, 0, 0, width, height);
 
           // Subtle vignette
@@ -755,6 +687,7 @@ export function TryOnDialog({
 
           // Try loading product image
           const productImg = document.createElement('img');
+          productImg.crossOrigin = 'anonymous';
           let resolved = false;
 
           const finish = (img?: HTMLImageElement) => {
@@ -831,8 +764,8 @@ export function TryOnDialog({
   }, [handleGenerate]);
 
   // ── Download result with 3BOXES watermark ────────────────────────
+  // CRITICAL: Always download the WATERMARKED version so 3BOXES branding is included
   const handleDownload = useCallback(() => {
-    // Use the watermarked version for download
     const imageToDownload = watermarkedResult || resultImage;
     if (!imageToDownload) return;
 
@@ -983,7 +916,7 @@ export function TryOnDialog({
                       disabled={!disclaimerChecked}
                       className="flex-1 bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      I Understand & Agree
+                      Accept & Upload Photo
                     </Button>
                   </div>
                 </motion.div>
@@ -1030,7 +963,7 @@ export function TryOnDialog({
                     Upload your selfie
                   </p>
                   <p className="mt-1 text-xs text-amber-200/40">
-                    Drag & drop or click to browse · JPG, PNG, WebP
+                    Drag & drop or click to browse &middot; JPG, PNG, WebP
                   </p>
                 </div>
 
@@ -1243,7 +1176,7 @@ export function TryOnDialog({
 
                 {/* Disclaimer */}
                 <p className="text-center text-xs text-amber-200/30">
-                  AI-generated preview with 3BOXES watermark · Actual fit may vary
+                  AI-generated preview with 3BOXES watermark &middot; Actual fit may vary
                 </p>
               </motion.div>
             )}

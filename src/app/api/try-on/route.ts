@@ -3,6 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 // Maximum duration for Vercel serverless function (Pro plan = 60s)
 export const maxDuration = 60
 
+// ── Hard timeout constants ──────────────────────────────────────────
+const TOTAL_HARD_TIMEOUT_MS = 50_000 // 50 seconds — hard server timeout (leaves 10s buffer for Vercel)
+const IDM_VTON_TIMEOUT_MS = 30_000  // 30 seconds for IDM-VTON (most of the time it takes 15-25s)
+const ZAI_EDIT_TIMEOUT_MS = 20_000  // 20 seconds for ZAI image edit
+
 // ── Product image helpers ──────────────────────────────────────────
 
 async function getProductImageBase64(imagePath: string): Promise<string | null> {
@@ -88,9 +93,7 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
   }
 }
 
-// ── IDM-VTON Integration ─────────────────────────────────────────
-
-const IDM_VTON_URL = 'https://yisol-idm-vton.hf.space'
+// ── Data URL Helpers ────────────────────────────────────────────────
 
 function dataUrlToBase64(dataUrl: string): string {
   const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
@@ -102,19 +105,31 @@ function getMimeType(dataUrl: string): string {
   return match ? match[1] : 'image/png'
 }
 
+// ── Strategy 1: IDM-VTON HuggingFace Space ─────────────────────────
+
+const IDM_VTON_URL = 'https://yisol-idm-vton.hf.space'
+
 function getGarmentDescription(categorySlug: string, productName: string): string {
   const cat = (categorySlug || '').toLowerCase()
-  if (cat.includes('saree')) return `A beautiful saree - ${productName}. Traditional Indian garment with elegant drape.`
-  if (cat.includes('jewel')) return `Elegant jewelry - ${productName}`
+  const name = (productName || '').toLowerCase()
+
+  if (cat.includes('saree') || cat.includes('women-saree'))
+    return `A beautiful saree - ${productName}. Traditional Indian garment with elegant drape.`
+  if (cat.includes('jewel') || cat.includes('women-jewel')) {
+    if (name.includes('earring') || name.includes('jhumka')) return `Elegant earrings - ${productName}`
+    if (name.includes('necklace') || name.includes('pendant') || name.includes('choker')) return `Beautiful necklace - ${productName}`
+    if (name.includes('bracelet') || name.includes('bangle') || name.includes('kada')) return `Elegant bracelet - ${productName}`
+    if (name.includes('ring')) return `Beautiful ring - ${productName}`
+    return `Jewelry piece - ${productName}`
+  }
   if (cat.includes('watch')) return `Luxury watch - ${productName}`
-  if (cat.includes('shirt') || cat.includes('tshirt')) return `A shirt - ${productName}. Well-fitted casual wear.`
-  if (cat.includes('fashion') || cat.includes('dress')) return `A fashion outfit - ${productName}. Stylish and well-fitted.`
+  if (cat.includes('shirt') || cat.includes('tshirt') || cat.includes('t-shirt'))
+    return `A shirt - ${productName}. Well-fitted casual wear.`
+  if (cat.includes('fashion') || cat.includes('dress') || cat.includes('women-fashion'))
+    return `A fashion outfit - ${productName}. Stylish and well-fitted.`
   return `A garment - ${productName}`
 }
 
-/**
- * Upload an image to the IDM-VTON Space.
- */
 async function uploadImageToSpace(
   imageDataUrl: string,
   filename: string,
@@ -164,9 +179,6 @@ async function uploadImageToSpace(
   return paths[0]
 }
 
-/**
- * Download a result image and convert to base64 data URL.
- */
 async function downloadResultImage(url: string): Promise<string | null> {
   try {
     const headers: Record<string, string> = {
@@ -196,17 +208,16 @@ async function downloadResultImage(url: string): Promise<string | null> {
 }
 
 /**
- * Try IDM-VTON virtual try-on with a HARD 50-second timeout.
- * Returns the result image as a base64 data URL, or null if it fails/times out.
+ * Strategy 1: IDM-VTON virtual try-on with HARD timeout.
+ * Returns the result image as base64 data URL, or null if it fails/times out.
  */
 async function tryIDMVTON(
   selfieData: string,
   productImageBase64: string,
   productName: string,
   categorySlug: string,
-  onProgress?: (msg: string) => void,
+  hardTimeoutMs: number,
 ): Promise<{ imageUrl: string; strategy: string } | null> {
-  const HARD_TIMEOUT_MS = 50_000 // 50 seconds — hard server timeout
   const startTime = Date.now()
 
   const token = process.env.HF_API_TOKEN
@@ -217,44 +228,47 @@ async function tryIDMVTON(
 
   try {
     // Step 1: Upload person image
-    onProgress?.('Uploading your photo to AI...')
     let personPath: string
     try {
       personPath = await uploadImageToSpace(selfieData, 'person', headers)
-      console.log(`[try-on] Person uploaded to: ${personPath}`)
+      console.log(`[try-on] IDM-VTON: Person uploaded to: ${personPath}`)
     } catch (uploadErr) {
-      console.error(`[try-on] Person upload failed:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr))
+      console.error(`[try-on] IDM-VTON: Person upload failed:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr))
       return null
     }
 
-    if (Date.now() - startTime > HARD_TIMEOUT_MS) return null
+    if (Date.now() - startTime > hardTimeoutMs) {
+      console.log('[try-on] IDM-VTON: Timed out after person upload')
+      return null
+    }
 
     // Step 2: Upload garment image
-    onProgress?.('Uploading product image to AI...')
     let garmentPath: string
     try {
       garmentPath = await uploadImageToSpace(productImageBase64, 'garment', headers)
-      console.log(`[try-on] Garment uploaded to: ${garmentPath}`)
+      console.log(`[try-on] IDM-VTON: Garment uploaded to: ${garmentPath}`)
     } catch (uploadErr) {
-      console.error(`[try-on] Garment upload failed:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr))
+      console.error(`[try-on] IDM-VTON: Garment upload failed:`, uploadErr instanceof Error ? uploadErr.message : String(uploadErr))
       return null
     }
 
-    if (Date.now() - startTime > HARD_TIMEOUT_MS) return null
+    if (Date.now() - startTime > hardTimeoutMs) {
+      console.log('[try-on] IDM-VTON: Timed out after garment upload')
+      return null
+    }
 
     // Step 3: Call the tryon endpoint
-    onProgress?.('AI is generating your try-on...')
     const garmentDes = getGarmentDescription(categorySlug, productName)
 
     const callBody = {
       data: [
-        // Human (ImageEditor format)
+        // Human (ImageEditor format) — background is the person image
         {
           background: { path: personPath, meta: { _type: 'gradio.FileData' } },
           layers: [],
           composite: null,
         },
-        // Garment
+        // Garment (simple Image component)
         { path: garmentPath, meta: { _type: 'gradio.FileData' } },
         // garment description
         garmentDes,
@@ -269,6 +283,8 @@ async function tryIDMVTON(
       ],
     }
 
+    console.log(`[try-on] IDM-VTON: Calling /call/tryon`)
+
     const callRes = await fetch(`${IDM_VTON_URL}/call/tryon`, {
       method: 'POST',
       headers: {
@@ -281,7 +297,7 @@ async function tryIDMVTON(
 
     if (!callRes.ok) {
       const errText = await callRes.text().catch(() => 'unknown')
-      console.error(`[try-on] Call tryon failed ${callRes.status}: ${errText.substring(0, 300)}`)
+      console.error(`[try-on] IDM-VTON: Call tryon failed ${callRes.status}: ${errText.substring(0, 300)}`)
       return null
     }
 
@@ -300,14 +316,14 @@ async function tryIDMVTON(
     }
 
     if (!eventId) {
-      console.error(`[try-on] Could not parse event_id: ${callResponseText.substring(0, 300)}`)
+      console.error(`[try-on] IDM-VTON: Could not parse event_id: ${callResponseText.substring(0, 300)}`)
       return null
     }
 
-    console.log(`[try-on] Event ID: ${eventId}`)
+    console.log(`[try-on] IDM-VTON: Event ID: ${eventId}`)
 
     // Step 4: Poll for the result with remaining time
-    const maxPollTime = HARD_TIMEOUT_MS - (Date.now() - startTime) - 5000 // Leave 5s buffer
+    const maxPollTime = hardTimeoutMs - (Date.now() - startTime) - 3000 // Leave 3s buffer
     const pollStart = Date.now()
 
     while (Date.now() - pollStart < maxPollTime) {
@@ -328,19 +344,19 @@ async function tryIDMVTON(
 
         // Check for error event
         if (pollText.includes('event: error') || pollText.includes('event:error')) {
-          console.error(`[try-on] Error event: ${pollText.substring(0, 500)}`)
+          console.error(`[try-on] IDM-VTON: Error event: ${pollText.substring(0, 500)}`)
           return null
         }
 
         // Check for complete event
         if (pollText.includes('event: complete') || pollText.includes('event:complete')) {
-          console.log(`[try-on] Got complete event!`)
+          console.log(`[try-on] IDM-VTON: Got complete event!`)
 
           // Extract image URL
           const urlMatches = [...pollText.matchAll(/"url":\s*"([^"]+)"/g)]
           if (urlMatches.length > 0) {
             const imageUrl = urlMatches[0][1]
-            console.log(`[try-on] Got result image URL: ${imageUrl.substring(0, 100)}`)
+            console.log(`[try-on] IDM-VTON: Got result image URL: ${imageUrl.substring(0, 100)}`)
             const result = await downloadResultImage(imageUrl)
             if (result) {
               return { imageUrl: result, strategy: 'idm-vton' }
@@ -358,23 +374,23 @@ async function tryIDMVTON(
             }
           }
 
-          console.error(`[try-on] Could not extract image from complete event`)
+          console.error(`[try-on] IDM-VTON: Could not extract image from complete event`)
           return null
         }
 
-        // Still processing — update progress
+        // Still processing
         const elapsed = Math.floor((Date.now() - startTime) / 1000)
-        onProgress?.(`AI is processing... (${elapsed}s)`)
+        console.log(`[try-on] IDM-VTON: Still processing... (${elapsed}s)`)
       } catch (pollErr) {
         const errMsg = pollErr instanceof Error ? pollErr.message : String(pollErr)
         if (errMsg.includes('ECONNRESET') || errMsg.includes('socket')) {
           continue
         }
-        console.error(`[try-on] Poll error: ${errMsg.substring(0, 200)}`)
+        console.error(`[try-on] IDM-VTON: Poll error: ${errMsg.substring(0, 200)}`)
       }
     }
 
-    console.log(`[try-on] IDM-VTON timed out after ${Math.floor((Date.now() - startTime) / 1000)}s`)
+    console.log(`[try-on] IDM-VTON: Timed out after ${Math.floor((Date.now() - startTime) / 1000)}s`)
     return null
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
@@ -383,9 +399,104 @@ async function tryIDMVTON(
   }
 }
 
+// ── Strategy 2: ZAI Dual-Image Edit ────────────────────────────────
+
+async function tryZAIImageEdit(
+  selfieData: string,
+  productImageBase64: string,
+  productName: string,
+  categorySlug: string,
+  hardTimeoutMs: number,
+): Promise<{ imageUrl: string; strategy: string } | null> {
+  try {
+    const { createZAI } = await import('@/lib/zai')
+    const zai = await createZAI()
+
+    // Build a prompt for the image edit
+    const cat = (categorySlug || '').toLowerCase()
+    let bodyType = 'Professional fashion photograph, upper body'
+    let placement = 'wearing the product'
+
+    if (cat.includes('saree')) {
+      bodyType = 'Full-body professional fashion photograph'
+      placement = 'draped in the saree in traditional Indian style with pallu over the left shoulder'
+    } else if (cat.includes('fashion') || cat.includes('dress')) {
+      bodyType = 'Full-body professional fashion photograph'
+      placement = 'wearing the outfit'
+    } else if (cat.includes('jewel') || cat.includes('women-jewel')) {
+      bodyType = 'Close-up beauty photograph from chest up'
+      const name = productName.toLowerCase()
+      if (name.includes('earring') || name.includes('jhumka')) placement = 'wearing the earrings'
+      else if (name.includes('necklace') || name.includes('pendant')) placement = 'wearing the necklace'
+      else if (name.includes('bracelet') || name.includes('bangle')) placement = 'wearing the bracelet'
+      else if (name.includes('ring')) placement = 'wearing the ring'
+      else placement = 'wearing the jewelry'
+    } else if (cat.includes('watch')) {
+      bodyType = 'Close-up photograph from waist up'
+      placement = 'wearing the watch on the wrist'
+    } else if (cat.includes('shirt') || cat.includes('tshirt')) {
+      bodyType = 'Full-body professional fashion photograph'
+      placement = 'wearing the shirt'
+    }
+
+    const prompt = `${bodyType}. Show this EXACT person ${placement}. The product is "${productName}". Preserve the person's face exactly - same eyes, nose, lips, jawline. Do NOT change skin tone or hair. The product must look naturally worn with proper shadows and fit. Studio-quality photorealistic result.`
+
+    console.log(`[try-on] ZAI: Attempting dual-image edit for "${productName}"`)
+
+    const response = await Promise.race([
+      zai.images.generations.edit({
+        prompt,
+        images: [
+          { url: selfieData },
+          { url: productImageBase64 },
+        ],
+        size: '768x1344',
+      } as any),
+      new Promise<null>(r => setTimeout(() => r(null), hardTimeoutMs)),
+    ])
+
+    if (response?.data?.[0]?.base64) {
+      console.log(`[try-on] ZAI: Dual-image edit succeeded!`)
+      return {
+        imageUrl: `data:image/png;base64,${response.data[0].base64}`,
+        strategy: 'zai-dual-edit',
+      }
+    }
+
+    // If dual-image edit failed, try single-image edit with just the selfie
+    console.log(`[try-on] ZAI: Dual-image edit returned no result, trying single-image edit`)
+
+    const singleResponse = await Promise.race([
+      zai.images.generations.edit({
+        prompt,
+        images: [{ url: selfieData }],
+        size: '768x1344',
+      } as any),
+      new Promise<null>(r => setTimeout(() => r(null), 15000)),
+    ])
+
+    if (singleResponse?.data?.[0]?.base64) {
+      console.log(`[try-on] ZAI: Single-image edit succeeded!`)
+      return {
+        imageUrl: `data:image/png;base64,${singleResponse.data[0].base64}`,
+        strategy: 'zai-selfie-edit',
+      }
+    }
+
+    console.log(`[try-on] ZAI: Both edit strategies returned no result`)
+    return null
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.error('[try-on] ZAI error:', errMsg.substring(0, 300))
+    return null
+  }
+}
+
 // ── POST /api/try-on ───────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  const pipelineStart = Date.now()
+
   let body: any
   try {
     body = await request.json()
@@ -424,35 +535,85 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // ── PRIMARY STRATEGY: IDM-VTON HuggingFace Space ──
-  // This is the ONLY strategy — a dedicated virtual try-on model.
-  // Hard 50-second timeout ensures we never exceed Vercel's 60s limit.
-  console.log('[try-on] Attempting IDM-VTON virtual try-on...')
-
-  const result = await tryIDMVTON(
-    selfieData,
-    finalProductImageBase64,
-    productName || 'Product',
-    categorySlug || '',
-  )
-
-  if (result) {
-    console.log(`[try-on] IDM-VTON success! Strategy: ${result.strategy}`)
+  // Check if we still have time left
+  const elapsedSoFar = Date.now() - pipelineStart
+  if (elapsedSoFar > TOTAL_HARD_TIMEOUT_MS - 10000) {
+    console.log(`[try-on] Already used ${elapsedSoFar}ms, not enough time for AI. Returning canvas mode.`)
     return NextResponse.json({
-      success: true,
-      imageUrl: result.imageUrl,
-      strategy: result.strategy,
-      productName,
-      categorySlug,
+      mode: 'canvas',
+      code: 'AI_CANVAS_MODE',
+      message: 'Image preparation took too long. A style overlay preview will be shown instead.',
+      productImageBase64: finalProductImageBase64,
+      productImageUrl: productImageUrl || null,
+      productName: productName || null,
+      categorySlug: categorySlug || null,
     })
   }
 
-  // ── IDM-VTON failed — return canvas mode ──
-  console.log('[try-on] IDM-VTON failed, returning canvas mode')
+  // ── Strategy 1: IDM-VTON HuggingFace Space ──────────────────────
+  const idmVtonTimeout = Math.min(IDM_VTON_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 5000)
+  if (idmVtonTimeout > 10000) {
+    console.log(`[try-on] Strategy 1: IDM-VTON (timeout: ${idmVtonTimeout}ms)`)
+
+    const idmResult = await tryIDMVTON(
+      selfieData,
+      finalProductImageBase64,
+      productName || 'Product',
+      categorySlug || '',
+      idmVtonTimeout,
+    )
+
+    if (idmResult) {
+      console.log(`[try-on] IDM-VTON success! Strategy: ${idmResult.strategy} (${Date.now() - pipelineStart}ms)`)
+      return NextResponse.json({
+        success: true,
+        imageUrl: idmResult.imageUrl,
+        strategy: idmResult.strategy,
+        productName,
+        categorySlug,
+      })
+    }
+
+    console.log(`[try-on] IDM-VTON failed (${Date.now() - pipelineStart}ms elapsed)`)
+  }
+
+  // ── Strategy 2: ZAI Image Edit ──────────────────────────────────
+  const zaiTimeout = Math.min(ZAI_EDIT_TIMEOUT_MS, TOTAL_HARD_TIMEOUT_MS - (Date.now() - pipelineStart) - 3000)
+  if (zaiTimeout > 5000) {
+    console.log(`[try-on] Strategy 2: ZAI Image Edit (timeout: ${zaiTimeout}ms)`)
+
+    const zaiResult = await tryZAIImageEdit(
+      selfieData,
+      finalProductImageBase64,
+      productName || 'Product',
+      categorySlug || '',
+      zaiTimeout,
+    )
+
+    if (zaiResult) {
+      console.log(`[try-on] ZAI success! Strategy: ${zaiResult.strategy} (${Date.now() - pipelineStart}ms)`)
+      return NextResponse.json({
+        success: true,
+        imageUrl: zaiResult.imageUrl,
+        strategy: zaiResult.strategy,
+        productName,
+        categorySlug,
+      })
+    }
+
+    console.log(`[try-on] ZAI failed (${Date.now() - pipelineStart}ms elapsed)`)
+  }
+
+  // ── All AI strategies failed — return canvas mode ────────────────
+  const totalTime = Date.now() - pipelineStart
+  console.log(`[try-on] All AI strategies failed after ${totalTime}ms, returning canvas mode`)
+
   return NextResponse.json({
     mode: 'canvas',
     code: 'AI_CANVAS_MODE',
-    message: 'AI virtual try-on is currently busy. A style overlay preview will be shown instead.',
+    message: totalTime > TOTAL_HARD_TIMEOUT_MS - 5000
+      ? 'AI virtual try-on timed out. Please try again — it usually works on the second attempt!'
+      : 'AI virtual try-on is currently busy. A style overlay preview will be shown instead.',
     productImageBase64: finalProductImageBase64,
     productImageUrl: productImageUrl || null,
     productName: productName || null,
@@ -461,7 +622,7 @@ export async function POST(request: NextRequest) {
 }
 
 // ── GET /api/try-on?jobId=xxx ──────────────────────────────────────
-// Kept for backward compatibility with polling clients
+// Kept for backward compatibility — no longer uses job polling
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -471,8 +632,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Job ID required' }, { status: 400 })
   }
 
-  // No job storage in the simplified route — return not found
-  // The client should use the synchronous POST approach instead
   return NextResponse.json({
     status: 'failed',
     error: 'Job polling is no longer supported. Please use the synchronous API.',
