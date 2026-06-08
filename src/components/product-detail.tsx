@@ -1,6 +1,6 @@
 'use client';
 
-/* Product Detail with AI Virtual Try-On v5 */
+/* Product Detail with AI Virtual Try-On v6 */
 
 import { useStore } from '@/lib/store';
 import { TryOnDialog } from '@/components/try-on-dialog';

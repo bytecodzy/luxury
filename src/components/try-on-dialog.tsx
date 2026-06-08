@@ -1,16 +1,16 @@
 'use client';
 
 /**
- * TryOnDialog v5 — Instant Preview, Reliable Try-On, Never Fails
+ * TryOnDialog v6 — Honest, Fast, No Fake Overlays
  *
  * KEY PRINCIPLES:
- * 1. Selfie preview shown INSTANTLY after file read (before compression)
+ * 1. Selfie preview shown INSTANTLY after file read
  * 2. "Create Try-On" button available as soon as selfie data is ready
- * 3. Single synchronous POST to /api/try-on (no polling, no jobs)
- * 4. 55-second hard client timeout — never wait 200+ seconds
- * 5. Canvas fallback ALWAYS succeeds — user ALWAYS gets a result
- * 6. Pre-warm IDM-VTON Space when dialog opens (parallel with upload)
- * 7. Clear progress messages so user knows what's happening
+ * 3. Single synchronous POST to /api/try-on
+ * 4. 50-second hard client timeout — never wait more than 50s
+ * 5. NO canvas overlay fallback — either real AI result or honest error
+ * 6. If AI is slow, show "try later" — never make users wait 200s
+ * 7. Clear progress with real strategy indicators
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -22,7 +22,6 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Camera,
@@ -31,8 +30,7 @@ import {
   RotateCcw,
   Download,
   AlertCircle,
-  RefreshCw,
-  Zap,
+  Clock,
   Shirt,
 } from 'lucide-react';
 import Image from 'next/image';
@@ -119,248 +117,18 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
   return null;
 }
 
-// ── Canvas Fallback ────────────────────────────────────────────────
-
-/**
- * Client-side canvas composite that overlays the product on the selfie.
- * This is the "never fails" fallback — it ALWAYS produces a result.
- */
-function generateCanvasFallback(
-  selfieData: string,
-  productImageUrl: string,
-  productName: string,
-  productImageBase64?: string,
-  categorySlug?: string,
-): Promise<string> {
-  return new Promise((resolve) => {
-    const createMinimalResult = (): string => {
-      try {
-        const c = document.createElement('canvas');
-        c.width = 512; c.height = 680;
-        const cx = c.getContext('2d');
-        if (cx) {
-          const grad = cx.createLinearGradient(0, 0, 0, 680);
-          grad.addColorStop(0, '#1c1917'); grad.addColorStop(1, '#292524');
-          cx.fillStyle = grad; cx.fillRect(0, 0, 512, 680);
-          cx.fillStyle = '#daa520'; cx.font = 'bold 22px Arial, sans-serif'; cx.textAlign = 'center';
-          cx.fillText('✨ Style Preview', 256, 300);
-          cx.fillStyle = '#a8a29e'; cx.font = '14px Arial, sans-serif';
-          cx.fillText((productName || 'Product').substring(0, 40), 256, 340);
-          cx.fillStyle = '#78716c'; cx.font = '12px Arial, sans-serif';
-          cx.fillText('Powered by 3BOXES', 256, 380);
-          return c.toDataURL('image/png');
-        }
-      } catch {}
-      return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg==';
-    };
-
-    try {
-      const selfieImg = document.createElement('img');
-      const cat = (categorySlug || '').toLowerCase();
-
-      selfieImg.onload = () => {
-        const canvas = document.createElement('canvas');
-        const width = Math.max(selfieImg.naturalWidth, 512);
-        const height = Math.max(selfieImg.naturalHeight, 680);
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) { resolve(createMinimalResult()); return; }
-
-        // 1. Draw the selfie as the base
-        ctx.drawImage(selfieImg, 0, 0, width, height);
-
-        // 2. Subtle vignette overlay for premium feel
-        const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
-        vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-        vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.15)');
-        ctx.fillStyle = vignetteGrad;
-        ctx.fillRect(0, 0, width, height);
-
-        // 3. Determine overlay position based on category
-        let overlayX: number, overlayY: number, overlayW: number, overlayH: number;
-        const centerX = width / 2;
-
-        if (cat.includes('jewel') || cat.includes('necklace')) {
-          overlayX = centerX - width * 0.2;
-          overlayY = height * 0.35;
-          overlayW = width * 0.4;
-          overlayH = height * 0.18;
-        } else if (cat.includes('watch')) {
-          overlayX = width * 0.15;
-          overlayY = height * 0.55;
-          overlayW = width * 0.25;
-          overlayH = width * 0.25;
-        } else if (cat.includes('saree') || cat.includes('fashion') || cat.includes('shirt') || cat.includes('dress')) {
-          overlayX = centerX - width * 0.28;
-          overlayY = height * 0.35;
-          overlayW = width * 0.56;
-          overlayH = height * 0.38;
-        } else if (cat.includes('fragrance')) {
-          overlayX = centerX + width * 0.05;
-          overlayY = height * 0.35;
-          overlayW = width * 0.25;
-          overlayH = height * 0.3;
-        } else {
-          overlayX = centerX - width * 0.2;
-          overlayY = height * 0.38;
-          overlayW = width * 0.4;
-          overlayH = height * 0.28;
-        }
-
-        // 4. Load and draw product image
-        const productImg = document.createElement('img');
-        let resolved = false;
-
-        const finish = (img?: HTMLImageElement) => {
-          if (resolved) return;
-          resolved = true;
-
-          if (img) {
-            // Draw product image at the calculated position
-            ctx.save();
-            ctx.shadowColor = 'rgba(0,0,0,0.4)';
-            ctx.shadowBlur = 15;
-            ctx.shadowOffsetX = 3;
-            ctx.shadowOffsetY = 3;
-
-            // Maintain aspect ratio
-            const imgAspect = img.naturalWidth / img.naturalHeight;
-            const slotAspect = overlayW / overlayH;
-            let drawW = overlayW;
-            let drawH = overlayH;
-            if (imgAspect > slotAspect) {
-              drawH = drawW / imgAspect;
-            } else {
-              drawW = drawH * imgAspect;
-            }
-            const drawX = overlayX + (overlayW - drawW) / 2;
-            const drawY = overlayY + (overlayH - drawH) / 2;
-
-            // Semi-transparent overlay for blending
-            ctx.globalAlpha = 0.55;
-            const cornerRadius = Math.min(12, drawW * 0.08);
-            ctx.beginPath();
-            ctx.roundRect(drawX, drawY, drawW, drawH, cornerRadius);
-            ctx.clip();
-            ctx.drawImage(img, drawX, drawY, drawW, drawH);
-            ctx.restore();
-
-            // Glow border
-            ctx.save();
-            ctx.globalAlpha = 0.35;
-            ctx.strokeStyle = '#daa520';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.roundRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2, cornerRadius + 1);
-            ctx.stroke();
-            ctx.restore();
-
-            // Product label
-            ctx.save();
-            const labelFontSize = Math.max(9, Math.floor(drawW * 0.06));
-            ctx.font = `600 ${labelFontSize}px Arial, sans-serif`;
-            ctx.textAlign = 'center';
-            const labelText = productName.substring(0, 28);
-            const labelWidth = ctx.measureText(labelText).width + 16;
-            const labelHeight = labelFontSize + 8;
-            const labelX = drawX + drawW / 2 - labelWidth / 2;
-            const labelY = drawY + drawH + 6;
-
-            ctx.fillStyle = 'rgba(28,25,23,0.75)';
-            ctx.beginPath();
-            ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 4);
-            ctx.fill();
-            ctx.fillStyle = '#daa520';
-            ctx.globalAlpha = 0.9;
-            ctx.fillText(labelText, drawX + drawW / 2, labelY + labelFontSize + 2);
-            ctx.restore();
-          }
-
-          // Badge
-          ctx.save();
-          ctx.globalAlpha = 0.92;
-          const badgeW = Math.floor(width * 0.38);
-          const badgeH = Math.floor(height * 0.042);
-          ctx.fillStyle = '#1c1917';
-          ctx.beginPath();
-          ctx.roundRect(12, 12, badgeW, badgeH, 6);
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(218,165,32,0.5)';
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.roundRect(12, 12, badgeW, badgeH, 6);
-          ctx.stroke();
-          ctx.fillStyle = '#daa520';
-          ctx.font = `bold ${Math.max(9, Math.floor(badgeH * 0.48))}px Arial, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.fillText('✨ AI STYLE PREVIEW', 12 + badgeW / 2, 12 + badgeH * 0.68);
-          ctx.restore();
-
-          // Bottom watermark
-          ctx.save();
-          ctx.globalAlpha = 0.7;
-          const wmFontSize = Math.max(10, Math.floor(width * 0.017));
-          const wmLabelFontSize = Math.max(8, Math.floor(width * 0.013));
-          const wmBarHeight = Math.max(wmFontSize + wmLabelFontSize + 16, 36);
-          const wmBarY = height - wmBarHeight - 8;
-          ctx.fillStyle = 'rgba(28,25,23,0.6)';
-          ctx.beginPath();
-          ctx.roundRect(width * 0.15, wmBarY, width * 0.7, wmBarHeight, 6);
-          ctx.fill();
-          ctx.fillStyle = '#daa520';
-          ctx.font = `bold ${wmFontSize}px Arial, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.fillText('AI Style Preview', width / 2, wmBarY + wmFontSize + 4);
-          ctx.globalAlpha = 0.5;
-          ctx.fillStyle = '#a8a29e';
-          ctx.font = `${wmLabelFontSize}px Arial, sans-serif`;
-          ctx.fillText('Powered by 3BOXES', width / 2, wmBarY + wmFontSize + wmLabelFontSize + 6);
-          ctx.restore();
-
-          resolve(canvas.toDataURL('image/png'));
-        };
-
-        productImg.onload = () => finish(productImg);
-        productImg.onerror = () => finish();
-
-        // Timeout: if product image doesn't load in 5s, continue without it
-        setTimeout(() => finish(), 5000);
-
-        // Prefer base64 data URL if available (no CORS issues)
-        if (productImageBase64 && productImageBase64.startsWith('data:')) {
-          productImg.src = productImageBase64;
-        } else {
-          let imgSrc = productImageUrl;
-          if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
-            imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
-          } else if (imgSrc.startsWith('//')) {
-            imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
-          } else if (imgSrc.startsWith('/') && !imgSrc.startsWith('/api/')) {
-            imgSrc = `${window.location.origin}${imgSrc}`;
-          }
-          productImg.src = imgSrc;
-        }
-      };
-
-      selfieImg.onerror = () => resolve(createMinimalResult());
-      selfieImg.src = selfieData;
-    } catch {
-      resolve(createMinimalResult());
-    }
-  });
-}
-
 // ── Progress Messages ───────────────────────────────────────────────
 
 const PROGRESS_MESSAGES = [
-  { at: 0, text: 'Uploading your photo to AI service...' },
-  { at: 10, text: 'AI is analyzing your photo and the product...' },
-  { at: 20, text: 'AI is draping the product onto your photo...' },
-  { at: 40, text: 'AI is generating the final try-on image...' },
-  { at: 60, text: 'Almost there — adding finishing touches...' },
-  { at: 80, text: 'Finalizing your style preview...' },
+  { at: 0, text: 'Analyzing your photo and the product...' },
+  { at: 15, text: 'AI is creating the virtual try-on...' },
+  { at: 30, text: 'Generating your style preview...' },
+  { at: 45, text: 'Almost done — finalizing the image...' },
 ];
+
+// ── Client Timeout ─────────────────────────────────────────────────
+
+const CLIENT_TIMEOUT_MS = 50_000; // 50 seconds — never wait more
 
 // ── Component ──────────────────────────────────────────────────────
 
@@ -381,38 +149,23 @@ export function TryOnDialog({
   const [errorCode, setErrorCode] = useState<string>('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressText, setProgressText] = useState('');
-  const [spaceReady, setSpaceReady] = useState(false);
-  const [spaceWarming, setSpaceWarming] = useState(false);
-  const [isCanvasMode, setIsCanvasMode] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isSlowWarning, setIsSlowWarning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const elapsedIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ── Pre-warm IDM-VTON Space when dialog opens ───────────────────
+  // ── Pre-warm when dialog opens ──────────────────────────────────
 
   useEffect(() => {
     if (!open) return;
-
-    // Use a ref to track if we should still update state
-    let active = true;
-
-    // Start the pre-warm fetch
-    fetch('/api/try-on?action=prewarm')
-      .then(res => res.json())
-      .then(data => {
-        if (!active) return;
-        setSpaceReady(data.spaceAwake === true);
-        setSpaceWarming(false);
-      })
-      .catch(() => {
-        if (!active) return;
-        setSpaceWarming(false);
-      });
-
-    return () => { active = false; };
+    // Pre-warm the AI service in the background
+    fetch('/api/try-on?action=prewarm').catch(() => {});
   }, [open]);
 
   // ── Reset ────────────────────────────────────────────────────────
+
   const reset = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -422,6 +175,10 @@ export function TryOnDialog({
       clearInterval(progressIntervalRef.current);
       progressIntervalRef.current = null;
     }
+    if (elapsedIntervalRef.current) {
+      clearInterval(elapsedIntervalRef.current);
+      elapsedIntervalRef.current = null;
+    }
     setStep('upload');
     setSelfiePreview(null);
     setSelfieData(null);
@@ -430,10 +187,12 @@ export function TryOnDialog({
     setErrorCode('');
     setProgressPercent(0);
     setProgressText('');
-    setIsCanvasMode(false);
+    setElapsedSeconds(0);
+    setIsSlowWarning(false);
   }, []);
 
   // ── Handle file selection ────────────────────────────────────────
+
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -457,16 +216,15 @@ export function TryOnDialog({
         const originalDataUrl = ev.target?.result as string;
         if (!originalDataUrl) return;
 
-        // Show preview IMMEDIATELY with the original image
+        // Show preview IMMEDIATELY
         setSelfiePreview(originalDataUrl);
         setStep('preview');
 
-        // Compress in the background (smaller = faster upload)
+        // Compress in the background
         try {
           const compressed = await compressImage(originalDataUrl, 1024, 0.85);
           setSelfieData(compressed);
         } catch {
-          // If compression fails, use the original
           setSelfieData(originalDataUrl);
         }
       };
@@ -476,6 +234,7 @@ export function TryOnDialog({
   );
 
   // ── Handle drag & drop ───────────────────────────────────────────
+
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
@@ -492,7 +251,6 @@ export function TryOnDialog({
         const originalDataUrl = ev.target?.result as string;
         if (!originalDataUrl) return;
 
-        // INSTANT preview
         setSelfiePreview(originalDataUrl);
         setStep('preview');
 
@@ -512,15 +270,21 @@ export function TryOnDialog({
     e.preventDefault();
   }, []);
 
-  // ── Start progress simulation ────────────────────────────────────
+  // ── Start progress tracking ──────────────────────────────────────
+
   const startProgress = useCallback(() => {
     setProgressPercent(5);
     setProgressText(PROGRESS_MESSAGES[0].text);
+    setElapsedSeconds(0);
+    setIsSlowWarning(false);
 
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+    if (elapsedIntervalRef.current) clearInterval(elapsedIntervalRef.current);
+
+    // Progress bar (slower increment — don't reach 100% until real result)
     progressIntervalRef.current = setInterval(() => {
       setProgressPercent(prev => {
-        if (prev >= 92) return prev; // Stop at 92% — will jump to 100% on success
+        if (prev >= 90) return prev; // Cap at 90% until real result
         const next = prev + 1;
         for (let i = PROGRESS_MESSAGES.length - 1; i >= 0; i--) {
           if (next >= PROGRESS_MESSAGES[i].at) {
@@ -530,43 +294,45 @@ export function TryOnDialog({
         }
         return next;
       });
-    }, 1200); // ~55s to reach 92% with 1% per 1.2s
-  }, []);
+    }, 800);
 
-  // ── Canvas Fallback ──────────────────────────────────────────────
-  const doCanvasFallback = useCallback(async (fallbackProductImageBase64?: string) => {
-    if (!selfieData) return;
+    // Elapsed time counter
+    elapsedIntervalRef.current = setInterval(() => {
+      setElapsedSeconds(prev => {
+        const next = prev + 1;
+        // Show warning at 35 seconds
+        if (next >= 35 && !isSlowWarning) {
+          setIsSlowWarning(true);
+        }
+        return next;
+      });
+    }, 1000);
+  }, [isSlowWarning]);
 
+  // ── Stop progress ────────────────────────────────────────────────
+
+  const stopProgress = useCallback(() => {
     if (progressIntervalRef.current) {
       clearInterval(progressIntervalRef.current);
       progressIntervalRef.current = null;
     }
-
-    setProgressPercent(90);
-    setProgressText('Creating style preview...');
-
-    try {
-      const canvasResult = await generateCanvasFallback(
-        selfieData,
-        rawProductImage || productImage,
-        productName,
-        fallbackProductImageBase64,
-        categorySlug,
-      );
-      setProgressPercent(100);
-      setProgressText('Done!');
-      setResultImage(canvasResult);
-      setIsCanvasMode(true);
-      setStep('result');
-    } catch {
-      // Even canvas failed — show error
-      setStep('error');
-      setErrorMessage('Could not generate style preview. Please try again.');
-      setErrorCode('CANVAS_FAILED');
+    if (elapsedIntervalRef.current) {
+      clearInterval(elapsedIntervalRef.current);
+      elapsedIntervalRef.current = null;
     }
-  }, [selfieData, productImage, productName, categorySlug, rawProductImage]);
+  }, []);
+
+  // ── Show error with "try later" message ──────────────────────────
+
+  const showError = useCallback((message: string, code: string) => {
+    stopProgress();
+    setStep('error');
+    setErrorMessage(message);
+    setErrorCode(code);
+  }, [stopProgress]);
 
   // ── Generate Try-On ──────────────────────────────────────────────
+
   const handleGenerate = useCallback(async () => {
     if (!selfieData) {
       setErrorMessage('Please wait for image to finish processing...');
@@ -575,7 +341,7 @@ export function TryOnDialog({
 
     setStep('generating');
     setErrorMessage('');
-    setIsCanvasMode(false);
+    setErrorCode('');
 
     // Abort any previous request
     if (abortRef.current) abortRef.current.abort();
@@ -593,13 +359,16 @@ export function TryOnDialog({
       }
     } catch {}
 
-    // 55-second hard client timeout — if no result by then, use canvas
-    const clientTimeout = setTimeout(async () => {
+    // 50-second hard client timeout
+    const clientTimeout = setTimeout(() => {
       if (controller.signal.aborted) return;
       controller.abort();
-      console.warn('[try-on] Client timeout (55s) — using canvas fallback');
-      await doCanvasFallback(productImageBase64);
-    }, 55_000);
+      console.warn('[try-on] Client timeout (50s) — showing "try later"');
+      showError(
+        'AI service is taking too long. Please try again in a few minutes.',
+        'TIMEOUT'
+      );
+    }, CLIENT_TIMEOUT_MS);
 
     try {
       const response = await fetch('/api/try-on', {
@@ -617,59 +386,57 @@ export function TryOnDialog({
       });
 
       clearTimeout(clientTimeout);
-
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
+      stopProgress();
 
       const data = await response.json();
 
       if (data.success && data.imageUrl) {
         // SUCCESS — show the AI-generated try-on image
         setProgressPercent(100);
-        setProgressText('Done!');
         setResultImage(data.imageUrl);
-        setIsCanvasMode(false);
         setStep('result');
-      } else if (data.mode === 'canvas' || data.errorCode === 'CANVAS_MODE') {
-        // CANVAS MODE — AI couldn't generate, use client-side canvas
-        await doCanvasFallback(data.productImageBase64 || productImageBase64);
       } else {
-        // ERROR — show error with helpful message
-        setStep('error');
-        setErrorMessage(data.error || 'Virtual try-on failed. Please try again.');
-        setErrorCode(data.errorCode || 'UNKNOWN');
+        // ERROR — show honest error with "try later" message
+        const msg = data.error || 'AI try-on failed. Please try again.';
+        const code = data.errorCode || 'UNKNOWN';
+
+        // Customize message based on error code
+        let userMessage = msg;
+        if (code === 'SERVICE_BUSY' || code === 'ALL_STRATEGIES_FAILED') {
+          userMessage = 'AI service is currently busy. Please try again in a few minutes.';
+        } else if (code === 'TIMEOUT') {
+          userMessage = 'AI service is taking too long. Please try again in a few minutes.';
+        } else if (code === 'SPACE_SLEEPING') {
+          userMessage = 'AI service is waking up. Please try again in 30-60 seconds.';
+        }
+
+        showError(userMessage, code);
       }
     } catch (err) {
       clearTimeout(clientTimeout);
-
-      if (progressIntervalRef.current) {
-        clearInterval(progressIntervalRef.current);
-        progressIntervalRef.current = null;
-      }
+      stopProgress();
 
       if (controller.signal.aborted) {
-        // Already handled by client timeout or user cancel
+        // Already handled by timeout
         return;
       }
 
-      // Network error — try canvas fallback
-      await doCanvasFallback(productImageBase64);
+      // Network error
+      showError(
+        'Network error. Please check your connection and try again.',
+        'NETWORK_ERROR'
+      );
     }
-  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, startProgress, doCanvasFallback]);
+  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, startProgress, stopProgress, showError]);
 
   // ── Retry ────────────────────────────────────────────────────────
-  const handleRetry = useCallback(async () => {
-    // Re-warm the Space first
-    try {
-      await fetch('/api/try-on?action=prewarm');
-    } catch {}
-    // Then try generating again
+
+  const handleRetry = useCallback(() => {
     handleGenerate();
   }, [handleGenerate]);
 
   // ── Download result ──────────────────────────────────────────────
+
   const handleDownload = useCallback(() => {
     if (!resultImage) return;
 
@@ -682,6 +449,7 @@ export function TryOnDialog({
   }, [resultImage, productName]);
 
   // ── Render ───────────────────────────────────────────────────────
+
   return (
     <Dialog
       open={open}
@@ -700,9 +468,7 @@ export function TryOnDialog({
             </DialogTitle>
             <DialogDescription className="text-amber-200/50">
               {step === 'result'
-                ? isCanvasMode
-                  ? 'Here\'s your style preview!'
-                  : 'Here\'s how it looks on you!'
+                ? "Here's how it looks on you!"
                 : step === 'error'
                 ? 'Something went wrong'
                 : <>
@@ -712,28 +478,6 @@ export function TryOnDialog({
               }
             </DialogDescription>
           </DialogHeader>
-
-          {/* Space status indicator */}
-          {step === 'upload' && (
-            <div className="mt-2 flex items-center gap-1.5 text-xs">
-              {spaceWarming ? (
-                <>
-                  <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
-                  <span className="text-amber-300/60">Warming up AI service...</span>
-                </>
-              ) : spaceReady ? (
-                <>
-                  <Zap className="h-3 w-3 text-green-400" />
-                  <span className="text-green-300/60">AI service ready — best quality available</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-3 w-3 text-amber-400/50" />
-                  <span className="text-amber-300/40">AI will use alternative generation</span>
-                </>
-              )}
-            </div>
-          )}
         </div>
 
         <div className="px-6 pb-6">
@@ -793,7 +537,7 @@ export function TryOnDialog({
                 {/* Tips */}
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
-                    <span className="font-semibold text-amber-300/60">💡 Tips:</span> Use a clear,
+                    <span className="font-semibold text-amber-300/60">Tips:</span> Use a clear,
                     well-lit selfie facing the camera for the best results. Full-body or
                     upper-body photos work best for clothing items.
                   </p>
@@ -912,26 +656,36 @@ export function TryOnDialog({
                   </div>
                 </div>
 
-                {/* Progress bar */}
+                {/* Simple progress indicator */}
                 <div className="space-y-2">
-                  <Progress
-                    value={progressPercent}
-                    className="h-2 bg-stone-800 [&>div]:bg-amber-500"
-                  />
-                  <p className="text-center text-xs text-amber-200/40">
-                    {progressPercent}% · Usually takes 20-40 seconds
-                  </p>
+                  <div className="h-2 w-full rounded-full bg-stone-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-amber-500 transition-all duration-500"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-amber-200/40">
+                    <span>{elapsedSeconds}s elapsed</span>
+                    <span>Usually 15-30 seconds</span>
+                  </div>
                 </div>
 
-                {/* Info box */}
-                <div className="rounded-lg bg-amber-900/10 p-3">
-                  <p className="text-xs text-amber-200/50">
-                    <span className="font-semibold text-amber-300/60">✨ How it works:</span>{' '}
-                    Our AI analyzes your photo, understands your body shape,
-                    and realistically drapes the product onto your image. You&apos;ll get
-                    a photorealistic preview in under a minute.
-                  </p>
-                </div>
+                {/* Slow warning */}
+                {isSlowWarning && (
+                  <div className="rounded-lg border border-amber-700/30 bg-amber-900/20 p-3">
+                    <div className="flex items-start gap-2">
+                      <Clock className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium text-amber-300/80">
+                          Taking longer than usual
+                        </p>
+                        <p className="text-xs text-amber-200/50 mt-0.5">
+                          AI service is busy. You can wait or cancel and try again later.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Cancel button */}
                 <Button
@@ -939,10 +693,6 @@ export function TryOnDialog({
                   className="mx-auto text-amber-200/40 hover:text-amber-200"
                   onClick={() => {
                     if (abortRef.current) abortRef.current.abort();
-                    if (progressIntervalRef.current) {
-                      clearInterval(progressIntervalRef.current);
-                      progressIntervalRef.current = null;
-                    }
                     reset();
                   }}
                 >
@@ -971,13 +721,8 @@ export function TryOnDialog({
                   />
                   <div className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-amber-300 flex items-center gap-1">
                     <Sparkles className="h-3 w-3" />
-                    {isCanvasMode ? 'Style Preview' : 'AI Try-On'}
+                    AI Try-On
                   </div>
-                  {isCanvasMode && (
-                    <div className="absolute top-2 right-2 rounded bg-amber-900/80 px-2 py-0.5 text-xs text-amber-200">
-                      Preview Mode
-                    </div>
-                  )}
                 </div>
 
                 {/* Action buttons */}
@@ -1001,10 +746,7 @@ export function TryOnDialog({
 
                 {/* Disclaimer */}
                 <p className="text-center text-xs text-amber-200/30">
-                  {isCanvasMode
-                    ? 'Style preview overlay — actual fit may vary'
-                    : 'AI-generated preview — actual fit may vary'
-                  }
+                  AI-generated preview — actual fit may vary
                 </p>
               </motion.div>
             )}
@@ -1019,12 +761,12 @@ export function TryOnDialog({
                 className="space-y-4 py-4"
               >
                 <div className="flex flex-col items-center gap-3 text-center">
-                  <div className="h-16 w-16 rounded-full bg-red-900/20 flex items-center justify-center">
-                    <AlertCircle className="h-8 w-8 text-red-400" />
+                  <div className="h-16 w-16 rounded-full bg-amber-900/20 flex items-center justify-center">
+                    <AlertCircle className="h-8 w-8 text-amber-400" />
                   </div>
                   <div>
                     <p className="text-lg font-semibold text-amber-100">
-                      Try-On Unavailable
+                      Please Try Again Later
                     </p>
                     <p className="mt-1 text-sm text-amber-200/60 max-w-sm">
                       {errorMessage}
@@ -1032,13 +774,22 @@ export function TryOnDialog({
                   </div>
                 </div>
 
-                {/* Specific guidance based on error code */}
+                {/* Guidance based on error code */}
+                {(errorCode === 'SERVICE_BUSY' || errorCode === 'ALL_STRATEGIES_FAILED') && (
+                  <div className="rounded-lg bg-amber-900/10 p-3">
+                    <p className="text-xs text-amber-200/50">
+                      <span className="font-semibold text-amber-300/60">What happened:</span>{' '}
+                      The AI service is currently handling too many requests.
+                      This is temporary — please try again in 1-2 minutes.
+                    </p>
+                  </div>
+                )}
+
                 {errorCode === 'SPACE_SLEEPING' && (
                   <div className="rounded-lg bg-amber-900/10 p-3">
                     <p className="text-xs text-amber-200/50">
-                      <span className="font-semibold text-amber-300/60">⏳ AI Warming Up:</span>{' '}
-                      The AI service was asleep and is now waking up. This takes about 30-60 seconds.
-                      Please try again — it should work this time!
+                      <span className="font-semibold text-amber-300/60">AI Warming Up:</span>{' '}
+                      The AI service is waking up from sleep mode. Please try again in 30-60 seconds.
                     </p>
                   </div>
                 )}
@@ -1046,9 +797,8 @@ export function TryOnDialog({
                 {errorCode === 'TIMEOUT' && (
                   <div className="rounded-lg bg-amber-900/10 p-3">
                     <p className="text-xs text-amber-200/50">
-                      <span className="font-semibold text-amber-300/60">⏱️ Slow Response:</span>{' '}
-                      The AI service may be under heavy load. Trying again usually works.
-                      Best results come during off-peak hours.
+                      <span className="font-semibold text-amber-300/60">Timed Out:</span>{' '}
+                      The AI service took too long to respond. Please try again in a few minutes.
                     </p>
                   </div>
                 )}
@@ -1059,16 +809,15 @@ export function TryOnDialog({
                     onClick={handleRetry}
                     className="flex-1 bg-amber-700 hover:bg-amber-600 text-white"
                   >
-                    <RefreshCw className="mr-2 h-4 w-4" />
+                    <RotateCcw className="mr-2 h-4 w-4" />
                     Try Again
                   </Button>
                   <Button
-                    onClick={reset}
                     variant="outline"
+                    onClick={reset}
                     className="flex-1 border-amber-900/30 text-amber-200 hover:bg-amber-900/20"
                   >
-                    <RotateCcw className="mr-2 h-4 w-4" />
-                    New Photo
+                    Cancel
                   </Button>
                 </div>
               </motion.div>

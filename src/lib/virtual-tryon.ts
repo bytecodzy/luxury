@@ -1,12 +1,12 @@
 /**
- * Virtual Try-On Engine v5 — Concrete, Reliable, Fast
+ * Virtual Try-On Engine v6 — Reliable, Fast, Honest
  *
  * KEY PRINCIPLES:
- * 1. ALWAYS deliver a result within 55 seconds — never leave the user waiting 200+ seconds
- * 2. Try strategies in order: IDM-VTON → ZAI Image Edit → Canvas mode
- * 3. Aggressive per-strategy timeouts — don't waste time on failing services
- * 4. Synchronous processing — no broken in-memory job storage on Vercel
- * 5. Skip sleeping services immediately — don't wait 30-60s for warm-up
+ * 1. ZAI Image Generation is PRIMARY — most reliable, works everywhere
+ * 2. IDM-VTON is SECONDARY — best quality but often sleeping/unreliable
+ * 3. 50-second hard server timeout — never exceed Vercel's 60s limit
+ * 4. NO canvas overlay fallback — either real AI result or honest error
+ * 5. If AI is slow, tell user to try later — never make them wait 200s
  * 6. Category-aware prompts for accurate product draping
  */
 
@@ -25,9 +25,9 @@ export interface TryOnInput {
 export interface TryOnResult {
   success: boolean
   imageUrl?: string           // base64 data URL of the result
-  strategy?: string           // 'idm-vton' | 'zai-dual-edit' | 'zai-selfie-edit' | 'canvas'
+  strategy?: string           // 'zai-edit' | 'zai-generate' | 'idm-vton'
   error?: string
-  errorCode?: 'SPACE_SLEEPING' | 'UPLOAD_FAILED' | 'CALL_FAILED' | 'PROCESSING_FAILED' | 'TIMEOUT' | 'NETWORK_ERROR' | 'ALL_STRATEGIES_FAILED' | 'CANVAS_MODE'
+  errorCode?: 'SPACE_SLEEPING' | 'UPLOAD_FAILED' | 'CALL_FAILED' | 'PROCESSING_FAILED' | 'TIMEOUT' | 'NETWORK_ERROR' | 'ALL_STRATEGIES_FAILED' | 'SERVICE_BUSY'
   elapsedMs?: number
 }
 
@@ -35,10 +35,12 @@ type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864'
 
 // ── Timeouts ───────────────────────────────────────────────────────
 
-const TOTAL_TIMEOUT_MS = 55_000   // 55s hard limit
+const TOTAL_TIMEOUT_MS = 50_000   // 50s hard limit (leaves 10s buffer for Vercel 60s)
+const ZAI_EDIT_TIMEOUT_MS = 30_000  // 30s for ZAI image edit
+const ZAI_GENERATE_TIMEOUT_MS = 25_000  // 25s for ZAI text-to-image
 const IDM_VTON_TIMEOUT_MS = 35_000  // 35s for IDM-VTON (if space is awake)
-const ZAI_EDIT_TIMEOUT_MS = 25_000  // 25s for ZAI image edit
 const SPACE_CHECK_TIMEOUT_MS = 3_000 // 3s to check if space is awake
+const VLM_TIMEOUT_MS = 8_000  // 8s for VLM product description
 
 // ── Category Configuration ─────────────────────────────────────────
 
@@ -210,44 +212,43 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryP
 // ── Prompt Builder ─────────────────────────────────────────────────
 
 /**
- * Build the dual-image edit prompt for ZAI.
- * Both selfie AND product are passed as images.
+ * Build the image edit prompt for ZAI.
+ * Selfie is passed as image, product described in prompt via VLM analysis.
  */
-function buildDualImagePrompt(config: CategoryPromptConfig, productName: string): string {
-  return `VIRTUAL TRY-ON: Show this EXACT person (FIRST IMAGE) ${config.placement}. The product is "${productName}" — it is shown in the SECOND IMAGE.
-
-CRITICAL RULES:
-1. FACE & PERSON: Keep this person's EXACT face — same eyes, nose, lips, jawline, expression. Preserve their skin tone, hair color, and body proportions EXACTLY.
-2. PRODUCT COLOR ACCURACY (#1 PRIORITY): The product's ${config.colorFocus} MUST match the SECOND IMAGE exactly — same hue, saturation, and brightness. A gold product must stay gold, a maroon product must stay maroon.
-3. NATURAL DRAPING: The product must look NATURALLY WORN on the person — NOT pasted, floating, or overlaid. Proper shadows, highlights, folds, and fit where the product meets the body.
-4. PRODUCT INTEGRITY: Do NOT invent or hallucinate product details — only show what is visible in the SECOND IMAGE. Do NOT remove or simplify details that ARE visible.
-
-${config.bodyType}. Photorealistic, studio-quality, 8K. The result should look like a REAL PHOTOGRAPH of this exact person wearing this exact product.`
-}
-
-/**
- * Build the selfie-edit prompt for ZAI (when only selfie is available as image).
- * Product colors described in text from VLM analysis.
- */
-function buildSelfieEditPrompt(config: CategoryPromptConfig, productName: string, productDesc: string): string {
+function buildEditPrompt(config: CategoryPromptConfig, productName: string, productDesc: string): string {
   return `VIRTUAL TRY-ON: Show this EXACT person ${config.placement}. The product is "${productName}".
 
 PRODUCT DESCRIPTION: ${productDesc}
 
 CRITICAL RULES:
 1. FACE & PERSON: Keep this person's EXACT face — same eyes, nose, lips, jawline, expression. Preserve their skin tone, hair color, and body proportions EXACTLY.
-2. PRODUCT ACCURACY: The product must match the description above — exact colors, materials, and design. ${config.colorFocus}
-3. NATURAL DRAPING: The product must look NATURALLY WORN on the person — NOT pasted, floating, or overlaid. Proper shadows, folds, and fit.
-4. Do NOT invent or hallucinate product details beyond what is described above.
+2. PRODUCT COLOR ACCURACY (#1 PRIORITY): The product's ${config.colorFocus} MUST match the description above exactly — same hue, saturation, and brightness.
+3. NATURAL DRAPING: The product must look NATURALLY WORN on the person — NOT pasted, floating, or overlaid. Proper shadows, highlights, folds, and fit where the product meets the body.
+4. PRODUCT INTEGRITY: Do NOT invent or hallucinate product details — only show what is described above.
 
 ${config.bodyType}. Photorealistic, studio-quality, 8K. The result should look like a REAL PHOTOGRAPH of this exact person wearing this exact product.`
 }
 
-// ── ZAI Image Edit Helpers ─────────────────────────────────────────
+/**
+ * Build text-to-image prompt for ZAI (no reference selfie — generate from description).
+ */
+function buildGeneratePrompt(config: CategoryPromptConfig, productName: string, productDesc: string, personDesc: string): string {
+  return `VIRTUAL TRY-ON: A person ${personDesc}, ${config.placement}. The product is "${productName}".
+
+PRODUCT DESCRIPTION: ${productDesc}
+
+CRITICAL RULES:
+1. PRODUCT COLOR ACCURACY (#1 PRIORITY): The product's ${config.colorFocus} MUST match the description exactly.
+2. NATURAL DRAPING: The product must look NATURALLY WORN — NOT pasted, floating, or overlaid. Proper shadows, highlights, folds, and fit.
+3. REALISTIC: Photorealistic appearance with proper lighting and shadows.
+
+${config.bodyType}. Studio-quality, 8K.`
+}
+
+// ── ZAI Image Generation Helpers ─────────────────────────────────────
 
 /**
  * Quick VLM analysis of the product image — returns a compact description.
- * 10s timeout. Returns empty string on failure.
  */
 async function vlmDescribeProduct(productImageUrl: string): Promise<string> {
   try {
@@ -258,13 +259,13 @@ async function vlmDescribeProduct(productImageUrl: string): Promise<string> {
         messages: [{
           role: 'user',
           content: [
-            { type: 'text', text: 'Describe this product for a virtual try-on in 2-3 sentences. Include: main color with shade (e.g. deep maroon, warm gold, navy blue), material/texture, key design elements, and size relative to a person. Be extremely specific about colors — distinguish between similar shades like maroon vs burgundy vs wine.' },
+            { type: 'text', text: 'Describe this product for a virtual try-on in 2-3 sentences. Include: main color with shade (e.g. deep maroon, warm gold, navy blue), material/texture, key design elements, and size relative to a person. Be extremely specific about colors.' },
             { type: 'image_url', image_url: { url: productImageUrl } },
           ],
         }],
         thinking: { type: 'disabled' },
       }),
-      new Promise<null>(r => setTimeout(() => r(null), 10_000)),
+      new Promise<null>(r => setTimeout(() => r(null), VLM_TIMEOUT_MS)),
     ])
     return result ? (result.choices[0]?.message?.content || '') : ''
   } catch {
@@ -273,44 +274,36 @@ async function vlmDescribeProduct(productImageUrl: string): Promise<string> {
 }
 
 /**
- * Dual-image edit: both selfie and product passed as images.
- * This is the BEST ZAI strategy — the model can SEE both images.
+ * Quick VLM description of the person in the selfie.
  */
-async function zaiDualImageEdit(
-  selfieDataUrl: string,
-  productDataUrl: string,
-  prompt: string,
-  size: ImageSize,
-): Promise<string | null> {
+async function vlmDescribePerson(selfieDataUrl: string): Promise<string> {
   try {
     const zai = await createZAI()
-    const response = await Promise.race([
-      zai.images.generations.edit({
-        prompt,
-        images: [
-          { url: selfieDataUrl },
-          { url: productDataUrl },
-        ],
-        size,
-      } as any),
-      new Promise<null>(r => setTimeout(() => r(null), ZAI_EDIT_TIMEOUT_MS)),
+    const result = await Promise.race([
+      zai.chat.completions.createVision({
+        model: 'glm-4v-plus',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Describe this person briefly for a fashion photo: gender, approximate age range, skin tone, hair color and style, body type, and what they are currently wearing. Keep it to 1-2 sentences.' },
+            { type: 'image_url', image_url: { url: selfieDataUrl } },
+          ],
+        }],
+        thinking: { type: 'disabled' },
+      }),
+      new Promise<null>(r => setTimeout(() => r(null), VLM_TIMEOUT_MS)),
     ])
-
-    if (response?.data?.[0]?.base64) {
-      return `data:image/png;base64,${response.data[0].base64}`
-    }
-    return null
-  } catch (err) {
-    console.error('[virtual-tryon] ZAI dual-image edit failed:', (err as Error).message?.substring(0, 200))
-    return null
+    return result ? (result.choices[0]?.message?.content || '') : ''
+  } catch {
+    return ''
   }
 }
 
 /**
- * Selfie-edit: only the selfie is passed as image, product described in text.
- * Less accurate colors but preserves the person's face better.
+ * Image edit: selfie passed as image, product described in prompt.
+ * This is the MOST RELIABLE ZAI strategy.
  */
-async function zaiSelfieEdit(
+async function zaiImageEdit(
   selfieDataUrl: string,
   prompt: string,
   size: ImageSize,
@@ -329,9 +322,44 @@ async function zaiSelfieEdit(
     if (response?.data?.[0]?.base64) {
       return `data:image/png;base64,${response.data[0].base64}`
     }
+    if (response?.data?.[0]?.url) {
+      return response.data[0].url
+    }
     return null
   } catch (err) {
-    console.error('[virtual-tryon] ZAI selfie edit failed:', (err as Error).message?.substring(0, 200))
+    console.error('[virtual-tryon] ZAI image edit failed:', (err as Error).message?.substring(0, 200))
+    return null
+  }
+}
+
+/**
+ * Text-to-image generation: no reference image, just prompt.
+ * Fallback when image edit fails.
+ */
+async function zaiImageGenerate(
+  prompt: string,
+  size: ImageSize,
+): Promise<string | null> {
+  try {
+    const zai = await createZAI()
+    const response = await Promise.race([
+      zai.images.generations.create({
+        model: 'cogview-4-plus',
+        prompt,
+        size,
+      } as any),
+      new Promise<null>(r => setTimeout(() => r(null), ZAI_GENERATE_TIMEOUT_MS)),
+    ])
+
+    if (response?.data?.[0]?.base64) {
+      return `data:image/png;base64,${response.data[0].base64}`
+    }
+    if (response?.data?.[0]?.url) {
+      return response.data[0].url
+    }
+    return null
+  } catch (err) {
+    console.error('[virtual-tryon] ZAI image generate failed:', (err as Error).message?.substring(0, 200))
     return null
   }
 }
@@ -343,7 +371,6 @@ const SPACE_CACHE_TTL = 20_000 // 20 seconds
 
 /**
  * Quick check if IDM-VTON space is awake.
- * 3s timeout. Returns false if unsure.
  */
 async function isSpaceAwake(): Promise<boolean> {
   const now = Date.now()
@@ -365,14 +392,12 @@ async function isSpaceAwake(): Promise<boolean> {
 }
 
 /**
- * Pre-warm the IDM-VTON space. Call when the try-on dialog opens.
+ * Pre-warm the IDM-VTON space.
  */
 export async function preWarmSpace(): Promise<boolean> {
   try {
-    // Trigger a GET request to wake the space
     const awake = await isSpaceAwake()
     if (!awake) {
-      // Space is sleeping — send a wake-up request
       fetch('https://yisol-idm-vton.hf.space/', {
         method: 'GET',
         signal: AbortSignal.timeout(5_000),
@@ -385,7 +410,7 @@ export async function preWarmSpace(): Promise<boolean> {
 }
 
 /**
- * Get cached space status (no network call).
+ * Get cached space status.
  */
 export function getCachedSpaceStatus(): { awake: boolean; timestamp: number } | null {
   return spaceAwakeCache
@@ -397,12 +422,12 @@ export function getCachedSpaceStatus(): { awake: boolean; timestamp: number } | 
  * Perform virtual try-on using multiple strategies with aggressive timeouts.
  *
  * Strategy order:
- * 1. IDM-VTON (if space is awake) — best quality, proper garment draping
- * 2. ZAI dual-image edit — good quality, AI-generated approximation
- * 3. ZAI selfie-edit — decent quality with product described in text
- * 4. Canvas mode — client-side fallback (returned as indicator)
+ * 1. ZAI Image Edit (selfie + VLM-described product) — most reliable
+ * 2. IDM-VTON (if space is awake) — best quality, proper garment draping
+ * 3. ZAI Image Generate (text-to-image) — fallback, no face preservation
  *
- * Total time: max 55 seconds
+ * Total time: max 50 seconds
+ * NO canvas overlay fallback — either real AI or honest error
  */
 export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResult> {
   const totalStart = Date.now()
@@ -410,11 +435,71 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
 
   const config = getCategoryConfig(input.categorySlug, input.productName)
 
-  // ── Strategy 1: IDM-VTON (if space is awake) ──────────────────
+  // ── Step 0: Get VLM description of product (needed for all ZAI strategies) ──
+  console.log('[virtual-tryon] Getting VLM description of product...')
+  const productDesc = await Promise.race([
+    vlmDescribeProduct(input.productImageBase64),
+    new Promise<string>(r => setTimeout(() => r('a luxury product with elegant design'), VLM_TIMEOUT_MS)),
+  ])
+  console.log(`[virtual-tryon] Product desc: ${productDesc.substring(0, 100)}...`)
+
+  // Check if we still have time
+  if (Date.now() >= totalDeadline - 5_000) {
+    const elapsed = Date.now() - totalStart
+    return {
+      success: false,
+      error: 'AI service is busy right now. Please try again in a few minutes.',
+      errorCode: 'SERVICE_BUSY',
+      strategy: undefined,
+      elapsedMs: elapsed,
+    }
+  }
+
+  // ── Strategy 1: ZAI Image Edit (selfie + VLM-described product) ──
+  if (Date.now() < totalDeadline - 15_000) {
+    console.log('[virtual-tryon] Strategy 1: ZAI image edit (selfie + product description)')
+    try {
+      const prompt = buildEditPrompt(config, input.productName, productDesc)
+      const result = await zaiImageEdit(
+        input.selfieData,
+        prompt,
+        config.size,
+      )
+
+      if (result) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ ZAI image edit succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: result,
+          strategy: 'zai-edit',
+          elapsedMs: elapsed,
+        }
+      }
+
+      console.log('[virtual-tryon] ZAI image edit returned null')
+    } catch (err) {
+      console.log(`[virtual-tryon] ZAI image edit error: ${(err as Error).message?.substring(0, 100)}`)
+    }
+  }
+
+  // Check if we still have time
+  if (Date.now() >= totalDeadline - 5_000) {
+    const elapsed = Date.now() - totalStart
+    return {
+      success: false,
+      error: 'AI service is busy right now. Please try again in a few minutes.',
+      errorCode: 'SERVICE_BUSY',
+      strategy: undefined,
+      elapsedMs: elapsed,
+    }
+  }
+
+  // ── Strategy 2: IDM-VTON (if space is awake) ──────────────────
   const spaceAwake = await isSpaceAwake()
 
-  if (spaceAwake && Date.now() < totalDeadline - 30_000) {
-    console.log('[virtual-tryon] Strategy 1: IDM-VTON (space is awake)')
+  if (spaceAwake && Date.now() < totalDeadline - 20_000) {
+    console.log('[virtual-tryon] Strategy 2: IDM-VTON (space is awake)')
     try {
       const result = await Promise.race([
         hfPerformTryOn({
@@ -442,104 +527,59 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       console.log(`[virtual-tryon] IDM-VTON error: ${(err as Error).message?.substring(0, 100)}`)
     }
   } else {
-    if (!spaceAwake) {
-      console.log('[virtual-tryon] Skipping IDM-VTON — space is sleeping')
-    } else {
-      console.log('[virtual-tryon] Skipping IDM-VTON — not enough time remaining')
-    }
-  }
-
-  // Check if we still have time
-  if (Date.now() >= totalDeadline - 10_000) {
-    console.log('[virtual-tryon] Out of time — returning canvas mode')
-    return {
-      success: false,
-      error: 'AI services are busy. Using style preview mode.',
-      errorCode: 'CANVAS_MODE',
-      strategy: 'canvas',
-      elapsedMs: Date.now() - totalStart,
-    }
-  }
-
-  // ── Strategy 2: ZAI Dual-Image Edit ────────────────────────────
-  if (Date.now() < totalDeadline - 15_000) {
-    console.log('[virtual-tryon] Strategy 2: ZAI dual-image edit')
-    try {
-      const prompt = buildDualImagePrompt(config, input.productName)
-      const result = await zaiDualImageEdit(
-        input.selfieData,
-        input.productImageBase64,
-        prompt,
-        config.size,
-      )
-
-      if (result) {
-        const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ ZAI dual-image edit succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-        return {
-          success: true,
-          imageUrl: result,
-          strategy: 'zai-dual-edit',
-          elapsedMs: elapsed,
-        }
-      }
-
-      console.log('[virtual-tryon] ZAI dual-image edit returned null')
-    } catch (err) {
-      console.log(`[virtual-tryon] ZAI dual-image edit error: ${(err as Error).message?.substring(0, 100)}`)
-    }
+    console.log('[virtual-tryon] Skipping IDM-VTON — space is sleeping or not enough time')
   }
 
   // Check if we still have time
   if (Date.now() >= totalDeadline - 5_000) {
-    console.log('[virtual-tryon] Out of time — returning canvas mode')
+    const elapsed = Date.now() - totalStart
     return {
       success: false,
-      error: 'AI services timed out. Using style preview mode.',
-      errorCode: 'CANVAS_MODE',
-      strategy: 'canvas',
-      elapsedMs: Date.now() - totalStart,
+      error: 'AI service is busy right now. Please try again in a few minutes.',
+      errorCode: 'SERVICE_BUSY',
+      strategy: undefined,
+      elapsedMs: elapsed,
     }
   }
 
-  // ── Strategy 3: ZAI Selfie-Edit (with VLM product description) ──
+  // ── Strategy 3: ZAI Text-to-Image Generate ──────────────────────
   if (Date.now() < totalDeadline - 10_000) {
-    console.log('[virtual-tryon] Strategy 3: ZAI selfie-edit with VLM description')
+    console.log('[virtual-tryon] Strategy 3: ZAI text-to-image generate')
     try {
-      // Quick VLM analysis of the product (5s timeout)
-      const productDesc = await Promise.race([
-        vlmDescribeProduct(input.productImageBase64),
-        new Promise<string>(r => setTimeout(() => r('a luxury product'), 5_000)),
+      // Get person description from VLM
+      const personDesc = await Promise.race([
+        vlmDescribePerson(input.selfieData),
+        new Promise<string>(r => setTimeout(() => r('a person'), VLM_TIMEOUT_MS)),
       ])
 
-      if (productDesc && Date.now() < totalDeadline - 10_000) {
-        const prompt = buildSelfieEditPrompt(config, input.productName, productDesc)
-        const result = await zaiSelfieEdit(input.selfieData, prompt, config.size)
+      if (Date.now() < totalDeadline - 10_000) {
+        const prompt = buildGeneratePrompt(config, input.productName, productDesc, personDesc)
+        const result = await zaiImageGenerate(prompt, config.size)
 
         if (result) {
           const elapsed = Date.now() - totalStart
-          console.log(`[virtual-tryon] ✅ ZAI selfie-edit succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+          console.log(`[virtual-tryon] ✅ ZAI text-to-image succeeded in ${(elapsed / 1000).toFixed(1)}s`)
           return {
             success: true,
             imageUrl: result,
-            strategy: 'zai-selfie-edit',
+            strategy: 'zai-generate',
             elapsedMs: elapsed,
           }
         }
       }
     } catch (err) {
-      console.log(`[virtual-tryon] ZAI selfie-edit error: ${(err as Error).message?.substring(0, 100)}`)
+      console.log(`[virtual-tryon] ZAI text-to-image error: ${(err as Error).message?.substring(0, 100)}`)
     }
   }
 
-  // ── All strategies failed — return canvas mode ─────────────────
+  // ── All strategies failed — honest error ─────────────────────
   const elapsed = Date.now() - totalStart
-  console.log(`[virtual-tryon] All AI strategies failed in ${(elapsed / 1000).toFixed(1)}s — returning canvas mode`)
+  console.log(`[virtual-tryon] All AI strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
   return {
     success: false,
-    error: 'AI generation unavailable. Creating style preview instead.',
-    errorCode: 'CANVAS_MODE',
-    strategy: 'canvas',
+    error: 'AI try-on service is currently busy. Please try again in a few minutes.',
+    errorCode: 'ALL_STRATEGIES_FAILED',
+    strategy: undefined,
     elapsedMs: elapsed,
   }
 }

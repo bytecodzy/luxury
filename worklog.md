@@ -1,26 +1,40 @@
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Fix two build errors preventing preview from working
+Task: Fix Video icon HMR error and overhaul Virtual Try-On pipeline
 
 Work Log:
-- Analyzed the two build errors reported by user:
-  1. `Export isSpaceAwake doesn't exist in target module` in route.ts
-  2. `Video` icon HMR cache error in product-detail.tsx
-- Read `src/lib/virtual-tryon.ts` — confirmed `isSpaceAwake` is a local function (not exported) at line 348, but `checkIDMVTONSpaceStatus` IS exported at line 550
-- Read `src/app/api/try-on/route.ts` — confirmed it already imports `checkIDMVTONSpaceStatus` (not `isSpaceAwake`), meaning the first error was already fixed in a previous session
-- Read `src/components/product-detail.tsx` — confirmed `Video` icon is NOT imported anywhere (only Star, ShoppingCart, ArrowLeft, etc. from lucide-react). The HMR error was from stale cache
-- Cleared the `.next` build cache directory to fix the stale HMR module reference
-- Killed conflicting processes on ports 3000 and 3030
-- Restarted the Next.js dev server with fresh cache
-- Verified the app loads correctly using Agent Browser (HTTP 200, all products visible)
-- Verified no console errors or page errors in browser
-- Verified the try-on API endpoint works: `GET /api/try-on` returns `{available: true, spaceAwake: true, mode: "idm-vton"}`
+- Diagnosed Video icon HMR error as stale Turbopack cache from previous file version
+- Killed dev server, cleared .next cache, made trivial edit to product-detail.tsx (v5→v6 comment) to force recompile
+- Rewrote src/lib/virtual-tryon.ts (v6):
+  - ZAI Image Edit is now PRIMARY strategy (most reliable, preserves face)
+  - IDM-VTON is SECONDARY (best quality but unreliable - often sleeping)
+  - ZAI Text-to-Image Generate is TERTIARY (no face preservation but works)
+  - Removed canvas overlay fallback entirely — no more fake overlays
+  - 50-second hard server timeout (leaves 10s buffer for Vercel 60s limit)
+  - Added vlmDescribePerson() for text-to-image fallback
+  - Added SERVICE_BUSY error code for "try later" messaging
+- Rewrote src/components/try-on-dialog.tsx (v6):
+  - Removed ALL canvas fallback code (~200 lines removed)
+  - 50-second client timeout — shows "try later" instead of canvas
+  - Added elapsed time counter (real-time seconds display)
+  - Added "slow warning" at 35 seconds — tells user AI is busy
+  - Simplified progress bar (custom div instead of Progress component)
+  - Better error messages with specific guidance per error code
+  - Error step shows "Please Try Again Later" instead of "Try-On Unavailable"
+- Rewrote src/app/api/try-on/route.ts (v6):
+  - Removed canvas mode handling — always honest success or error
+  - Simplified response structure
+  - 50-second implicit timeout via performVirtualTryOn
+- Verified page loads without HMR Video error via Agent Browser
+- Verified try-on API responds correctly: GET /api/try-on returns {available: true, spaceAwake: true}
 
 Stage Summary:
-- Both build errors are now fixed
-- Error 1 (isSpaceAwake import) was already resolved in a prior edit — route.ts uses `checkIDMVTONSpaceStatus` which exists in virtual-tryon.ts
-- Error 2 (Video icon HMR) was a stale cache issue — fixed by clearing .next directory and restarting dev server
-- The app compiles and renders correctly at http://localhost:3000/
-- The try-on API is functional with IDM-VTON space awake
-- ai-proxy port 3030 conflict resolved by killing orphaned process
+- Video icon HMR error is FIXED — page loads cleanly
+- Virtual Try-On pipeline completely overhauled:
+  - ZAI Image Edit is primary (most reliable)
+  - IDM-VTON is secondary (best quality when available)
+  - ZAI Text-to-Image is tertiary (fallback)
+  - NO canvas overlay fallback — either real AI draping or honest "try later"
+  - 50-second timeout enforced on both client and server
+  - Better UX: elapsed timer, slow warning at 35s, clear error guidance

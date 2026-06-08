@@ -1,13 +1,12 @@
 /**
- * AI Virtual Try-On API v5 — Synchronous, Reliable, Never Fails
+ * AI Virtual Try-On API v6 — Synchronous, Honest, Fast
  *
  * Key improvements:
- * 1. Synchronous processing — call strategies in order, return first success
- * 2. No in-memory job storage (broken on Vercel serverless)
- * 3. No polling — single POST, wait for result
- * 4. Always returns a result within 55 seconds
- * 5. If all AI strategies fail, returns canvas mode indicator
- * 6. maxDuration = 60 for Vercel Pro
+ * 1. Synchronous processing — single POST, return first success
+ * 2. 50-second server timeout — never exceed Vercel's 60s limit
+ * 3. NO canvas overlay fallback — either real AI result or honest error
+ * 4. If AI is busy, tell user to try later — don't make them wait
+ * 5. maxDuration = 60 for Vercel Pro
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -93,7 +92,6 @@ export async function POST(request: NextRequest) {
         success: false,
         error: 'Could not load product image. Please try again.',
         errorCode: 'NO_PRODUCT_IMAGE',
-        strategy: 'canvas',
         elapsed: ((Date.now() - startTime) / 1000).toFixed(1),
       })
     }
@@ -120,26 +118,12 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Canvas mode — AI couldn't generate, frontend will create canvas composite
-    if (result.errorCode === 'CANVAS_MODE' || result.strategy === 'canvas') {
-      console.log(`[try-on] 🎨 Canvas mode in ${elapsed}s`)
-      return NextResponse.json({
-        success: false,
-        mode: 'canvas',
-        errorCode: 'CANVAS_MODE',
-        error: result.error || 'AI generation unavailable. Creating style preview.',
-        strategy: 'canvas',
-        productImageBase64, // Pass back for client-side canvas
-        elapsed: parseFloat(elapsed),
-      })
-    }
-
-    // Other failures
+    // AI failed — honest error, tell user to try later
     console.log(`[try-on] ❌ Failed in ${elapsed}s: ${result.error}`)
     return NextResponse.json({
       success: false,
-      error: result.error || 'Virtual try-on failed. Please try again.',
-      errorCode: result.errorCode || 'PROCESSING_FAILED',
+      error: result.error || 'AI try-on is currently unavailable. Please try again in a few minutes.',
+      errorCode: result.errorCode || 'ALL_STRATEGIES_FAILED',
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
     })
@@ -150,8 +134,6 @@ export async function POST(request: NextRequest) {
       success: false,
       error: 'An unexpected error occurred. Please try again.',
       errorCode: 'INTERNAL_ERROR',
-      strategy: 'canvas',
-      mode: 'canvas',
       elapsed: parseFloat(elapsed),
     }, { status: 500 })
   }
@@ -166,7 +148,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: awake ? 'IDM-VTON ready' : 'IDM-VTON warming up — try-on will use alternative AI',
+      message: awake ? 'IDM-VTON ready' : 'IDM-VTON warming up — try-on will use AI image generation',
     })
   }
   const statusResult = await checkIDMVTONSpaceStatus()
@@ -175,6 +157,6 @@ export async function GET(request: NextRequest) {
     available: true,
     spaceAwake: awake,
     mode: awake ? 'idm-vton' : 'zai-fallback',
-    message: awake ? 'IDM-VTON ready — best quality' : 'Using AI image edit — good quality',
+    message: awake ? 'IDM-VTON ready — best quality' : 'Using AI image generation — good quality',
   })
 }
