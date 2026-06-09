@@ -2,12 +2,12 @@
  * AI Virtual Try-On API (backward-compatible route)
  *
  * Delegates to the same performVirtualTryOn engine as /api/virtual-tryon
- * Strategy: ZAI Image Edit → IDM-VTON → ZAI Text-to-Image
+ * Strategy: IDM-VTON → ZAI VLM+Edit → ZAI Text-to-Image
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/lib/virtual-tryon'
-import { isZAIConfigured } from '@/lib/zai'
+import { isZAIConfigured, getZAIConfig } from '@/lib/zai'
 
 export const maxDuration = 60
 
@@ -115,6 +115,19 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[try-on] ❌ Failed in ${elapsed}s: ${result.error}`)
+
+    const zaiConfigured = isZAIConfigured()
+    const isVercel = !!process.env.VERCEL
+    const zaiConfig = getZAIConfig()
+    const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
+
+    let hint: string | undefined
+    if (isVercel && isInternalZAI) {
+      hint = 'ZAI_BASE_URL points to internal-api.z.ai which is NOT reachable from Vercel. Use a public API endpoint or rely on the HuggingFace IDM-VTON service.'
+    } else if (isVercel && !zaiConfigured) {
+      hint = 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel.'
+    }
+
     return NextResponse.json({
       success: false,
       error: result.error || 'AI try-on is currently unavailable. Please try again in a few minutes.',
@@ -122,8 +135,10 @@ export async function POST(request: NextRequest) {
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
       debug: {
-        zaiConfigured: isZAIConfigured(),
-        isVercel: !!process.env.VERCEL,
+        zaiConfigured,
+        isVercel,
+        isInternalZAI,
+        hint,
       },
     })
   } catch (error) {
@@ -159,7 +174,7 @@ export async function GET(request: NextRequest) {
     available: true,
     spaceAwake: awake,
     zaiConfigured,
-    mode: zaiConfigured ? 'zai-edit' : awake ? 'idm-vton' : 'unavailable',
-    message: zaiConfigured ? 'ZAI Image Edit ready' : awake ? 'IDM-VTON ready' : 'AI service not configured',
+    mode: zaiConfigured ? 'zai-vlm-edit' : awake ? 'idm-vton' : 'unavailable',
+    message: zaiConfigured ? 'ZAI VLM+Edit ready' : awake ? 'IDM-VTON ready' : 'AI service not configured',
   })
 }

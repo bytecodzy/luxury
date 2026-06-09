@@ -1,18 +1,16 @@
 /**
- * AI Virtual Try-On API v9 — Reliable, Fast, Zero-VLM
+ * AI Virtual Try-On API v10 — Fixed for Vercel
  *
- * Strategy order:
- * 1. ZAI Image Edit (most reliable, preserves face)
- * 2. IDM-VTON (best quality garment draping, but space may sleep)
- * 3. ZAI Text-to-Image (last resort, no face preservation)
- *
- * 50-second server timeout — never exceed Vercel's 60s limit
- * NO VLM calls — eliminates 6-12s latency and failure points
+ * Key fixes:
+ * 1. Better Vercel-specific error messages (internal-api.z.ai is unreachable)
+ * 2. Proper product image resolution
+ * 3. IDM-VTON as primary strategy
+ * 4. ZAI Image Edit with correct `image` parameter format
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/lib/virtual-tryon'
-import { isZAIConfigured } from '@/lib/zai'
+import { isZAIConfigured, getZAIConfig } from '@/lib/zai'
 
 export const maxDuration = 60
 
@@ -33,11 +31,9 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
       }
     } catch {}
   }
-  // Try to fetch via base URL
   const base = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
   const httpResult = await fetchImageAsBase64(`${base}${imagePath}`)
   if (httpResult) return httpResult
-  // Try reading from filesystem (local dev only)
   if (!process.env.VERCEL) {
     try {
       const { existsSync, readFileSync } = await import('fs')
@@ -105,7 +101,6 @@ export async function POST(request: NextRequest) {
 
     console.log(`[virtual-tryon] Starting virtual try-on for "${productName}" (${categorySlug})`)
 
-    // Run the multi-strategy try-on engine
     const result = await performVirtualTryOn({
       selfieData,
       productImageBase64,
@@ -125,24 +120,36 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // AI failed — honest error
+    // AI failed — honest error with helpful message
     console.log(`[virtual-tryon] ❌ Failed in ${elapsed}s: ${result.error}`)
 
     const zaiConfigured = isZAIConfigured()
     const isVercel = !!process.env.VERCEL
+    const zaiConfig = getZAIConfig()
+
+    // Detect if ZAI_BASE_URL points to internal-api.z.ai (unreachable from Vercel)
+    const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
+
+    let errorMessage = result.error || 'AI try-on is currently unavailable. Please try again in a few minutes.'
+    let hint: string | undefined
+
+    if (isVercel && isInternalZAI) {
+      hint = 'ZAI_BASE_URL points to internal-api.z.ai which is NOT reachable from Vercel servers. Set ZAI_BASE_URL to a public API endpoint, or rely on the HuggingFace IDM-VTON service (which may need warming up).'
+    } else if (isVercel && !zaiConfigured) {
+      hint = 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel to enable AI-powered virtual try-on. Note: internal-api.z.ai is not reachable from Vercel.'
+    }
 
     return NextResponse.json({
       success: false,
-      error: result.error || 'AI try-on is currently unavailable. Please try again in a few minutes.',
+      error: errorMessage,
       errorCode: result.errorCode || 'ALL_STRATEGIES_FAILED',
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
       debug: {
         zaiConfigured,
         isVercel,
-        hint: !zaiConfigured && isVercel
-          ? 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel'
-          : undefined,
+        isInternalZAI,
+        hint,
       },
     })
   } catch (error) {
@@ -164,21 +171,44 @@ export async function GET(request: NextRequest) {
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
     const zaiConfigured = isZAIConfigured()
+    const isVercel = !!process.env.VERCEL
+    const zaiConfig = getZAIConfig()
+    const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
+
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
       zaiConfigured,
-      message: awake ? 'IDM-VTON ready' : zaiConfigured ? 'Using AI image generation' : 'AI service not configured',
+      zaiReachable: zaiConfigured && !isInternalZAI,
+      isVercel,
+      message: zaiConfigured && !isInternalZAI
+        ? 'ZAI + IDM-VTON ready'
+        : awake
+          ? 'IDM-VTON ready'
+          : 'Warming up IDM-VTON',
     })
   }
   const statusResult = await checkIDMVTONSpaceStatus()
   const awake = statusResult.awake
   const zaiConfigured = isZAIConfigured()
+  const isVercel = !!process.env.VERCEL
+  const zaiConfig = getZAIConfig()
+  const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
+  const zaiReachable = zaiConfigured && !isInternalZAI
+
   return NextResponse.json({
     available: true,
     spaceAwake: awake,
     zaiConfigured,
-    mode: zaiConfigured ? 'zai-edit' : awake ? 'idm-vton' : 'unavailable',
-    message: zaiConfigured ? 'ZAI Image Edit ready — reliable' : awake ? 'IDM-VTON ready — best quality' : 'AI service not configured',
+    zaiReachable,
+    isVercel,
+    mode: zaiReachable ? 'zai-vlm-edit + idm-vton' : awake ? 'idm-vton' : 'unavailable',
+    message: zaiReachable
+      ? 'ZAI VLM+Edit + IDM-VTON available'
+      : awake
+        ? 'IDM-VTON ready — best quality'
+        : isVercel
+          ? 'AI service not configured for Vercel. IDM-VTON is sleeping — try again in 30s.'
+          : 'AI service not configured',
   })
 }
