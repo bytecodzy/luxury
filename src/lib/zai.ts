@@ -191,6 +191,9 @@ export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
 
 /**
  * Get the ZAI config from environment variables or file.
+ * Priority:
+ * 1. ZAI_BASE_URL + ZAI_API_KEY env vars (works on Vercel and locally)
+ * 2. .z-ai-config files (sandbox/local development)
  */
 export function getZAIConfig(): { baseUrl: string; apiKey: string; chatId?: string; token?: string; userId?: string } | null {
   const envBaseUrl = process.env.ZAI_BASE_URL
@@ -205,8 +208,9 @@ export function getZAIConfig(): { baseUrl: string; apiKey: string; chatId?: stri
     }
   }
 
-  // On Vercel, don't check config files
+  // On Vercel, don't check config files — env vars are required
   if (process.env.VERCEL) {
+    console.warn('[ZAI] ZAI_BASE_URL and ZAI_API_KEY environment variables are not set on Vercel. Virtual try-on requires these to be configured.')
     return null
   }
 
@@ -239,6 +243,14 @@ export function getZAIConfig(): { baseUrl: string; apiKey: string; chatId?: stri
   }
 
   return null
+}
+
+/**
+ * Check if ZAI is properly configured (has baseUrl and apiKey).
+ * This is different from reachable — it just checks if config exists.
+ */
+export function isZAIConfigured(): boolean {
+  return getZAIConfig() !== null
 }
 
 /**
@@ -279,33 +291,42 @@ export async function isZAIAvailable(): Promise<{
         return { available: true, mode: 'proxy', reason: 'AI service unreachable, using proxy' }
       }
     }
+
+    // Config exists but API is unreachable
+    return {
+      available: false,
+      mode: 'unavailable',
+      reason: 'ZAI API is configured but currently unreachable. Check ZAI_BASE_URL and ZAI_API_KEY.',
+    }
   }
 
-  // Strategy 2: Try SDK auto-discovery (ZAI.create()) — works in sandbox AND on Vercel
-  try {
-    const testInstance = await ZAI.create()
-    if (testInstance) {
-      // Actually verify the API is reachable with a lightweight chat call
-      try {
-        await Promise.race([
-          testInstance.chat.completions.create({
-            model: 'glm-4-flash',
-            messages: [{ role: 'user', content: 'ping' }],
-            max_tokens: 1,
-          }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('connectivity check timed out')), 8000)
-          ),
-        ])
-        console.log('[ZAI] SDK auto-discovery succeeded — AI available and reachable')
-        return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
-      } catch (connErr) {
-        console.log('[ZAI] SDK created but AI service is unreachable:', connErr instanceof Error ? connErr.message : String(connErr))
-        return { available: false, mode: 'unavailable', reason: 'AI service is configured but currently unreachable (connection timeout)' }
+  // Strategy 2: Try SDK auto-discovery (ZAI.create()) — works in sandbox
+  if (!process.env.VERCEL) {
+    try {
+      const testInstance = await ZAI.create()
+      if (testInstance) {
+        // Actually verify the API is reachable with a lightweight chat call
+        try {
+          await Promise.race([
+            testInstance.chat.completions.create({
+              model: 'glm-4-flash',
+              messages: [{ role: 'user', content: 'ping' }],
+              max_tokens: 1,
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('connectivity check timed out')), 8000)
+            ),
+          ])
+          console.log('[ZAI] SDK auto-discovery succeeded — AI available and reachable')
+          return { available: true, mode: 'sdk-auto', reason: 'Using SDK auto-discovery' }
+        } catch (connErr) {
+          console.log('[ZAI] SDK created but AI service is unreachable:', connErr instanceof Error ? connErr.message : String(connErr))
+          return { available: false, mode: 'unavailable', reason: 'AI service is configured but currently unreachable (connection timeout)' }
+        }
       }
+    } catch (sdkErr) {
+      console.log('[ZAI] SDK auto-discovery failed:', sdkErr instanceof Error ? sdkErr.message : String(sdkErr))
     }
-  } catch (sdkErr) {
-    console.log('[ZAI] SDK auto-discovery failed:', sdkErr instanceof Error ? sdkErr.message : String(sdkErr))
   }
 
   // Strategy 3: Try proxy URL
@@ -324,8 +345,8 @@ export async function isZAIAvailable(): Promise<{
   return {
     available: false,
     mode: 'unavailable',
-    reason: config
-      ? 'AI service is configured but not reachable, local proxy unavailable, and no remote proxy configured.'
+    reason: process.env.VERCEL
+      ? 'ZAI_BASE_URL and ZAI_API_KEY environment variables are not set. These are required on Vercel for virtual try-on to work.'
       : 'AI service is not configured and local proxy is unavailable.',
   }
 }
@@ -352,15 +373,22 @@ export async function createZAI(): Promise<InstanceType<typeof ZAI>> {
     }
   }
 
-  // Strategy 2: SDK auto-discovery — works in sandbox AND on Vercel
-  try {
-    const instance = await ZAI.create()
-    if (instance) {
-      return instance
+  // Strategy 2: SDK auto-discovery — works in sandbox only (not on Vercel)
+  if (!process.env.VERCEL) {
+    try {
+      const instance = await ZAI.create()
+      if (instance) {
+        return instance
+      }
+    } catch (err) {
+      console.error('[ZAI] SDK auto-discovery failed:', err instanceof Error ? err.message : String(err))
     }
-  } catch (err) {
-    console.error('[ZAI] SDK auto-discovery failed:', err instanceof Error ? err.message : String(err))
   }
 
-  throw new Error('AI_STYLE_SERVICE_UNAVAILABLE')
+  // Provide a helpful error message based on environment
+  if (process.env.VERCEL) {
+    throw new Error('AI_STYLE_SERVICE_NOT_CONFIGURED: Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel to enable virtual try-on.')
+  }
+
+  throw new Error('AI_STYLE_SERVICE_UNAVAILABLE: No ZAI configuration found. Create a .z-ai-config file or set ZAI_BASE_URL and ZAI_API_KEY environment variables.')
 }

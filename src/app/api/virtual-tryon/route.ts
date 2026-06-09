@@ -1,8 +1,7 @@
 /**
- * AI Virtual Try-On API v7 — Synchronous, Multi-Strategy, Fast
+ * AI Virtual Try-On API v8 — Synchronous, Multi-Strategy, Vercel-Ready
  *
- * This route bypasses the Caddy ai-proxy routing and goes directly
- * to the Next.js multi-strategy pipeline.
+ * This route handles virtual try-on requests with multi-strategy fallback.
  *
  * Strategy order:
  * 1. IDM-VTON (best quality garment draping)
@@ -15,6 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/lib/virtual-tryon'
+import { isZAIConfigured } from '@/lib/zai'
 
 export const maxDuration = 60
 
@@ -124,12 +124,25 @@ export async function POST(request: NextRequest) {
 
     // AI failed — honest error, tell user to try later
     console.log(`[virtual-tryon] ❌ Failed in ${elapsed}s: ${result.error}`)
+
+    // Include configuration info for debugging
+    const zaiConfigured = isZAIConfigured()
+    const isVercel = !!process.env.VERCEL
+
     return NextResponse.json({
       success: false,
       error: result.error || 'AI try-on is currently unavailable. Please try again in a few minutes.',
       errorCode: result.errorCode || 'ALL_STRATEGIES_FAILED',
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
+      // Debug info (safe to expose — no secrets)
+      debug: {
+        zaiConfigured,
+        isVercel,
+        hint: !zaiConfigured && isVercel
+          ? 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel'
+          : undefined,
+      },
     })
   } catch (error) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
@@ -149,17 +162,21 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
+    const zaiConfigured = isZAIConfigured()
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
+      zaiConfigured,
       message: awake ? 'IDM-VTON ready' : 'IDM-VTON warming up — try-on will use AI image generation',
     })
   }
   const statusResult = await checkIDMVTONSpaceStatus()
   const awake = statusResult.awake
+  const zaiConfigured = isZAIConfigured()
   return NextResponse.json({
     available: true,
     spaceAwake: awake,
+    zaiConfigured,
     mode: awake ? 'idm-vton' : 'zai-fallback',
     message: awake ? 'IDM-VTON ready — best quality' : 'Using AI image generation — good quality',
   })

@@ -402,7 +402,9 @@ export function TryOnDialog({
 
         // Customize message based on error code
         let userMessage = msg;
-        if (code === 'SERVICE_BUSY' || code === 'ALL_STRATEGIES_FAILED') {
+        if (code === 'ZAI_NOT_CONFIGURED') {
+          userMessage = 'AI try-on service is not configured. Please contact support to enable this feature.';
+        } else if (code === 'SERVICE_BUSY' || code === 'ALL_STRATEGIES_FAILED') {
           userMessage = 'AI service is currently busy. Please try again in a few minutes.';
         } else if (code === 'TIMEOUT') {
           userMessage = 'AI service is taking too long. Please try again in a few minutes.';
@@ -799,6 +801,15 @@ export function TryOnDialog({
                     <p className="text-xs text-amber-200/50">
                       <span className="font-semibold text-amber-300/60">Timed Out:</span>{' '}
                       The AI service took too long to respond. Please try again in a few minutes.
+                    </p>
+                  </div>
+                )}
+
+                {errorCode === 'ZAI_NOT_CONFIGURED' && (
+                  <div className="rounded-lg bg-amber-900/10 p-3">
+                    <p className="text-xs text-amber-200/50">
+                      <span className="font-semibold text-amber-300/60">Configuration Required:</span>{' '}
+                      The AI try-on service needs to be configured with API credentials. If you're the site owner, set ZAI_BASE_URL and ZAI_API_KEY environment variables.
                     </p>
                   </div>
                 )}

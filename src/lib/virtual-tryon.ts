@@ -1,18 +1,19 @@
 /**
- * Virtual Try-On Engine v7 — IDM-VTON Primary, ZAI Fallback
+ * Virtual Try-On Engine v8 — IDM-VTON Primary, ZAI Fallback, Vercel-Ready
  *
  * KEY PRINCIPLES:
- * 1. IDM-VTON is PRIMARY — best quality garment draping, currently working
+ * 1. IDM-VTON is PRIMARY — best quality garment draping
  * 2. ZAI Image Edit is SECONDARY — good when ZAI API is reachable
  * 3. ZAI Text-to-Image is TERTIARY — no face preservation
  * 4. 50-second hard server timeout — never exceed Vercel's 60s limit
  * 5. NO canvas overlay fallback — either real AI result or honest error
  * 6. Quick availability check to skip strategies that won't work
  * 7. Category-aware prompts for accurate product draping
+ * 8. Clear error codes for Vercel configuration issues
  */
 
 import { performTryOn as hfPerformTryOn, checkSpaceStatus } from './huggingface-tryon'
-import { createZAI, getZAIConfig, isLocalProxyReachable } from './zai'
+import { createZAI, getZAIConfig, isZAIConfigured } from './zai'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ export interface TryOnResult {
   imageUrl?: string           // base64 data URL of the result
   strategy?: string           // 'idm-vton' | 'zai-edit' | 'zai-generate'
   error?: string
-  errorCode?: 'SPACE_SLEEPING' | 'UPLOAD_FAILED' | 'CALL_FAILED' | 'PROCESSING_FAILED' | 'TIMEOUT' | 'NETWORK_ERROR' | 'ALL_STRATEGIES_FAILED' | 'SERVICE_BUSY' | 'NO_PRODUCT_IMAGE'
+  errorCode?: 'SPACE_SLEEPING' | 'UPLOAD_FAILED' | 'CALL_FAILED' | 'PROCESSING_FAILED' | 'TIMEOUT' | 'NETWORK_ERROR' | 'ALL_STRATEGIES_FAILED' | 'SERVICE_BUSY' | 'NO_PRODUCT_IMAGE' | 'ZAI_NOT_CONFIGURED'
   elapsedMs?: number
 }
 
@@ -246,6 +247,12 @@ let zaiAvailableCache: { available: boolean; timestamp: number } | null = null
 const ZAI_AVAILABILITY_CACHE_TTL = 20_000 // 20 seconds
 
 async function isZAIReachable(): Promise<boolean> {
+  // Fast check: if not configured, skip entirely
+  if (!isZAIConfigured()) {
+    console.log('[virtual-tryon] ZAI is not configured (no ZAI_BASE_URL/ZAI_API_KEY or .z-ai-config)')
+    return false
+  }
+
   const now = Date.now()
   if (zaiAvailableCache && now - zaiAvailableCache.timestamp < ZAI_AVAILABILITY_CACHE_TTL) {
     return zaiAvailableCache.available
@@ -265,7 +272,9 @@ async function isZAIReachable(): Promise<boolean> {
     const available = result !== null
     zaiAvailableCache = { available, timestamp: now }
     return available
-  } catch {
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.log(`[virtual-tryon] ZAI not reachable: ${errMsg.substring(0, 100)}`)
     zaiAvailableCache = { available: false, timestamp: now }
     return false
   }
@@ -427,7 +436,7 @@ export function getCachedSpaceStatus(): { awake: boolean; timestamp: number } | 
  * Strategy order (optimized for current availability):
  * 1. IDM-VTON (if space is awake) — best quality, proper garment draping
  * 2. ZAI Image Edit (selfie + VLM-described product) — good quality when ZAI is available
- * 3. ZAI Image Generate (text-to-image) — fallback, no face preservation
+ * 3. ZAI Text-to-Image (text-to-image) — fallback, no face preservation
  *
  * Total time: max 50 seconds
  * NO canvas overlay fallback — either real AI or honest error
@@ -440,11 +449,19 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
 
   // ── Quick availability checks (parallel, 3s each) ──────────────
   console.log('[virtual-tryon] Checking AI service availability...')
+
+  // Check ZAI configuration first (instant check)
+  const zaiConfigured = isZAIConfigured()
+  if (!zaiConfigured) {
+    console.log('[virtual-tryon] ZAI is NOT configured — will only try IDM-VTON')
+  }
+
   const [spaceAwake, zaiReachable] = await Promise.all([
     isSpaceAwake(),
-    isZAIReachable(),
+    zaiConfigured ? isZAIReachable() : Promise.resolve(false),
   ])
-  console.log(`[virtual-tryon] Availability: IDM-VTON=${spaceAwake ? 'AWAKE' : 'SLEEPING/MAYBE'}, ZAI=${zaiReachable ? 'REACHABLE' : 'DOWN'}`)
+
+  console.log(`[virtual-tryon] Availability: IDM-VTON=${spaceAwake ? 'AWAKE' : 'SLEEPING/MAYBE'}, ZAI=${zaiReachable ? 'REACHABLE' : zaiConfigured ? 'CONFIGURED-BUSY' : 'NOT-CONFIGURED'}`)
 
   // ── Strategy 1: IDM-VTON (best quality garment draping) ────────
   // IMPORTANT: Try IDM-VTON even when space appears to be sleeping.
@@ -484,6 +501,24 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     if (!spaceAwake) {
       // Pre-warm in background for next attempt
       preWarmSpace().catch(() => {})
+    }
+  }
+
+  // If ZAI is not configured, we can't try any ZAI strategies
+  if (!zaiConfigured) {
+    const elapsed = Date.now() - totalStart
+    console.log(`[virtual-tryon] ZAI not configured — cannot try ZAI strategies`)
+
+    // Provide a helpful error based on environment
+    const isVercel = !!process.env.VERCEL
+    return {
+      success: false,
+      error: isVercel
+        ? 'AI try-on requires ZAI_BASE_URL and ZAI_API_KEY environment variables to be set on Vercel. Please configure these in your Vercel project settings.'
+        : 'AI try-on service is not configured. Create a .z-ai-config file or set ZAI_BASE_URL and ZAI_API_KEY environment variables.',
+      errorCode: 'ZAI_NOT_CONFIGURED',
+      strategy: undefined,
+      elapsedMs: elapsed,
     }
   }
 
@@ -538,8 +573,39 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
         console.log(`[virtual-tryon] ZAI image edit error: ${(err as Error).message?.substring(0, 100)}`)
       }
     }
-  } else if (!zaiReachable) {
-    console.log('[virtual-tryon] Skipping ZAI — API is unreachable')
+  } else if (!zaiReachable && zaiConfigured) {
+    console.log('[virtual-tryon] ZAI is configured but unreachable — trying anyway with direct call')
+
+    // Try ZAI even if the reachability check failed (it might be a false negative)
+    if (Date.now() < totalDeadline - 15_000) {
+      let productDesc = ''
+      try {
+        productDesc = await Promise.race([
+          vlmDescribeProduct(input.productImageBase64),
+          new Promise<string>(r => setTimeout(() => r('a luxury product with elegant design'), VLM_TIMEOUT_MS)),
+        ])
+      } catch {}
+
+      if (Date.now() < totalDeadline - 10_000) {
+        try {
+          const prompt = buildEditPrompt(config, input.productName, productDesc || 'a luxury product')
+          const result = await zaiImageEdit(input.selfieData, prompt, config.size)
+
+          if (result) {
+            const elapsed = Date.now() - totalStart
+            console.log(`[virtual-tryon] ✅ ZAI image edit (direct) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+            return {
+              success: true,
+              imageUrl: result,
+              strategy: 'zai-edit',
+              elapsedMs: elapsed,
+            }
+          }
+        } catch (err) {
+          console.log(`[virtual-tryon] ZAI image edit (direct) error: ${(err as Error).message?.substring(0, 100)}`)
+        }
+      }
+    }
   }
 
   // Check if we still have time
@@ -555,7 +621,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ── Strategy 3: ZAI Text-to-Image Generate ──────────────────────
-  if (zaiReachable && Date.now() < totalDeadline - 10_000) {
+  if (zaiConfigured && Date.now() < totalDeadline - 10_000) {
     console.log('[virtual-tryon] Strategy 3: ZAI text-to-image generate')
     try {
       // Get descriptions
