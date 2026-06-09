@@ -444,11 +444,15 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     isSpaceAwake(),
     isZAIReachable(),
   ])
-  console.log(`[virtual-tryon] Availability: IDM-VTON=${spaceAwake ? 'AWAKE' : 'SLEEPING'}, ZAI=${zaiReachable ? 'REACHABLE' : 'DOWN'}`)
+  console.log(`[virtual-tryon] Availability: IDM-VTON=${spaceAwake ? 'AWAKE' : 'SLEEPING/MAYBE'}, ZAI=${zaiReachable ? 'REACHABLE' : 'DOWN'}`)
 
   // ── Strategy 1: IDM-VTON (best quality garment draping) ────────
-  if (spaceAwake && Date.now() < totalDeadline - 20_000) {
-    console.log('[virtual-tryon] Strategy 1: IDM-VTON (space is awake, best quality)')
+  // IMPORTANT: Try IDM-VTON even when space appears to be sleeping.
+  // The space status check can be unreliable (timeouts, network issues).
+  // If the space is actually sleeping, the upload will fail quickly
+  // and we'll fall through to ZAI strategies — no wasted time.
+  if (Date.now() < totalDeadline - 15_000) {
+    console.log(`[virtual-tryon] Strategy 1: IDM-VTON (${spaceAwake ? 'space is awake' : 'space may be sleeping, trying anyway'})`)
     try {
       const idmDeadline = Math.min(IDM_VTON_TIMEOUT_MS, totalDeadline - Date.now())
       const result = await Promise.race([
@@ -476,10 +480,11 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     } catch (err) {
       console.log(`[virtual-tryon] IDM-VTON error: ${(err as Error).message?.substring(0, 100)}`)
     }
-  } else if (!spaceAwake) {
-    console.log('[virtual-tryon] Skipping IDM-VTON — space is sleeping')
-    // Pre-warm in background for next attempt
-    preWarmSpace().catch(() => {})
+
+    if (!spaceAwake) {
+      // Pre-warm in background for next attempt
+      preWarmSpace().catch(() => {})
+    }
   }
 
   // Check if we still have time
