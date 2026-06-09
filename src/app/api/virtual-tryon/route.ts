@@ -120,8 +120,12 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // AI failed — honest error with helpful message
+    // AI failed — honest error with helpful message + debug info
     console.log(`[virtual-tryon] ❌ Failed in ${elapsed}s: ${result.error}`)
+    if (result.debugInfo) {
+      console.log(`[virtual-tryon] Debug: strategies=${result.debugInfo.strategiesAttempted.join(',')}, health=${JSON.stringify(result.debugInfo.healthCheck)}`)
+      console.log(`[virtual-tryon] Strategy errors: ${JSON.stringify(result.debugInfo.strategyErrors)}`)
+    }
 
     const zaiConfigured = isZAIConfigured()
     const isVercel = !!process.env.VERCEL
@@ -150,6 +154,9 @@ export async function POST(request: NextRequest) {
         isVercel,
         isInternalZAI,
         hint,
+        strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
+        strategyErrors: result.debugInfo?.strategyErrors || {},
+        healthCheck: result.debugInfo?.healthCheck || null,
       },
     })
   } catch (error) {

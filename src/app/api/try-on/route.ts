@@ -115,6 +115,9 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[try-on] ❌ Failed in ${elapsed}s: ${result.error}`)
+    if (result.debugInfo) {
+      console.log(`[try-on] Debug: strategies=${result.debugInfo.strategiesAttempted.join(',')}, health=${JSON.stringify(result.debugInfo.healthCheck)}`)
+    }
 
     const zaiConfigured = isZAIConfigured()
     const isVercel = !!process.env.VERCEL
@@ -139,6 +142,9 @@ export async function POST(request: NextRequest) {
         isVercel,
         isInternalZAI,
         hint,
+        strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
+        strategyErrors: result.debugInfo?.strategyErrors || {},
+        healthCheck: result.debugInfo?.healthCheck || null,
       },
     })
   } catch (error) {

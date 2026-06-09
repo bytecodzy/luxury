@@ -396,9 +396,14 @@ export function TryOnDialog({
         setResultImage(data.imageUrl);
         setStep('result');
       } else {
-        // ERROR — show honest error with "try later" message
+        // ERROR — show honest error with strategy debug info
         const msg = data.error || 'AI try-on failed. Please try again.';
         const code = data.errorCode || 'UNKNOWN';
+
+        // Log debug info for troubleshooting
+        if (data.debug) {
+          console.log('[try-on] Debug info:', JSON.stringify(data.debug, null, 2));
+        }
 
         // Customize message based on error code
         let userMessage = msg;
@@ -410,6 +415,8 @@ export function TryOnDialog({
           userMessage = 'AI service is taking too long. Please try again in a few minutes.';
         } else if (code === 'SPACE_SLEEPING') {
           userMessage = 'AI service is waking up. Please try again in 30-60 seconds.';
+        } else if (code === 'NO_PRODUCT_IMAGE') {
+          userMessage = 'Could not load the product image. Please try again.';
         }
 
         showError(userMessage, code);
