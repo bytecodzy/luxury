@@ -1,15 +1,13 @@
 /**
- * AI Virtual Try-On API v8 — Synchronous, Multi-Strategy, Vercel-Ready
- *
- * This route handles virtual try-on requests with multi-strategy fallback.
+ * AI Virtual Try-On API v9 — Reliable, Fast, Zero-VLM
  *
  * Strategy order:
- * 1. IDM-VTON (best quality garment draping)
- * 2. ZAI Image Edit (good quality, face preservation)
- * 3. ZAI Text-to-Image (fallback, no face preservation)
+ * 1. ZAI Image Edit (most reliable, preserves face)
+ * 2. IDM-VTON (best quality garment draping, but space may sleep)
+ * 3. ZAI Text-to-Image (last resort, no face preservation)
  *
  * 50-second server timeout — never exceed Vercel's 60s limit
- * Honest errors with "try later" — never make users wait 200s
+ * NO VLM calls — eliminates 6-12s latency and failure points
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -29,12 +27,17 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
     try {
       const u = new URL(imagePath, 'http://localhost')
       const orig = u.searchParams.get('url')
-      if (orig) { const r = await fetchImageAsBase64(orig.startsWith('//') ? `https:${orig}` : orig); if (r) return r }
+      if (orig) {
+        const r = await fetchImageAsBase64(orig.startsWith('//') ? `https:${orig}` : orig)
+        if (r) return r
+      }
     } catch {}
   }
+  // Try to fetch via base URL
   const base = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
   const httpResult = await fetchImageAsBase64(`${base}${imagePath}`)
   if (httpResult) return httpResult
+  // Try reading from filesystem (local dev only)
   if (!process.env.VERCEL) {
     try {
       const { existsSync, readFileSync } = await import('fs')
@@ -86,7 +89,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Resolve product image
+    // Resolve product image — prefer client-provided base64 over URL fetch
     let productImageBase64 = clientBase64 || null
     if (!productImageBase64 && productImageUrl) {
       productImageBase64 = await getProductImageBase64(productImageUrl)
@@ -122,10 +125,9 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // AI failed — honest error, tell user to try later
+    // AI failed — honest error
     console.log(`[virtual-tryon] ❌ Failed in ${elapsed}s: ${result.error}`)
 
-    // Include configuration info for debugging
     const zaiConfigured = isZAIConfigured()
     const isVercel = !!process.env.VERCEL
 
@@ -135,7 +137,6 @@ export async function POST(request: NextRequest) {
       errorCode: result.errorCode || 'ALL_STRATEGIES_FAILED',
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
-      // Debug info (safe to expose — no secrets)
       debug: {
         zaiConfigured,
         isVercel,
@@ -167,7 +168,7 @@ export async function GET(request: NextRequest) {
       available: true,
       spaceAwake: awake,
       zaiConfigured,
-      message: awake ? 'IDM-VTON ready' : 'IDM-VTON warming up — try-on will use AI image generation',
+      message: awake ? 'IDM-VTON ready' : zaiConfigured ? 'Using AI image generation' : 'AI service not configured',
     })
   }
   const statusResult = await checkIDMVTONSpaceStatus()
@@ -177,7 +178,7 @@ export async function GET(request: NextRequest) {
     available: true,
     spaceAwake: awake,
     zaiConfigured,
-    mode: awake ? 'idm-vton' : 'zai-fallback',
-    message: awake ? 'IDM-VTON ready — best quality' : 'Using AI image generation — good quality',
+    mode: zaiConfigured ? 'zai-edit' : awake ? 'idm-vton' : 'unavailable',
+    message: zaiConfigured ? 'ZAI Image Edit ready — reliable' : awake ? 'IDM-VTON ready — best quality' : 'AI service not configured',
   })
 }

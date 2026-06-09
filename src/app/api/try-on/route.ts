@@ -1,16 +1,13 @@
 /**
- * AI Virtual Try-On API v6 — Synchronous, Honest, Fast
+ * AI Virtual Try-On API (backward-compatible route)
  *
- * Key improvements:
- * 1. Synchronous processing — single POST, return first success
- * 2. 50-second server timeout — never exceed Vercel's 60s limit
- * 3. NO canvas overlay fallback — either real AI result or honest error
- * 4. If AI is busy, tell user to try later — don't make them wait
- * 5. maxDuration = 60 for Vercel Pro
+ * Delegates to the same performVirtualTryOn engine as /api/virtual-tryon
+ * Strategy: ZAI Image Edit → IDM-VTON → ZAI Text-to-Image
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/lib/virtual-tryon'
+import { isZAIConfigured } from '@/lib/zai'
 
 export const maxDuration = 60
 
@@ -82,7 +79,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Resolve product image
+    // Resolve product image — prefer client-provided base64
     let productImageBase64 = clientBase64 || null
     if (!productImageBase64 && productImageUrl) {
       productImageBase64 = await getProductImageBase64(productImageUrl)
@@ -98,7 +95,6 @@ export async function POST(request: NextRequest) {
 
     console.log(`[try-on] Starting virtual try-on for "${productName}" (${categorySlug})`)
 
-    // Run the multi-strategy try-on engine
     const result = await performVirtualTryOn({
       selfieData,
       productImageBase64,
@@ -118,7 +114,6 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // AI failed — honest error, tell user to try later
     console.log(`[try-on] ❌ Failed in ${elapsed}s: ${result.error}`)
     return NextResponse.json({
       success: false,
@@ -126,6 +121,10 @@ export async function POST(request: NextRequest) {
       errorCode: result.errorCode || 'ALL_STRATEGIES_FAILED',
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
+      debug: {
+        zaiConfigured: isZAIConfigured(),
+        isVercel: !!process.env.VERCEL,
+      },
     })
   } catch (error) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
@@ -145,18 +144,22 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
+    const zaiConfigured = isZAIConfigured()
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: awake ? 'IDM-VTON ready' : 'IDM-VTON warming up — try-on will use AI image generation',
+      zaiConfigured,
+      message: zaiConfigured ? 'AI ready' : awake ? 'IDM-VTON ready' : 'Warming up',
     })
   }
   const statusResult = await checkIDMVTONSpaceStatus()
   const awake = statusResult.awake
+  const zaiConfigured = isZAIConfigured()
   return NextResponse.json({
     available: true,
     spaceAwake: awake,
-    mode: awake ? 'idm-vton' : 'zai-fallback',
-    message: awake ? 'IDM-VTON ready — best quality' : 'Using AI image generation — good quality',
+    zaiConfigured,
+    mode: zaiConfigured ? 'zai-edit' : awake ? 'idm-vton' : 'unavailable',
+    message: zaiConfigured ? 'ZAI Image Edit ready' : awake ? 'IDM-VTON ready' : 'AI service not configured',
   })
 }
