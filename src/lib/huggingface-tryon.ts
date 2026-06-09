@@ -146,22 +146,31 @@ async function pollForResult(eventId: string, abortSignal: AbortSignal): Promise
   const start = Date.now()
   while (Date.now() - start < POLL_TIMEOUT_MS && !abortSignal.aborted) {
     try {
+      // Gradio SSE uses long-polling: the server keeps the connection open
+      // until the result is ready (~15-30s for tryon). We must use a long
+      // timeout per request to avoid closing the connection prematurely.
+      const remainingMs = Math.max(POLL_TIMEOUT_MS - (Date.now() - start), 5_000)
       const r = await fetch(`${SPACE_URL}/call/tryon/${eventId}`, {
         method: 'GET',
         headers: { 'Accept': 'text/event-stream' },
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(Math.min(remainingMs, 45_000)),
       })
       if (r.status === 404) { await new Promise(r => setTimeout(r, POLL_INTERVAL_MS)); continue }
       if (!r.ok) { await new Promise(r => setTimeout(r, POLL_INTERVAL_MS)); continue }
       const text = await r.text()
       let eventType = ''
+      let foundComplete = false
       for (const line of text.split('\n')) {
         const trimmed = line.trim()
         if (trimmed.startsWith('event:')) eventType = trimmed.replace('event:', '').trim()
         if (trimmed.startsWith('data:')) {
           const dataStr = trimmed.substring(5).trim()
-          if (eventType === 'error') return null
+          if (eventType === 'error') {
+            console.log('[idm-vton] SSE error event:', dataStr.substring(0, 200))
+            return null
+          }
           if (eventType === 'complete') {
+            foundComplete = true
             try {
               const data = JSON.parse(dataStr)
               if (Array.isArray(data) && data.length > 0) {
@@ -171,9 +180,21 @@ async function pollForResult(eventId: string, abortSignal: AbortSignal): Promise
               }
             } catch { return null }
           }
+          // Heartbeat event — connection still open, result not ready yet
+          if (eventType === 'heartbeat') continue
         }
       }
-    } catch { if (abortSignal.aborted) return null }
+      // If we got a response but no complete event, the result isn't ready yet
+      if (!foundComplete) {
+        await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
+        continue
+      }
+    } catch (err) {
+      if (abortSignal.aborted) return null
+      // Timeout on this request — result may still be processing, retry
+      console.log('[idm-vton] Poll request timed out, retrying...')
+      await new Promise(r => setTimeout(r, 1_000))
+    }
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
   }
   return null

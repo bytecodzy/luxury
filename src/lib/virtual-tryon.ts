@@ -1,19 +1,22 @@
 /**
- * Virtual Try-On Engine v10 — Direct API, Zero-VLM, Vercel-Ready
+ * Virtual Try-On Engine v11 — Availability-First, Zero-Waste
  *
- * DESIGN PRINCIPLES:
- * 1. ZAI Image Edit is PRIMARY — most reliable, preserves face
- * 2. IDM-VTON is SECONDARY — best quality garment draping, but space sleeps
- * 3. ZAI Text-to-Image is TERTIARY — no face preservation, last resort
- * 4. NO VLM calls — eliminates 6-12s latency and multiple failure points
- * 5. Direct API calls — bypasses ZAI SDK for maximum Vercel compatibility
- * 6. Category-aware prompts built from product name + category config
- * 7. 50-second hard server timeout — never exceed Vercel's 60s limit
- * 8. Works on sandbox (via .z-ai-config) and Vercel (via env vars)
+ * DESIGN:
+ * 1. Quick health check (2-3s) determines what's available
+ * 2. Only tries strategies that can actually succeed
+ * 3. ZAI SDK integration with proper auto-discovery
+ * 4. IDM-VTON as reliable primary (when ZAI unreachable)
+ * 5. 50-second total timeout (Vercel 60s limit)
+ *
+ * KEY INSIGHT: The ZAI API (internal-api.z.ai) resolves to private IPs
+ * (172.25.x.x) that are NOT reachable from the sandbox or Vercel.
+ * Connection attempts timeout after 10+ seconds, wasting precious time.
+ * This version does a quick 2s connectivity check FIRST and skips
+ * unreachable strategies entirely, giving IDM-VTON the full time budget.
  */
 
 import { performTryOn as hfPerformTryOn, checkSpaceStatus } from './huggingface-tryon'
-import { getZAIConfig, isZAIConfigured } from './zai'
+import { createZAI, isZAIConfigured, getZAIConfig } from './zai'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -37,149 +40,67 @@ type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864'
 
 // ── Timeouts ───────────────────────────────────────────────────────
 
-const TOTAL_TIMEOUT_MS = 50_000      // 50s hard limit (10s buffer for Vercel 60s)
-const ZAI_EDIT_TIMEOUT_MS = 30_000   // 30s for ZAI image edit
-const IDM_VTON_TIMEOUT_MS = 35_000   // 35s for IDM-VTON
-const ZAI_GENERATE_TIMEOUT_MS = 25_000  // 25s for ZAI text-to-image
+const TOTAL_TIMEOUT_MS = 50_000       // 50s hard limit (10s buffer for Vercel 60s)
+const ZAI_EDIT_TIMEOUT_MS = 30_000    // 30s for ZAI image edit
+const IDM_VTON_TIMEOUT_MS = 45_000    // 45s for IDM-VTON (needs more time)
+const ZAI_GENERATE_TIMEOUT_MS = 25_000 // 25s for ZAI text-to-image
+const HEALTH_CHECK_TIMEOUT_MS = 2_000  // 2s for each health check probe
 
-// ── Direct AI API Calls ────────────────────────────────────────────
-// Bypasses the ZAI SDK entirely for maximum Vercel compatibility.
-// Uses the same credentials from getZAIConfig() (env vars or .z-ai-config).
+// ── Health Check ───────────────────────────────────────────────────
+// Quick parallel probes to determine what's available before trying strategies.
+// Caches results for 15 seconds to avoid re-checking on every request.
 
-function buildAuthHeaders(): Record<string, string> {
-  const config = getZAIConfig()
-  if (!config) return {}
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${config.apiKey}`,
-    'X-Z-AI-From': 'Z',
-    'X-Chat-Id': config.chatId || '',
-    'X-User-Id': config.userId || '',
-    'X-Token': config.token || '',
-  }
+interface HealthStatus {
+  zaiReachable: boolean
+  spaceAwake: boolean
+  timestamp: number
 }
 
-async function directAIImageEdit(
-  selfieDataUrl: string,
-  prompt: string,
-  size: ImageSize,
-  timeoutMs: number,
-): Promise<string | null> {
-  const config = getZAIConfig()
-  if (!config) return null
+let healthCache: HealthStatus | null = null
+const HEALTH_CACHE_TTL = 15_000 // 15 seconds
 
-  try {
-    const url = `${config.baseUrl}/images/generations/edit`
-    const headers = buildAuthHeaders()
-    const body = JSON.stringify({
-      prompt,
-      images: [{ url: selfieDataUrl }],
-      size,
-    })
-
-    console.log(`[virtual-tryon] Direct API call: POST ${url} (timeout: ${timeoutMs}ms)`)
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '')
-      console.error(`[virtual-tryon] Image edit API returned ${response.status}: ${errorText.substring(0, 200)}`)
-      return null
-    }
-
-    const result = await response.json()
-
-    // Handle base64 response
-    if (result.data?.[0]?.base64) {
-      return `data:image/png;base64,${result.data[0].base64}`
-    }
-
-    // Handle URL response — download and convert to base64
-    if (result.data?.[0]?.url) {
-      try {
-        const imgRes = await fetch(result.data[0].url, { signal: AbortSignal.timeout(10_000) })
-        if (imgRes.ok) {
-          const buf = Buffer.from(await imgRes.arrayBuffer())
-          const ct = imgRes.headers.get('content-type') || 'image/png'
-          return `data:${ct.split(';')[0]};base64,${buf.toString('base64')}`
-        }
-      } catch {}
-      return result.data[0].url
-    }
-
-    console.error('[virtual-tryon] Image edit API returned unexpected format:', JSON.stringify(result).substring(0, 200))
-    return null
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('[virtual-tryon] Direct image edit failed:', msg.substring(0, 200))
-    return null
+async function quickHealthCheck(): Promise<Pick<HealthStatus, 'zaiReachable' | 'spaceAwake'>> {
+  const now = Date.now()
+  if (healthCache && now - healthCache.timestamp < HEALTH_CACHE_TTL) {
+    return { zaiReachable: healthCache.zaiReachable, spaceAwake: healthCache.spaceAwake }
   }
-}
 
-async function directAIImageGenerate(
-  prompt: string,
-  size: ImageSize,
-  timeoutMs: number,
-): Promise<string | null> {
-  const config = getZAIConfig()
-  if (!config) return null
-
-  try {
-    const url = `${config.baseUrl}/images/generations`
-    const headers = buildAuthHeaders()
-    const body = JSON.stringify({
-      model: 'cogview-4-plus',
-      prompt,
-      size,
-    })
-
-    console.log(`[virtual-tryon] Direct API call: POST ${url} (timeout: ${timeoutMs}ms)`)
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body,
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '')
-      console.error(`[virtual-tryon] Image generate API returned ${response.status}: ${errorText.substring(0, 200)}`)
-      return null
-    }
-
-    const result = await response.json()
-
-    // Handle base64 response
-    if (result.data?.[0]?.base64) {
-      return `data:image/png;base64,${result.data[0].base64}`
-    }
-
-    // Handle URL response
-    if (result.data?.[0]?.url) {
+  // Run both checks in parallel with short timeouts
+  const [zaiResult, spaceResult] = await Promise.all([
+    // ZAI connectivity check — lightweight GET with 2s timeout
+    // Avoids slow POST /chat/completions call from isAIReachable()
+    (async (): Promise<boolean> => {
+      if (!isZAIConfigured()) return false
       try {
-        const imgRes = await fetch(result.data[0].url, { signal: AbortSignal.timeout(10_000) })
-        if (imgRes.ok) {
-          const buf = Buffer.from(await imgRes.arrayBuffer())
-          const ct = imgRes.headers.get('content-type') || 'image/png'
-          return `data:${ct.split(';')[0]};base64,${buf.toString('base64')}`
-        }
-      } catch {}
-      return result.data[0].url
-    }
+        const config = getZAIConfig()
+        if (!config) return false
+        // Lightweight check: just try to connect to the API host
+        const r = await fetch(`${config.baseUrl}/models`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${config.apiKey}` },
+          signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
+        })
+        // Any response (even 401/403) means the API is reachable
+        return r.status < 500
+      } catch {
+        return false
+      }
+    })(),
+    // IDM-VTON space check — 2s timeout
+    (async (): Promise<boolean> => {
+      try {
+        return await Promise.race([
+          checkSpaceStatus(),
+          new Promise<false>(r => setTimeout(() => r(false), HEALTH_CHECK_TIMEOUT_MS)),
+        ])
+      } catch {
+        return false
+      }
+    })(),
+  ])
 
-    console.error('[virtual-tryon] Image generate API returned unexpected format:', JSON.stringify(result).substring(0, 200))
-    return null
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('[virtual-tryon] Direct image generate failed:', msg.substring(0, 200))
-    return null
-  }
+  healthCache = { zaiReachable: zaiResult, spaceAwake: spaceResult, timestamp: now }
+  return { zaiReachable: zaiResult, spaceAwake: spaceResult }
 }
 
 // ── Category Configuration ─────────────────────────────────────────
@@ -396,7 +317,7 @@ CRITICAL RULES:
 ${config.bodyType}. Studio-quality, 8K detail.`
 }
 
-// ── Space Status Check (lightweight) ────────────────────────────────
+// ── Space Status Helpers ────────────────────────────────────────────
 
 let spaceAwakeCache: { awake: boolean; timestamp: number } | null = null
 const SPACE_CACHE_TTL = 20_000 // 20 seconds
@@ -438,53 +359,106 @@ export function getCachedSpaceStatus(): { awake: boolean; timestamp: number } | 
   return spaceAwakeCache
 }
 
+// ── ZAI Image Result Helper ────────────────────────────────────────
+// Processes the ZAI SDK response, converting URLs to base64 when needed.
+
+async function processZAIImageResponse(
+  result: { data?: Array<{ base64?: string; url?: string }> } | null,
+): Promise<string | null> {
+  if (!result?.data?.[0]) return null
+
+  const item = result.data[0]
+
+  // Base64 response — direct
+  if (item.base64) {
+    return `data:image/png;base64,${item.base64}`
+  }
+
+  // URL response — download and convert to base64
+  if (item.url) {
+    try {
+      const imgRes = await fetch(item.url, { signal: AbortSignal.timeout(5_000) })
+      if (imgRes.ok) {
+        const buf = Buffer.from(await imgRes.arrayBuffer())
+        const ct = imgRes.headers.get('content-type') || 'image/png'
+        return `data:${ct.split(';')[0]};base64,${buf.toString('base64')}`
+      }
+    } catch {
+      // Download failed — return URL directly
+    }
+    return item.url
+  }
+
+  return null
+}
+
 // ── Main Try-On Function ───────────────────────────────────────────
 
 /**
- * Perform virtual try-on using multiple strategies with direct API calls.
+ * Perform virtual try-on using availability-aware strategy selection.
  *
- * Strategy order (optimized for RELIABILITY):
- * 1. ZAI Image Edit — most reliable, preserves face, direct API call
- * 2. IDM-VTON — best quality garment draping, but space may sleep
- * 3. ZAI Text-to-Image — last resort, no face preservation
+ * FLOW:
+ * 1. Quick health check (2-3s) determines what's reachable
+ * 2. If ZAI IS reachable:  ZAI Image Edit → IDM-VTON → ZAI Text-to-Image
+ * 3. If ZAI is NOT reachable: IDM-VTON (gets full time budget)
+ * 4. Total time: max 50 seconds
  *
- * Total time: max 50 seconds
- * NO VLM calls — eliminates 6-12s latency and failure points
- * Direct API calls — bypasses ZAI SDK for maximum Vercel compatibility
+ * NO VLM calls — eliminates 6-12s latency and failure points.
+ * ZAI SDK integration with auto-discovery and proper error handling.
  */
 export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResult> {
   const totalStart = Date.now()
   const totalDeadline = totalStart + TOTAL_TIMEOUT_MS
   const config = getCategoryConfig(input.categorySlug, input.productName)
-  const zaiConfigured = isZAIConfigured()
 
-  console.log(`[virtual-tryon] Starting try-on for "${input.productName}" (${input.categorySlug}), ZAI=${zaiConfigured ? 'configured' : 'NOT configured'}`)
+  console.log(`[virtual-tryon] Starting try-on for "${input.productName}" (${input.categorySlug})`)
 
-  // ── Strategy 1: ZAI Image Edit (MOST RELIABLE — preserves face) ──
-  if (zaiConfigured && Date.now() < totalDeadline - 15_000) {
-    console.log('[virtual-tryon] Strategy 1: ZAI Image Edit (direct API call)')
+  // ── Step 1: Quick health check — determines available strategies ──
+  const health = await quickHealthCheck()
+  console.log(
+    `[virtual-tryon] Health: ZAI=${health.zaiReachable ? 'reachable' : 'unreachable'}, IDM-VTON=${health.spaceAwake ? 'awake' : 'sleeping'}`,
+  )
+
+  // ── Strategy 1: ZAI Image Edit (ONLY if ZAI is reachable) ────────
+  // Preserves the person's face — highest quality result
+  if (health.zaiReachable && Date.now() < totalDeadline - 15_000) {
+    console.log('[virtual-tryon] Strategy 1: ZAI Image Edit (SDK)')
     try {
+      const zai = await createZAI()
       const prompt = buildEditPrompt(config, input.productName)
       const remainingTime = Math.min(ZAI_EDIT_TIMEOUT_MS, totalDeadline - Date.now())
-      const result = await directAIImageEdit(input.selfieData, prompt, config.size, remainingTime)
+
+      const result = await Promise.race([
+        zai.images.generations.edit({
+          prompt,
+          images: [{ url: input.selfieData }],
+          size: config.size,
+        } as any),
+        new Promise<null>(r => setTimeout(() => r(null), remainingTime)),
+      ])
 
       if (result) {
-        const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ ZAI Image Edit succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-        return {
-          success: true,
-          imageUrl: result,
-          strategy: 'zai-edit',
-          elapsedMs: elapsed,
+        const imageUrl = await processZAIImageResponse(result as any)
+        if (imageUrl) {
+          const elapsed = Date.now() - totalStart
+          console.log(`[virtual-tryon] ✅ ZAI Image Edit succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+          return {
+            success: true,
+            imageUrl,
+            strategy: 'zai-edit',
+            elapsedMs: elapsed,
+          }
         }
       }
-      console.log('[virtual-tryon] ZAI Image Edit returned null')
+      console.log('[virtual-tryon] ZAI Image Edit returned no usable image')
     } catch (err) {
-      console.log(`[virtual-tryon] ZAI Image Edit error: ${(err as Error).message?.substring(0, 100)}`)
+      const msg = (err as Error).message || String(err)
+      console.log(`[virtual-tryon] ZAI Image Edit failed: ${msg.substring(0, 100)}`)
     }
   }
 
-  // ── Strategy 2: IDM-VTON (best quality garment draping) ──────────
+  // ── Strategy 2: IDM-VTON (reliable — space is public and usually awake) ──
+  // Best quality garment draping, works even when ZAI is unreachable
   if (Date.now() < totalDeadline - 15_000) {
     console.log('[virtual-tryon] Strategy 2: IDM-VTON (HuggingFace Space)')
     try {
@@ -514,16 +488,65 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       console.log(`[virtual-tryon] IDM-VTON error: ${(err as Error).message?.substring(0, 100)}`)
     }
 
-    // Pre-warm in background for next attempt
+    // Pre-warm space in background for next attempt
     preWarmSpace().catch(() => {})
   }
 
-  // If ZAI is not configured, we can't try ZAI strategies
-  if (!zaiConfigured) {
-    const elapsed = Date.now() - totalStart
-    const isVercel = !!process.env.VERCEL
-    console.log(`[virtual-tryon] ZAI not configured — cannot try ZAI text-to-image`)
+  // ── Strategy 3: ZAI Text-to-Image (ONLY if ZAI is reachable and we still have time) ──
+  // No face preservation — last resort
+  if (health.zaiReachable && Date.now() < totalDeadline - 8_000) {
+    console.log('[virtual-tryon] Strategy 3: ZAI Text-to-Image (SDK)')
+    try {
+      const zai = await createZAI()
+      const prompt = buildGeneratePrompt(config, input.productName)
+      const remainingTime = Math.min(ZAI_GENERATE_TIMEOUT_MS, totalDeadline - Date.now())
 
+      const result = await Promise.race([
+        zai.images.generations.create({
+          model: 'cogview-4-plus',
+          prompt,
+          size: config.size,
+        }),
+        new Promise<null>(r => setTimeout(() => r(null), remainingTime)),
+      ])
+
+      if (result) {
+        const imageUrl = await processZAIImageResponse(result as any)
+        if (imageUrl) {
+          const elapsed = Date.now() - totalStart
+          console.log(`[virtual-tryon] ✅ ZAI Text-to-Image succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+          return {
+            success: true,
+            imageUrl,
+            strategy: 'zai-generate',
+            elapsedMs: elapsed,
+          }
+        }
+      }
+    } catch (err) {
+      console.log(`[virtual-tryon] ZAI Text-to-Image error: ${(err as Error).message?.substring(0, 100)}`)
+    }
+  }
+
+  // ── All strategies failed ────────────────────────────────────────
+  const elapsed = Date.now() - totalStart
+  const isVercel = !!process.env.VERCEL
+  console.log(`[virtual-tryon] All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
+
+  // Provide contextual error messages
+  if (!health.zaiReachable && !health.spaceAwake) {
+    return {
+      success: false,
+      error: isVercel
+        ? 'AI services are currently unavailable. Please set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel for reliable virtual try-on.'
+        : 'AI services are currently unavailable. Please try again in a few minutes.',
+      errorCode: 'ALL_STRATEGIES_FAILED',
+      elapsedMs: elapsed,
+    }
+  }
+
+  // ZAI was reachable but failed, or space was awake but IDM-VTON failed
+  if (health.zaiReachable && !isZAIConfigured()) {
     return {
       success: false,
       error: isVercel
@@ -533,42 +556,6 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       elapsedMs: elapsed,
     }
   }
-
-  // Check if we still have time
-  if (Date.now() >= totalDeadline - 8_000) {
-    const elapsed = Date.now() - totalStart
-    return {
-      success: false,
-      error: 'AI service is busy right now. Please try again in a few minutes.',
-      errorCode: 'SERVICE_BUSY',
-      elapsedMs: elapsed,
-    }
-  }
-
-  // ── Strategy 3: ZAI Text-to-Image Generate (last resort) ────────
-  console.log('[virtual-tryon] Strategy 3: ZAI Text-to-Image (direct API call)')
-  try {
-    const prompt = buildGeneratePrompt(config, input.productName)
-    const remainingTime = Math.min(ZAI_GENERATE_TIMEOUT_MS, totalDeadline - Date.now())
-    const result = await directAIImageGenerate(prompt, config.size, remainingTime)
-
-    if (result) {
-      const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ ZAI Text-to-Image succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: result,
-        strategy: 'zai-generate',
-        elapsedMs: elapsed,
-      }
-    }
-  } catch (err) {
-    console.log(`[virtual-tryon] ZAI Text-to-Image error: ${(err as Error).message?.substring(0, 100)}`)
-  }
-
-  // ── All strategies failed ────────────────────────────────────────
-  const elapsed = Date.now() - totalStart
-  console.log(`[virtual-tryon] All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
 
   return {
     success: false,
@@ -581,6 +568,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
 // ── Backward Compatibility ─────────────────────────────────────────
 
 export function isHFAvailable(): boolean { return true }
+
 export async function checkIDMVTONSpaceStatus(): Promise<{ awake: boolean; loadAvg: number | null }> {
   return { awake: await isSpaceAwake(), loadAvg: null }
 }
