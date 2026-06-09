@@ -1,14 +1,15 @@
 /**
- * Virtual Try-On Engine v13 — Vercel-Reliable + Dual-Image ZAI Edit
+ * Virtual Try-On Engine v14 — Vercel-Reliable + Always-Try-ZAI
  *
- * CRITICAL FIXES from v12:
- * 1. Health check timeout increased from 2s to 6s (ZAI API slow from Vercel)
- * 2. Strategy ordering: ZAI Edit first if Space is sleeping (saves 45s)
- * 3. NEW: ZAI Image Edit with PRODUCT image as base + person description prompt
- *    → AI has visual reference of product, producing much more accurate results
- * 4. Dual VLM analysis: both selfie AND product analyzed for better prompts
- * 5. Detailed logging for Vercel debugging
- * 6. Strategy tracking for better error messages
+ * CRITICAL FIX from v13:
+ * - REMOVED health check gate on ZAI strategies. Previously, if the health check
+ *   (fetch /models with 6s timeout) failed, ALL ZAI strategies were skipped entirely.
+ *   On Vercel, the health check frequently fails due to network latency/cold starts,
+ *   even though the actual ZAI API calls would succeed. Now ZAI strategies are
+ *   ALWAYS attempted when isZAIConfigured() is true, with individual timeouts.
+ * - Health check is now informational only (used for strategy ordering/priority)
+ * - Removed hard block on internal-api.z.ai — let the actual API call fail naturally
+ * - VLM analyses always attempted when ZAI is configured
  *
  * STRATEGY ORDER (Vercel-optimized):
  * 1a. If IDM-VTON Space is awake → IDM-VTON (best quality)
@@ -54,7 +55,7 @@ const VLM_ANALYSIS_TIMEOUT_MS = 15_000 // 15s for VLM product analysis (increase
 const VLM_SELFIE_TIMEOUT_MS = 12_000   // 12s for VLM selfie analysis
 const ZAI_EDIT_TIMEOUT_MS = 30_000     // 30s for ZAI image edit (increased from 25s)
 const ZAI_GENERATE_TIMEOUT_MS = 25_000 // 25s for ZAI text-to-image
-const HEALTH_CHECK_ZAI_TIMEOUT_MS = 6_000   // 6s for ZAI health check (was 2s — too short for Vercel)
+const HEALTH_CHECK_ZAI_TIMEOUT_MS = 10_000   // 10s for ZAI health check (increased for Vercel cold starts)
 const HEALTH_CHECK_SPACE_TIMEOUT_MS = 4_000  // 4s for IDM-VTON Space check
 
 // ── Health Check ───────────────────────────────────────────────────
@@ -85,23 +86,34 @@ async function quickHealthCheck(): Promise<Pick<HealthStatus, 'zaiReachable' | '
         const config = getZAIConfig()
         if (!config) return false
 
-        // Check if ZAI_BASE_URL points to internal-api.z.ai (unreachable from Vercel)
+        // NOTE: We no longer hard-block internal-api.z.ai — let the actual API
+        // call determine if it's reachable. The health check is informational only.
         if (config.baseUrl.includes('internal-api.z.ai') && process.env.VERCEL) {
-          console.log('[virtual-tryon] ZAI_BASE_URL is internal-api.z.ai — unreachable from Vercel')
-          return false
+          console.log('[virtual-tryon] WARNING: ZAI_BASE_URL is internal-api.z.ai — this may be unreachable from Vercel, but we will try anyway')
+          // Don't return false — let the actual strategy calls determine reachability
         }
 
-        const r = await fetch(`${config.baseUrl}/models`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${config.apiKey}` },
-          signal: AbortSignal.timeout(HEALTH_CHECK_ZAI_TIMEOUT_MS),
-        })
-        const reachable = r.status < 500
-        console.log(`[virtual-tryon] ZAI health check: status=${r.status}, reachable=${reachable}`)
-        return reachable
+        try {
+          const r = await fetch(`${config.baseUrl}/models`, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${config.apiKey}` },
+            signal: AbortSignal.timeout(HEALTH_CHECK_ZAI_TIMEOUT_MS),
+          })
+          const reachable = r.status < 500
+          console.log(`[virtual-tryon] ZAI health check: status=${r.status}, reachable=${reachable}`)
+          return reachable
+        } catch (fetchErr) {
+          // Health check failed, but ZAI may still work — don't block strategies
+          console.log(`[virtual-tryon] ZAI health check fetch failed (API may still work): ${(fetchErr as Error).message?.substring(0, 100)}`)
+          // Return true if configured — the actual strategy calls will determine reachability
+          // This is the KEY FIX: health check failure no longer blocks ZAI strategies
+          return true
+        }
       } catch (err) {
-        console.log(`[virtual-tryon] ZAI health check failed: ${(err as Error).message?.substring(0, 100)}`)
-        return false
+        // Outer catch (e.g. getZAIConfig failed) — still don't block strategies
+        console.log(`[virtual-tryon] ZAI health check outer error: ${(err as Error).message?.substring(0, 100)}`)
+        // Return true if configured — let actual strategy calls determine reachability
+        return isZAIConfigured()
       }
     })(),
     // IDM-VTON space check — with increased timeout
@@ -673,15 +685,21 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   let vlmProductAnalysis: ProductAnalysis | null = null
   let vlmSelfieAnalysis: SelfieAnalysis | null = null
 
-  if (health.zaiReachable) {
+  // Always try VLM analyses when ZAI is configured — health check is informational only
+  if (isZAIConfigured()) {
     console.log('[virtual-tryon] Starting parallel VLM analyses (product + selfie)')
-    const [productResult, selfieResult] = await Promise.all([
-      vlmAnalyzeProduct(input.productImageBase64),
-      vlmAnalyzeSelfie(input.selfieData),
-    ])
-    vlmProductAnalysis = productResult
-    vlmSelfieAnalysis = selfieResult
-    console.log(`[virtual-tryon] VLM analyses complete: product=${vlmProductAnalysis ? 'ok' : 'failed'}, selfie=${vlmSelfieAnalysis ? 'ok' : 'failed'}`)
+    try {
+      const [productResult, selfieResult] = await Promise.all([
+        vlmAnalyzeProduct(input.productImageBase64),
+        vlmAnalyzeSelfie(input.selfieData),
+      ])
+      vlmProductAnalysis = productResult
+      vlmSelfieAnalysis = selfieResult
+      console.log(`[virtual-tryon] VLM analyses complete: product=${vlmProductAnalysis ? 'ok' : 'failed'}, selfie=${vlmSelfieAnalysis ? 'ok' : 'failed'}`)
+    } catch (vlmErr) {
+      console.log(`[virtual-tryon] VLM analyses failed: ${(vlmErr as Error).message?.substring(0, 150)}`)
+      // Continue without VLM — strategies will use fallback prompts
+    }
   }
 
   // ── Strategy Decision Tree ────────────────────────────────────
@@ -729,7 +747,8 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
 
   // ── Strategy 1b: ZAI Product Edit (if Space is sleeping — best alternative) ──
   // Uses the PRODUCT image as the base for editing → AI has visual reference
-  if (health.zaiReachable && !health.spaceAwake && Date.now() < totalDeadline - 12_000) {
+  // KEY FIX: Use isZAIConfigured() instead of health.zaiReachable — health check is unreliable on Vercel
+  if (isZAIConfigured() && !health.spaceAwake && Date.now() < totalDeadline - 12_000) {
     strategiesAttempted.push('zai-product-edit')
     console.log('[virtual-tryon] Strategy 1b: ZAI Product Edit (Space sleeping, using product image)')
     try {
@@ -783,7 +802,8 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ── Strategy 2: ZAI Selfie Edit (face preserved, text-based product) ──
-  if (health.zaiReachable && Date.now() < totalDeadline - 10_000) {
+  // KEY FIX: Use isZAIConfigured() instead of health.zaiReachable
+  if (isZAIConfigured() && Date.now() < totalDeadline - 10_000) {
     strategiesAttempted.push('zai-selfie-edit')
     console.log('[virtual-tryon] Strategy 2: ZAI Selfie Edit')
     try {
@@ -841,7 +861,8 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ── Strategy 3: ZAI Text-to-Image (last resort) ──────────────
-  if (health.zaiReachable && Date.now() < totalDeadline - 8_000) {
+  // KEY FIX: Use isZAIConfigured() instead of health.zaiReachable
+  if (isZAIConfigured() && Date.now() < totalDeadline - 8_000) {
     strategiesAttempted.push('zai-generate')
     console.log('[virtual-tryon] Strategy 3: ZAI Text-to-Image')
     try {
@@ -930,17 +951,10 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   let errorMessage: string
   let errorCode: TryOnResult['errorCode']
 
-  if (!health.zaiReachable && !health.spaceAwake) {
-    errorCode = 'ALL_STRATEGIES_FAILED'
+  if (!isZAIConfigured() && !health.spaceAwake) {
+    errorCode = 'ZAI_NOT_CONFIGURED'
     if (isVercel) {
-      const zaiConfig = getZAIConfig()
-      if (!zaiConfig) {
-        errorMessage = 'AI try-on requires ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel. The HuggingFace IDM-VTON service is also sleeping — try again in 30-60 seconds.'
-      } else if (zaiConfig.baseUrl.includes('internal-api.z.ai')) {
-        errorMessage = 'ZAI_BASE_URL points to internal-api.z.ai which is NOT reachable from Vercel servers. Please use a public API endpoint. The HuggingFace IDM-VTON service is also sleeping — try again in 30-60 seconds.'
-      } else {
-        errorMessage = 'AI services are currently unavailable. The ZAI API at the configured URL is not responding, and the HuggingFace IDM-VTON service is sleeping. Please try again in a few minutes.'
-      }
+      errorMessage = 'AI try-on requires ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel. Please set both in your Vercel project settings under Environment Variables.'
     } else {
       errorMessage = 'AI services are currently unavailable. Please try again in a few minutes.'
     }

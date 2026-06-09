@@ -134,13 +134,16 @@ export async function POST(request: NextRequest) {
     // Detect if ZAI_BASE_URL points to internal-api.z.ai (unreachable from Vercel)
     const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
 
+    // NOTE: We no longer hard-block internal-api.z.ai — the engine will try anyway
+    // and produce better error messages if it truly can't reach the API
+
     let errorMessage = result.error || 'AI try-on is currently unavailable. Please try again in a few minutes.'
     let hint: string | undefined
 
     if (isVercel && isInternalZAI) {
-      hint = 'ZAI_BASE_URL points to internal-api.z.ai which is NOT reachable from Vercel servers. Set ZAI_BASE_URL to a public API endpoint, or rely on the HuggingFace IDM-VTON service (which may need warming up).'
+      hint = 'ZAI_BASE_URL points to internal-api.z.ai which may not be reachable from Vercel servers. If try-on fails, consider using a public API endpoint.'
     } else if (isVercel && !zaiConfigured) {
-      hint = 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel to enable AI-powered virtual try-on. Note: internal-api.z.ai is not reachable from Vercel.'
+      hint = 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel to enable AI-powered virtual try-on.'
     }
 
     return NextResponse.json({

@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
 
     let hint: string | undefined
     if (isVercel && isInternalZAI) {
-      hint = 'ZAI_BASE_URL points to internal-api.z.ai which is NOT reachable from Vercel. Use a public API endpoint or rely on the HuggingFace IDM-VTON service.'
+      hint = 'ZAI_BASE_URL points to internal-api.z.ai which may not be reachable from Vercel. If try-on fails, consider using a public API endpoint.'
     } else if (isVercel && !zaiConfigured) {
       hint = 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel.'
     }

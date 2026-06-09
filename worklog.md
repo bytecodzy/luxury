@@ -33,3 +33,30 @@ Stage Summary:
 - Virtual try-on v13 with Vercel-optimized strategy selection, better health checks, new product-image-based editing strategy, dual VLM analysis, and comprehensive debug logging
 - All changes compile and run without errors
 - Key new strategy: "ZAI Product Edit" passes the PRODUCT image to the AI editor, giving it a visual reference (previously only text descriptions were used)
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix virtual try-on on Vercel - remove health check gate on ZAI strategies
+
+Work Log:
+- Read all relevant files: virtual-tryon.ts, try-on route, virtual-tryon route, zai.ts, huggingface-tryon.ts, vercel.json, next.config.ts, package.json
+- Identified ROOT CAUSE: ALL ZAI strategies were gated behind `health.zaiReachable` flag. The health check (fetch /models with 6s timeout) frequently fails on Vercel due to network latency/cold starts, causing ALL ZAI strategies to be completely skipped. Only IDM-VTON was attempted (usually sleeping).
+- Fixed virtual-tryon.ts (v13 → v14):
+  1. Replaced `health.zaiReachable` gates with `isZAIConfigured()` on all ZAI strategies (1b, 2, 3)
+  2. VLM analyses now always attempted when ZAI is configured
+  3. Health check now returns `true` on fetch failure instead of `false` (informational only)
+  4. Removed hard block on internal-api.z.ai — changed to warning, lets actual API call determine reachability
+  5. Increased health check timeout from 6s to 10s for Vercel cold starts
+  6. Better error messages for Vercel-specific issues
+- Created missing /api/image-proxy route for product image resolution
+- Updated vercel.json: increased memory from 1024 to 1536 for try-on routes, added image-proxy config
+- Updated both API routes to remove hard-block on internal-api.z.ai
+- Verified: lint passes on changed files, dev server running, API endpoints responding correctly
+
+Stage Summary:
+- ROOT CAUSE: health check gate blocked ALL ZAI strategies when check failed on Vercel
+- KEY FIX: ZAI strategies now always attempted when `isZAIConfigured()` is true
+- Created missing /api/image-proxy route
+- Updated vercel.json with increased memory and new route config
+- All changes compile and API endpoints verified working
