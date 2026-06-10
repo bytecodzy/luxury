@@ -35,8 +35,11 @@ import {
   ShieldCheck,
   Clock,
   Share2,
+  CheckCircle,
+  AlertCircle,
 } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useStore } from '@/lib/store';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -263,6 +266,14 @@ export function TryOnDialog({
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [disclaimerChecked, setDisclaimerChecked] = useState(false);
 
+  // Gallery sharing state
+  const [galleryConsent, setGalleryConsent] = useState(false);
+  const [gallerySubmitting, setGallerySubmitting] = useState(false);
+  const [gallerySubmitted, setGallerySubmitted] = useState(false);
+  const [galleryError, setGalleryError] = useState('');
+
+  const { authUser } = useStore();
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const generatingStartRef = useRef<number>(0);
@@ -326,6 +337,10 @@ export function TryOnDialog({
     setProgressText('');
     setIsRetrying(false);
     setElapsedSeconds(0);
+    setGalleryConsent(false);
+    setGallerySubmitting(false);
+    setGallerySubmitted(false);
+    setGalleryError('');
     onResetBackground?.();
   }, [onResetBackground]);
 
@@ -1174,31 +1189,122 @@ export function TryOnDialog({
                   </Button>
                 </div>
 
-                {/* Share to AI Style Gallery — ALWAYS visible after generation */}
+                {/* Share to AI Style Gallery — with admin approval workflow */}
                 <div className="rounded-xl border border-amber-600/30 bg-gradient-to-r from-amber-900/20 via-rose-900/15 to-amber-900/20 p-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <Share2 className="h-4 w-4 text-amber-400" />
                     <p className="text-sm font-semibold text-amber-200">Share Your Style</p>
                   </div>
-                  <p className="text-xs text-amber-200/50">
-                    Love this look? Share it to the AI Style Gallery so other shoppers can see how it looks!
-                  </p>
-                  <Button
-                    onClick={() => {
-                      const imageToShare = watermarkedResult || resultImage;
-                      if (imageToShare && onShareToInfluencer) {
-                        onShareToInfluencer(imageToShare);
-                      }
-                    }}
-                    className="w-full bg-amber-600 hover:bg-amber-500 text-stone-950 font-semibold gap-2"
-                    size="sm"
-                  >
-                    <Share2 className="h-4 w-4" />
-                    Share to AI Style Gallery
-                  </Button>
-                  <p className="text-[10px] text-amber-200/30 text-center">
-                    By sharing, you consent to your AI-generated image being visible to other shoppers
-                  </p>
+
+                  {gallerySubmitted ? (
+                    /* Success state — pending admin approval */
+                    <div className="flex flex-col items-center gap-2 py-2">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-600/20">
+                        <CheckCircle className="h-5 w-5 text-amber-400" />
+                      </div>
+                      <p className="text-sm font-medium text-amber-200">Submitted for Approval!</p>
+                      <p className="text-xs text-amber-200/50 text-center">
+                        Your style is being reviewed by our team. It will appear in the AI Style Gallery once approved.
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 rounded-full bg-amber-600/10 px-3 py-1 border border-amber-600/20">
+                        <Clock className="h-3 w-3 text-amber-400" />
+                        <span className="text-[10px] font-medium text-amber-300">Pending Admin Approval</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs text-amber-200/50">
+                        Love this look? Share it to the AI Style Gallery so other shoppers can get inspired!
+                      </p>
+
+                      {/* Consent checkbox */}
+                      <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-amber-900/20 bg-stone-900/40 p-2.5 transition-colors hover:border-amber-700/30">
+                        <Checkbox
+                          checked={galleryConsent}
+                          onCheckedChange={(checked) => {
+                            setGalleryConsent(checked === true);
+                            setGalleryError('');
+                          }}
+                          className="mt-0.5 data-[state=checked]:bg-amber-600 data-[state=checked]:border-amber-600"
+                        />
+                        <span className="text-[11px] leading-relaxed text-amber-200/60">
+                          I consent to my AI-generated style image being displayed in the public gallery after admin review
+                        </span>
+                      </label>
+
+                      {galleryError && (
+                        <div className="flex items-center gap-1.5 text-xs text-red-400">
+                          <AlertCircle className="h-3 w-3" />
+                          {galleryError}
+                        </div>
+                      )}
+
+                      <Button
+                        onClick={async () => {
+                          if (!galleryConsent) {
+                            setGalleryError('Please consent to share your image');
+                            return;
+                          }
+                          const imageToShare = watermarkedResult || resultImage;
+                          if (!imageToShare) return;
+
+                          setGallerySubmitting(true);
+                          setGalleryError('');
+
+                          try {
+                            const res = await fetch('/api/style-gallery', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                productId,
+                                productName,
+                                productImage: productImage,
+                                userId: authUser?.id || null,
+                                userName: authUser?.name || 'Anonymous',
+                                aiGeneratedImage: imageToShare,
+                                categorySlug: categorySlug || null,
+                                consentGiven: true,
+                              }),
+                            });
+
+                            const data = await res.json();
+
+                            if (res.ok && data.success) {
+                              setGallerySubmitted(true);
+                              // Also call the old callback for backward compat
+                              if (onShareToInfluencer) {
+                                onShareToInfluencer(imageToShare);
+                              }
+                            } else {
+                              setGalleryError(data.error || 'Failed to submit. Please try again.');
+                            }
+                          } catch {
+                            setGalleryError('Network error. Please try again.');
+                          } finally {
+                            setGallerySubmitting(false);
+                          }
+                        }}
+                        disabled={!galleryConsent || gallerySubmitting}
+                        className="w-full bg-amber-600 hover:bg-amber-500 text-stone-950 font-semibold gap-2 disabled:opacity-50"
+                        size="sm"
+                      >
+                        {gallerySubmitting ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Submitting...
+                          </>
+                        ) : (
+                          <>
+                            <Share2 className="h-4 w-4" />
+                            Share to AI Style Gallery
+                          </>
+                        )}
+                      </Button>
+                      <p className="text-[10px] text-amber-200/30 text-center">
+                        All submissions are reviewed by our team before being displayed publicly
+                      </p>
+                    </>
+                  )}
                 </div>
 
                 {/* Disclaimer */}

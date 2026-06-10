@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles, Heart, Clock, Camera, ChevronRight, Shield } from 'lucide-react';
+import { Sparkles, Heart, Clock, Camera, ChevronRight, Shield, CheckCircle, XCircle, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useStore } from '@/lib/store';
 
 interface GalleryItem {
   id: string;
@@ -16,6 +17,14 @@ interface GalleryItem {
   categorySlug?: string;
   likes: number;
   status: string;
+  createdAt: string;
+}
+
+interface MySubmission {
+  id: string;
+  productName: string;
+  status: string;
+  rejectReason?: string;
   createdAt: string;
 }
 
@@ -31,10 +40,20 @@ function relativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
+const STATUS_BADGE: Record<string, { label: string; color: string; icon: any }> = {
+  pending: { label: 'Under Admin Approval', color: 'bg-amber-600/20 text-amber-300 border-amber-600/30', icon: Clock },
+  approved: { label: 'Approved', color: 'bg-emerald-600/20 text-emerald-300 border-emerald-600/30', icon: CheckCircle },
+  rejected: { label: 'Rejected', color: 'bg-red-600/20 text-red-300 border-red-600/30', icon: XCircle },
+};
+
 export function StyleGallerySection() {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [mySubmissions, setMySubmissions] = useState<MySubmission[]>([]);
+  const [showMySubmissions, setShowMySubmissions] = useState(false);
+
+  const { authUser } = useStore();
 
   useEffect(() => {
     async function fetchGallery() {
@@ -42,7 +61,6 @@ export function StyleGallerySection() {
         const res = await fetch('/api/style-gallery?limit=8');
         if (res.ok) {
           const data = await res.json();
-          // API returns { items: [...] } from StyleGallery table
           setItems(data.items || []);
         }
       } catch {
@@ -53,6 +71,25 @@ export function StyleGallerySection() {
     }
     fetchGallery();
   }, []);
+
+  // Fetch user's submissions if logged in
+  useEffect(() => {
+    if (!authUser?.id) return;
+    async function fetchMySubmissions() {
+      try {
+        const res = await fetch(`/api/style-gallery/my?userId=${authUser.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.items?.length > 0) {
+            setMySubmissions(data.items);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    fetchMySubmissions();
+  }, [authUser?.id]);
 
   const handleLike = useCallback(async (id: string) => {
     if (likedIds.has(id)) return;
@@ -68,6 +105,8 @@ export function StyleGallerySection() {
       });
     } catch {}
   }, [likedIds]);
+
+  const hasPendingSubmissions = mySubmissions.some(s => s.status === 'pending' || s.status === 'rejected');
 
   return (
     <section className="py-16 px-4">
@@ -87,10 +126,59 @@ export function StyleGallerySection() {
             See How Others Style It
           </h2>
           <p className="text-sm text-amber-200/50 max-w-xl mx-auto">
-            Real shoppers using our AI to preview how products look on them. 
+            Real shoppers using our AI to preview how products look on them.
             Upload your selfie and share your style with the community.
           </p>
         </motion.div>
+
+        {/* My Submissions Status — for logged-in users */}
+        {authUser && hasPendingSubmissions && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="mb-8"
+          >
+            <button
+              onClick={() => setShowMySubmissions(!showMySubmissions)}
+              className="w-full flex items-center justify-between rounded-xl border border-amber-600/30 bg-amber-900/10 px-4 py-3 transition-colors hover:bg-amber-900/15"
+            >
+              <div className="flex items-center gap-2">
+                <Eye className="h-4 w-4 text-amber-400" />
+                <span className="text-sm font-medium text-amber-200">My Style Submissions</span>
+                {mySubmissions.filter(s => s.status === 'pending').length > 0 && (
+                  <Badge className="bg-amber-600/20 text-amber-300 border-amber-600/30 text-[10px] px-1.5 py-0.5">
+                    {mySubmissions.filter(s => s.status === 'pending').length} pending
+                  </Badge>
+                )}
+              </div>
+              <ChevronRight className={`h-4 w-4 text-amber-200/40 transition-transform ${showMySubmissions ? 'rotate-90' : ''}`} />
+            </button>
+
+            {showMySubmissions && (
+              <div className="mt-2 space-y-2 rounded-xl border border-amber-900/20 bg-stone-900/40 p-3">
+                {mySubmissions.map(sub => {
+                  const statusCfg = STATUS_BADGE[sub.status] || STATUS_BADGE.pending;
+                  const StatusIcon = statusCfg.icon;
+                  return (
+                    <div key={sub.id} className="flex items-center justify-between rounded-lg bg-stone-900/60 px-3 py-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <StatusIcon className={`h-3.5 w-3.5 flex-shrink-0 ${sub.status === 'pending' ? 'text-amber-400' : sub.status === 'approved' ? 'text-emerald-400' : 'text-red-400'}`} />
+                        <span className="text-xs text-amber-200/70 truncate">{sub.productName}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Badge className={`${statusCfg.color} text-[9px] px-1.5 py-0`}>
+                          {statusCfg.label}
+                        </Badge>
+                        <span className="text-[9px] text-amber-200/25">{relativeTime(sub.createdAt)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </motion.div>
+        )}
 
         {/* Gallery Grid */}
         {isLoading ? (
@@ -166,7 +254,7 @@ export function StyleGallerySection() {
             </div>
             <p className="text-base font-medium text-amber-200/50 mb-1">Be the First to Share Your Style!</p>
             <p className="text-sm text-amber-200/30 max-w-md text-center mb-6">
-              Upload a selfie, try on any product with AI, and share your look with the community. 
+              Upload a selfie, try on any product with AI, and share your look with the community.
               Your style will appear here after admin approval.
             </p>
             <div className="flex items-center gap-2 text-xs text-amber-200/25">
