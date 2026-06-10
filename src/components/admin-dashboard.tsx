@@ -26,6 +26,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
 import { PartnersTab } from '@/components/admin/partners-tab'
 import { DocumentationTab } from '@/components/admin/documentation-tab'
+import { StyleGalleryTab } from '@/components/admin/style-gallery-tab'
 import {
   LayoutDashboard, Package, Warehouse, ShoppingBag, FileText, Calculator,
   Truck, Users, BookOpen, Share2, Tag, Import, Plus, Pencil, Trash2,
@@ -34,7 +35,7 @@ import {
   Globe, ExternalLink, Image as ImageIcon, RefreshCw, Link2, ShoppingCart,
   Handshake, Building2, Megaphone, ThumbsUp, ThumbsDown, Users as UsersIcon,
   FolderOpen, BarChart3, Download, Truck as TruckIcon, Mail, Send, Copy, CheckCircle,
-  Presentation, Sun, Moon, Menu, ChevronLeft, ChevronRight, LogOut, Home,
+  Presentation, Sun, Moon, Menu, ChevronLeft, ChevronRight, LogOut, Home, Sparkles,
 } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 
@@ -190,6 +191,7 @@ export function AdminDashboard() {
     { value: 'reports', icon: BarChart3, label: 'Reports' },
     { value: 'integrations', icon: Globe, label: 'Integrations' },
     { value: 'partners', icon: Handshake, label: 'Partners' },
+    { value: 'style-gallery', icon: Sparkles, label: 'AI Style Gallery' },
     { value: 'corporate', icon: Building2, label: 'Corporate' },
   ]
 
@@ -215,6 +217,7 @@ export function AdminDashboard() {
       case 'reports': return <ReportsTab token={authToken} />
       case 'integrations': return <IntegrationsTab token={authToken} onMutate={invalidateAll} />
       case 'partners': return <PartnersTab token={authToken} onMutate={invalidateAll} />
+      case 'style-gallery': return <StyleGalleryTab />
       case 'corporate': return <CorporateTab token={authToken} onMutate={invalidateAll} />
       case 'documentation': return <DocumentationTab token={authToken} />
       case 'investor': return <InvestorKitTab token={authToken} />

@@ -24,6 +24,7 @@ import { GiftBuilder } from '@/components/gift-builder';
 import { AppDownloadSection } from '@/components/app-download-section';
 import { AppDownloadBanner } from '@/components/app-download-banner';
 import { FamilyPackSection } from '@/components/family-pack-section';
+import { StyleGallerySection } from '@/components/style-gallery-section';
 import { SocialConnectionsSection } from '@/components/social-connections-section';
 import { ThreeboxesCurateSection } from '@/components/threeboxes-curate-section';
 import { ToastContainer } from '@/hooks/use-toast-notification';
@@ -101,6 +102,11 @@ function HomeSections() {
       </ErrorBoundary>
       <ErrorBoundary fallback={null}>
         <ProductGrid />
+      </ErrorBoundary>
+
+      {/* AI Style Gallery */}
+      <ErrorBoundary fallback={null}>
+        <StyleGallerySection />
       </ErrorBoundary>
 
       {/* Family Pack Section */}

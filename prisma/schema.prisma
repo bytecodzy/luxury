@@ -70,6 +70,7 @@ model Product {
   variants       ProductVariant[]
   productImages  ProductImage[]
   portfolioItems CustomerPortfolio[]
+  styleGalleryItems StyleGallery[]
 }
 
 model ProductVariant {
@@ -676,6 +677,29 @@ model CustomerPortfolio {
   reviewComment    String?
   consentGiven     Boolean   @default(false) // whether customer consented to public display
   isApproved       Boolean   @default(false) // admin approval for public display
+  isActive         Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+// ─── AI Style Gallery (Admin Approval Workflow) ───
+
+model StyleGallery {
+  id               String    @id @default(cuid())
+  productId        String
+  product          Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productName      String
+  productImage     String?   // product thumbnail URL
+  userId           String?
+  userName         String
+  aiGeneratedImage String    // base64 data URL or URL of the AI-generated style image
+  categorySlug     String?   // product category for filtering
+  consentGiven     Boolean   @default(false)
+  status           String    @default("pending") // pending, approved, rejected
+  reviewedBy       String?   // admin userId who reviewed
+  reviewedAt       DateTime? // when admin reviewed
+  rejectReason     String?   // reason if rejected
+  likes            Int       @default(0)
   isActive         Boolean   @default(true)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

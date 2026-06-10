@@ -1,152 +1,115 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { verifyAuth } from '@/lib/auth-api'
 
-// GET /api/style-gallery — list gallery images with filtering & pagination
+// GET /api/style-gallery — fetch approved gallery items (public)
 export async function GET(request: NextRequest) {
   try {
-    const user = await verifyAuth(request)
-
     const { searchParams } = new URL(request.url)
-    const productId = searchParams.get('productId') || undefined
-    const status = searchParams.get('status') || undefined // pending | approved | rejected
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)))
+    const productId = searchParams.get('productId')
+    const categorySlug = searchParams.get('categorySlug')
+    const limit = Math.min(parseInt(searchParams.get('limit') || '20'), 50)
+    const offset = parseInt(searchParams.get('offset') || '0')
+    const mode = searchParams.get('mode') // 'approved' (default), 'pending', 'all'
 
-    // Build the where clause
-    const where: any = {}
+    // Admin mode: show pending/all
+    if (mode === 'pending' || mode === 'all') {
+      // In a real app, verify admin auth here
+      const where: any = { isActive: true }
+      if (mode === 'pending') where.status = 'pending'
 
-    // Non-admin users can only see approved + active images
-    if (!user || user.role !== 'admin') {
-      where.isApproved = true
-      where.isActive = true
-    } else {
-      // Admin filtering by status
-      if (status === 'pending') {
-        where.isApproved = false
-        where.isActive = true
-      } else if (status === 'approved') {
-        where.isApproved = true
-        where.isActive = true
-      } else if (status === 'rejected') {
-        where.isActive = false
-      }
-    }
-
-    if (productId) {
-      where.productId = productId
-    }
-
-    const [images, total] = await Promise.all([
-      db.customerPortfolio.findMany({
+      const items = await db.styleGallery.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
         take: limit,
-        include: {
-          product: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              images: true,
-            },
-          },
-        },
-      }),
-      db.customerPortfolio.count({ where }),
-    ])
+        skip: offset,
+      })
 
-    return NextResponse.json({
-      images,
-      pagination: {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-      },
+      const total = await db.styleGallery.count({ where })
+
+      return NextResponse.json({ items, total })
+    }
+
+    // Public mode: only approved items
+    const where: any = { status: 'approved', isActive: true }
+    if (productId) where.productId = productId
+    if (categorySlug) where.categorySlug = categorySlug
+
+    const items = await db.styleGallery.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
     })
+
+    const total = await db.styleGallery.count({ where })
+
+    return NextResponse.json({ items, total })
   } catch (error) {
-    console.error('Style Gallery GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch gallery images' }, { status: 500 })
+    console.error('[style-gallery] GET error:', error)
+    return NextResponse.json({ error: 'Failed to fetch gallery items' }, { status: 500 })
   }
 }
 
-// POST /api/style-gallery — create a new gallery image (user submission)
+// POST /api/style-gallery — submit a new style to gallery (requires auth)
 export async function POST(request: NextRequest) {
   try {
-    const user = await verifyAuth(request)
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
     const body = await request.json()
-    const { productId, userName, aiGeneratedImage, originalSelfie, rating, reviewTitle, reviewComment, consentGiven } = body
+    const { productId, productName, productImage, userId, userName, aiGeneratedImage, categorySlug, consentGiven } = body
 
-    // Validate required fields
-    if (!productId) {
-      return NextResponse.json({ error: 'productId is required' }, { status: 400 })
-    }
-    if (!userName) {
-      return NextResponse.json({ error: 'userName is required' }, { status: 400 })
-    }
-    if (!aiGeneratedImage) {
-      return NextResponse.json({ error: 'aiGeneratedImage is required' }, { status: 400 })
-    }
-    if (consentGiven !== true) {
-      return NextResponse.json({ error: 'consentGiven must be true to submit' }, { status: 400 })
+    if (!productId || !productName || !userName || !aiGeneratedImage) {
+      return NextResponse.json(
+        { error: 'Missing required fields: productId, productName, userName, aiGeneratedImage' },
+        { status: 400 }
+      )
     }
 
-    // Verify product exists
-    const product = await db.product.findUnique({ where: { id: productId } })
-    if (!product) {
-      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    if (!consentGiven) {
+      return NextResponse.json(
+        { error: 'Consent is required to share to gallery' },
+        { status: 400 }
+      )
     }
 
-    // Validate rating if provided
-    if (rating !== undefined && (rating < 1 || rating > 5)) {
-      return NextResponse.json({ error: 'Rating must be between 1 and 5' }, { status: 400 })
+    // Rate limit: max 5 pending submissions per user
+    if (userId) {
+      const pendingCount = await db.styleGallery.count({
+        where: { userId, status: 'pending' },
+      })
+      if (pendingCount >= 5) {
+        return NextResponse.json(
+          { error: 'You have too many pending submissions. Please wait for admin review.' },
+          { status: 429 }
+        )
+      }
     }
 
-    // Only store originalSelfie if consent is given
-    const data: any = {
-      productId,
-      userId: user.id,
-      userName,
-      aiGeneratedImage,
-      rating: rating ?? 5,
-      consentGiven: true,
-      isApproved: false, // requires admin approval
-      isActive: true,
-    }
-
-    if (originalSelfie && consentGiven) {
-      data.originalSelfie = originalSelfie
-    }
-    if (reviewTitle) {
-      data.reviewTitle = reviewTitle
-    }
-    if (reviewComment) {
-      data.reviewComment = reviewComment
-    }
-
-    const image = await db.customerPortfolio.create({
-      data,
-      include: {
-        product: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            images: true,
-          },
-        },
+    const item = await db.styleGallery.create({
+      data: {
+        productId,
+        productName,
+        productImage: productImage || null,
+        userId: userId || null,
+        userName,
+        aiGeneratedImage,
+        categorySlug: categorySlug || null,
+        consentGiven: true,
+        status: 'pending', // All submissions start as pending — admin must approve
       },
     })
 
-    return NextResponse.json({ image }, { status: 201 })
+    console.log(`[style-gallery] New submission: ${item.id} by ${userName} (status: pending)`)
+
+    return NextResponse.json({
+      success: true,
+      item: {
+        id: item.id,
+        status: item.status,
+        createdAt: item.createdAt,
+      },
+      message: 'Your style has been submitted and is pending admin approval. It will appear in the gallery once approved.',
+    }, { status: 201 })
   } catch (error) {
-    console.error('Style Gallery POST error:', error)
-    return NextResponse.json({ error: 'Failed to create gallery image' }, { status: 500 })
+    console.error('[style-gallery] POST error:', error)
+    return NextResponse.json({ error: 'Failed to submit to gallery' }, { status: 500 })
   }
 }

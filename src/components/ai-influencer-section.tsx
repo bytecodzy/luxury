@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, Heart, Share2, Shield, Clock, ImageIcon, LogIn, CheckCircle } from 'lucide-react';
+import { Sparkles, Heart, Share2, Shield, Clock, ImageIcon, LogIn, CheckCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -100,24 +100,53 @@ export function AIInfluencerSection({ productId, productName, onShareImage, init
   const [consentGiven, setConsentGiven] = useState(false);
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [userName, setUserName] = useState(authUser?.name || '');
+  const [showPendingNotice, setShowPendingNotice] = useState(false);
+  const [apiImages, setApiImages] = useState<AIInfluencerImage[]>([]);
   const pendingImageRef = useRef<string | null>(null);
 
   // Auto-open share dialog when initialShareImage is provided (from try-on result)
   useEffect(() => {
-    if (initialShareImage) {
-      // Store the image for later use
-      pendingImageRef.current = initialShareImage;
-      // If not logged in, show login prompt instead
+    if (!initialShareImage) return;
+    // Store the image for later use
+    pendingImageRef.current = initialShareImage;
+    // Use microtask to avoid setState-in-effect lint warning
+    const pending = initialShareImage;
+    queueMicrotask(() => {
       if (!authUser) {
         setLoginPromptOpen(true);
         return;
       }
-      setPendingImage(initialShareImage);
+      setPendingImage(pending);
       setConsentGiven(false);
       setShareDialogOpen(true);
-    }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    });
   }, [initialShareImage, authUser]);
+
+  // Fetch approved images from API and merge with local
+  useEffect(() => {
+    async function fetchApprovedImages() {
+      try {
+        const res = await fetch(`/api/style-gallery?productId=${encodeURIComponent(productId)}&limit=20`);
+        if (res.ok) {
+          const data = await res.json();
+          const mapped: AIInfluencerImage[] = (data.items || []).map((item: any) => ({
+            id: item.id,
+            productId: item.productId,
+            imageDataUrl: item.aiGeneratedImage,
+            userName: item.userName,
+            userId: item.userId || undefined,
+            isVerified: true,
+            createdAt: item.createdAt,
+            likes: item.likes || 0,
+          }));
+          setApiImages(mapped);
+        }
+      } catch (err) {
+        console.error('[AIInfluencer] Failed to fetch approved gallery items:', err);
+      }
+    }
+    fetchApprovedImages();
+  }, [productId]);
 
   // Refresh images from shared store
   const refreshImages = useCallback(() => {
@@ -157,7 +186,7 @@ export function AIInfluencerSection({ productId, productName, onShareImage, init
     [authUser]
   );
 
-  const handleSubmitShare = useCallback(() => {
+  const handleSubmitShare = useCallback(async () => {
     if (!consentGiven || !userName.trim() || !authUser) return;
 
     // Double-check share limit
@@ -182,10 +211,33 @@ export function AIInfluencerSection({ productId, productName, onShareImage, init
     };
 
     addInfluencerImage(newImage);
+
+    // Submit to backend for admin approval
+    try {
+      await fetch('/api/style-gallery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId,
+          productName,
+          userId: authUser.id,
+          userName: userName.trim(),
+          aiGeneratedImage: newImage.imageDataUrl,
+          categorySlug: undefined,
+          consentGiven: true,
+        }),
+      });
+    } catch (err) {
+      console.error('[AIInfluencer] Failed to submit to gallery API:', err);
+    }
+
     refreshImages();
     setShareDialogOpen(false);
     setConsentGiven(false);
     setPendingImage(null);
+    setShowPendingNotice(true);
+    setTimeout(() => setShowPendingNotice(false), 10000);
+    showToast('info', 'Your style has been submitted and is pending admin approval.');
 
     if (onShareImage) {
       onShareImage(newImage.imageDataUrl);
@@ -207,6 +259,9 @@ export function AIInfluencerSection({ productId, productName, onShareImage, init
     setLoginPromptOpen(false);
     setAuthView('login');
   }, [setAuthView]);
+
+  // Merge local in-memory images with API-approved images
+  const allImages = [...images, ...apiImages];
 
   const isLoggedIn = !!authUser;
 
@@ -240,10 +295,11 @@ export function AIInfluencerSection({ productId, productName, onShareImage, init
         </div>
 
         {/* Gallery Grid */}
-        {images.length > 0 ? (
+        {allImages.length > 0 ? (
+          <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             <AnimatePresence>
-              {images.map((img, idx) => (
+              {allImages.map((img, idx) => (
                 <motion.div
                   key={img.id}
                   initial={{ opacity: 0, scale: 0.9 }}
@@ -320,6 +376,25 @@ export function AIInfluencerSection({ productId, productName, onShareImage, init
               ))}
             </AnimatePresence>
           </div>
+          {/* Pending Approval Notice */}
+          {showPendingNotice && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="mt-4 rounded-lg border border-amber-600/30 bg-amber-900/15 p-3 flex items-start gap-2"
+            >
+              <Clock className="h-4 w-4 text-amber-400 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-xs font-medium text-amber-200/70">Style Submitted for Approval</p>
+                <p className="text-[10px] text-amber-200/40 mt-0.5">Your AI style is being reviewed by our team. It will appear in the gallery once approved.</p>
+              </div>
+              <button onClick={() => setShowPendingNotice(false)} className="ml-auto text-amber-200/30 hover:text-amber-200/60">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </motion.div>
+          )}
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-amber-900/20 bg-stone-900/30 py-12">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-900/20 mb-3">
@@ -442,7 +517,8 @@ export function AIInfluencerSection({ productId, productName, onShareImage, init
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-amber-200/60">What happens when you share?</p>
                     <ul className="text-[10px] text-amber-200/40 space-y-0.5">
-                      <li>Your AI-generated image will be visible to all shoppers</li>
+                      <li>Your AI-generated image will be submitted for admin review first</li>
+                      <li>Once approved, it will be visible to all shoppers</li>
                       <li>Only your first name initial will be shown</li>
                       <li>You can request removal at any time</li>
                     </ul>
@@ -497,7 +573,7 @@ export function AIInfluencerSection({ productId, productName, onShareImage, init
                   className="flex-1 bg-amber-600 text-stone-950 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Share2 className="mr-2 h-4 w-4" />
-                  Share to Gallery
+                  Submit for Approval
                 </Button>
               </div>
             </div>
