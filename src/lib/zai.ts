@@ -190,17 +190,38 @@ export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
 }
 
 /**
+ * Remap an internal ZAI API URL to the public endpoint.
+ * internal-api.z.ai resolves to private IPs (172.25.x.x) that are
+ * unreachable from Vercel. The public API is at api.z.ai/api/v1/.
+ */
+export function getPublicZAIUrl(baseUrl: string): string {
+  if (baseUrl.includes('internal-api.z.ai')) {
+    // Replace internal-api.z.ai/v1 with api.z.ai/api/v1
+    const remapped = baseUrl
+      .replace('internal-api.z.ai/v1', 'api.z.ai/api/v1')
+      .replace('internal-api.z.ai', 'api.z.ai/api/v1')
+    console.log(`[ZAI] Auto-remapping internal URL for Vercel: ${baseUrl} → ${remapped}`)
+    return remapped
+  }
+  return baseUrl
+}
+
+/**
  * Get the ZAI config from environment variables or file.
  * Priority:
  * 1. ZAI_BASE_URL + ZAI_API_KEY env vars (works on Vercel and locally)
  * 2. .z-ai-config files (sandbox/local development)
+ *
+ * On Vercel: automatically remaps internal-api.z.ai to the public api.z.ai endpoint.
  */
 export function getZAIConfig(): { baseUrl: string; apiKey: string; chatId?: string; token?: string; userId?: string } | null {
   const envBaseUrl = process.env.ZAI_BASE_URL
   const envApiKey = process.env.ZAI_API_KEY
   if (envBaseUrl && envApiKey) {
+    // On Vercel, auto-remap internal API URLs to the public endpoint
+    const resolvedBaseUrl = process.env.VERCEL ? getPublicZAIUrl(envBaseUrl) : envBaseUrl
     return {
-      baseUrl: envBaseUrl,
+      baseUrl: resolvedBaseUrl,
       apiKey: envApiKey,
       chatId: process.env.ZAI_CHAT_ID || undefined,
       token: process.env.ZAI_TOKEN || undefined,

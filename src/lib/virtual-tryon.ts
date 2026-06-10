@@ -21,6 +21,8 @@
 
 import { performTryOn as hfPerformTryOn, checkSpaceStatus } from './huggingface-tryon'
 import { createZAI, isZAIConfigured, getZAIConfig } from './zai'
+import { externalTryOn, isExternalAIAvailable } from './external-ai'
+import type { ExternalTryOnResult } from './external-ai'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -36,7 +38,7 @@ export interface TryOnResult {
   imageUrl?: string           // base64 data URL of the result
   strategy?: string           // 'idm-vton' | 'zai-product-edit' | 'zai-selfie-edit' | 'zai-generate'
   error?: string
-  errorCode?: 'SPACE_SLEEPING' | 'UPLOAD_FAILED' | 'CALL_FAILED' | 'PROCESSING_FAILED' | 'TIMEOUT' | 'NETWORK_ERROR' | 'ALL_STRATEGIES_FAILED' | 'SERVICE_BUSY' | 'NO_PRODUCT_IMAGE' | 'ZAI_NOT_CONFIGURED'
+  errorCode?: 'SPACE_SLEEPING' | 'UPLOAD_FAILED' | 'CALL_FAILED' | 'PROCESSING_FAILED' | 'TIMEOUT' | 'NETWORK_ERROR' | 'ALL_STRATEGIES_FAILED' | 'SERVICE_BUSY' | 'NO_PRODUCT_IMAGE' | 'ZAI_NOT_CONFIGURED' | 'EXTERNAL_AI_FAILED'
   elapsedMs?: number
   debugInfo?: {
     strategiesAttempted: string[]
@@ -685,8 +687,17 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   let vlmProductAnalysis: ProductAnalysis | null = null
   let vlmSelfieAnalysis: SelfieAnalysis | null = null
 
-  // Always try VLM analyses when ZAI is configured — health check is informational only
-  if (isZAIConfigured()) {
+  // On Vercel: skip VLM analysis if ZAI is unreachable to save precious time
+  // VLM analysis takes 15-30s and uses ZAI API — if unreachable, it just wastes time
+  const isVercel = !!process.env.VERCEL
+  const zaiConfig = getZAIConfig()
+  const zaiUsesInternalUrl = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
+  const skipVLMOnVercel = isVercel && !health.zaiReachable
+
+  if (skipVLMOnVercel) {
+    console.log('[virtual-tryon] Skipping VLM analyses on Vercel (ZAI unreachable) — using fallback prompts')
+  } else if (isZAIConfigured()) {
+    // Always try VLM analyses when ZAI is configured — health check is informational only
     console.log('[virtual-tryon] Starting parallel VLM analyses (product + selfie)')
     try {
       const [productResult, selfieResult] = await Promise.all([
@@ -940,9 +951,40 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     }
   }
 
+  // ── Strategy 5: External AI (Replicate/OpenAI) ──
+  const extAvail = isExternalAIAvailable()
+  if ((extAvail.replicate || extAvail.openai) && Date.now() < totalDeadline - 15_000) {
+    strategiesAttempted.push('external-ai')
+    console.log('[virtual-tryon] Strategy 5: External AI fallback')
+    try {
+      const result = await Promise.race<ExternalTryOnResult>([
+        externalTryOn({
+          selfieData: input.selfieData,
+          productImageBase64: input.productImageBase64,
+          productName: input.productName,
+          categorySlug: input.categorySlug,
+        }),
+        new Promise<ExternalTryOnResult>(r => setTimeout(() => r({ success: false, strategy: 'external-ai', error: 'External AI timed out' }), Math.min(20_000, totalDeadline - Date.now()))),
+      ])
+      if (result.success && result.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ External AI succeeded in ${(elapsed / 1000).toFixed(1)}s via ${result.strategy}`)
+        return {
+          success: true,
+          imageUrl: result.imageUrl,
+          strategy: result.strategy,
+          elapsedMs: elapsed,
+        }
+      }
+      strategyErrors['external-ai'] = result.error || 'External AI failed'
+    } catch (err) {
+      const msg = (err as Error).message || String(err)
+      strategyErrors['external-ai'] = msg
+    }
+  }
+
   // ── All strategies failed ────────────────────────────────────────
   const elapsed = Date.now() - totalStart
-  const isVercel = !!process.env.VERCEL
   console.log(`[virtual-tryon] All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
   console.log(`[virtual-tryon] Strategies attempted: ${strategiesAttempted.join(', ')}`)
   console.log(`[virtual-tryon] Strategy errors: ${JSON.stringify(strategyErrors)}`)
@@ -958,6 +1000,10 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     } else {
       errorMessage = 'AI services are currently unavailable. Please try again in a few minutes.'
     }
+  } else if (isVercel && zaiUsesInternalUrl && !health.zaiReachable) {
+    // Specific error for internal-api.z.ai on Vercel
+    errorCode = 'ALL_STRATEGIES_FAILED'
+    errorMessage = 'ZAI_BASE_URL is set to an internal API URL (internal-api.z.ai) which is not reachable from Vercel. Please change it to the public API URL: https://api.z.ai/api/v1 and ensure ZAI_API_KEY is set to your Z.ai dashboard API key. Alternatively, set REPLICATE_API_TOKEN or OPENAI_API_KEY for external AI try-on.'
   } else if (health.zaiReachable && Object.keys(strategyErrors).length > 0) {
     errorCode = 'ALL_STRATEGIES_FAILED'
     errorMessage = 'AI try-on services processed the request but could not generate a usable result. Please try again in a few minutes.'
