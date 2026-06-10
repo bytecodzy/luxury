@@ -1,17 +1,14 @@
 'use client';
 
-/* Product Detail with AI Virtual Try-On v6 */
-
 import { useStore } from '@/lib/store';
-import { TryOnDialog } from '@/components/try-on-dialog';
 import { useCurrency } from '@/lib/currency';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, CheckCircle, Truck, Heart, MessageSquare } from 'lucide-react';
-import { motion } from 'framer-motion';
-import { useState, useEffect } from 'react';
+import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle, Truck, Heart, MessageSquare } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { getProxiedImageUrl } from '@/lib/image-utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Label } from '@/components/ui/label';
@@ -23,9 +20,10 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Crown, Loader2, Send } from 'lucide-react';
+import { Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send, AlertTriangle, Clock, Share2, X } from 'lucide-react';
 import { useAffiliateClick } from '@/hooks/useAffiliateClick';
 import { AIInfluencerSection } from '@/components/ai-influencer-section';
+import { TryOnDialog } from '@/components/try-on-dialog';
 
 interface ProductDetail {
   id: string;
@@ -94,6 +92,7 @@ const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
   voylla: 'Voylla',
 };
 
+// ── Product Detail Component ───────────────────────────────────
 export function ProductDetail() {
   const { selectedProductId, setView, addItem, setCategory, authUser, authToken } = useStore();
   const { trackClick } = useAffiliateClick();
@@ -104,11 +103,14 @@ export function ProductDetail() {
   const [isAdding, setIsAdding] = useState(false);
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const [tryOnOpen, setTryOnOpen] = useState(false);
+  const [backgroundJobStep, setBackgroundJobStep] = useState<'generating' | 'result' | null>(null);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
   const [reviewForm, setReviewForm] = useState({ rating: 5, title: '', comment: '', name: '' });
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [influencerShareImage, setInfluencerShareImage] = useState<string | null>(null);
+  const influencerSectionRef = useRef<{ handleShareFromTryOn: (imageDataUrl: string) => void } | null>(null);
 
   const { data, isLoading } = useQuery<{ product: ProductDetail }>({
     queryKey: ['product', selectedProductId],
@@ -203,6 +205,8 @@ export function ProductDetail() {
     }
   };
 
+
+
   const handleAddToCart = () => {
     if (!product) return;
     setIsAdding(true);
@@ -216,6 +220,14 @@ export function ProductDetail() {
     }
     setTimeout(() => setIsAdding(false), 800);
   };
+
+  const handleBackgroundJob = useCallback((step: 'generating' | 'result') => {
+    setBackgroundJobStep(step);
+  }, []);
+
+  const handleResetBackground = useCallback(() => {
+    setBackgroundJobStep(null);
+  }, []);
 
   if (isLoading) {
     return (
@@ -653,6 +665,8 @@ export function ProductDetail() {
           <AIInfluencerSection
             productId={product.id}
             productName={product.name}
+            initialShareImage={influencerShareImage}
+            onShareComplete={() => setInfluencerShareImage(null)}
           />
         </div>
       )}
@@ -732,8 +746,8 @@ export function ProductDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Style Preview Dialog */}
-      {tryOnOpen && product && (
+      {/* Style Preview Dialog - mounted when open or background job active */}
+      {(tryOnOpen || backgroundJobStep !== null) && product && (
         <TryOnDialog
           open={tryOnOpen}
           onOpenChange={setTryOnOpen}
@@ -742,7 +756,43 @@ export function ProductDetail() {
           productImage={getProxiedImageUrl(safeImages[0] || '/images/hero.png', product.platform)}
           rawProductImage={safeImages[0] || '/images/hero.png'}
           categorySlug={product.categorySlug}
-        />
+          productImages={safeImages.map(img => getProxiedImageUrl(img, product.platform))}
+          onBackgroundJob={handleBackgroundJob}
+          onResetBackground={handleResetBackground}
+          onShareToInfluencer={(imageDataUrl) => {
+            setInfluencerShareImage(imageDataUrl);
+            // Close the try-on dialog and scroll to influencer section
+            setTryOnOpen(false);
+            setTimeout(() => {
+              const section = document.getElementById('ai-influencer-section');
+              if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 300);
+          }}
+/>
+      )}
+
+      {/* Floating Pill — shown when dialog is closed but a background job is running */}
+      {backgroundJobStep && !tryOnOpen && (
+        <motion.div
+          initial={{ y: 100, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: 100, opacity: 0 }}
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 cursor-pointer"
+          onClick={() => setTryOnOpen(true)}
+        >
+          {backgroundJobStep === 'generating' ? (
+            <div className="flex items-center gap-3 rounded-full border border-amber-600/40 bg-stone-900/95 px-5 py-3 shadow-2xl shadow-amber-900/30 backdrop-blur-sm">
+              <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+              <span className="text-xs font-semibold text-amber-200">Creating preview...</span>
+              <Sparkles className="h-4 w-4 text-amber-400/60" />
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-full border border-amber-500/60 bg-stone-900/95 px-5 py-3 shadow-2xl shadow-amber-500/20 backdrop-blur-sm animate-[glow_2s_ease-in-out_infinite]">
+              <Sparkles className="h-4 w-4 text-amber-400" />
+              <span className="text-xs font-bold text-amber-300">Style Preview Ready! Click to view</span>
+            </div>
+          )}
+        </motion.div>
       )}
     </motion.div>
   );

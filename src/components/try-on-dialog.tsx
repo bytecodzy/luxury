@@ -1,16 +1,17 @@
 'use client';
 
 /**
- * TryOnDialog v6 — Honest, Fast, No Fake Overlays
+ * TryOnDialog v3.0 — Fast, Reliable AI Virtual Try-On
  *
  * KEY PRINCIPLES:
- * 1. Selfie preview shown INSTANTLY after file read
- * 2. "Create Try-On" button available as soon as selfie data is ready
- * 3. Single synchronous POST to /api/try-on
- * 4. 50-second hard client timeout — never wait more than 50s
- * 5. NO canvas overlay fallback — either real AI result or honest error
- * 6. If AI is slow, show "try later" — never make users wait 200s
- * 7. Clear progress with real strategy indicators
+ * 1. Instant selfie preview (show raw image IMMEDIATELY on upload)
+ * 2. Disclaimer → auto-opens file picker (one-click flow)
+ * 3. Hard 55-second client timeout with friendly "try later" message
+ * 4. 3BOXES watermark on ALL generated/saved/downloaded images
+ * 5. Full-body output (never half image)
+ * 6. Works on both preview and Vercel
+ * 7. NEVER frustrate the user — clear progress, honest timeouts
+ * 8. 60-second golden rule — if not done, show friendly message
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -29,11 +30,13 @@ import {
   Loader2,
   RotateCcw,
   Download,
-  AlertCircle,
+  RefreshCw,
+  Zap,
+  ShieldCheck,
   Clock,
-  Shirt,
+  Share2,
 } from 'lucide-react';
-import Image from 'next/image';
+import { Checkbox } from '@/components/ui/checkbox';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -45,9 +48,18 @@ interface TryOnDialogProps {
   productImage: string;
   categorySlug?: string;
   rawProductImage?: string;
+  productImages?: string[];
+  onBackgroundJob?: (step: 'generating' | 'result') => void;
+  onResetBackground?: () => void;
+  onShareToInfluencer?: (imageDataUrl: string) => void;
 }
 
-type Step = 'upload' | 'preview' | 'generating' | 'result' | 'error';
+type Step = 'upload' | 'preview' | 'generating' | 'result' | 'timeout';
+
+// ── Constants ──────────────────────────────────────────────────────
+
+const CLIENT_TIMEOUT_MS = 55_000; // 55 seconds — hard client timeout (golden rule: max 60s total)
+const GENERATE_TIMEOUT_MSG = 'The AI service is currently busy. Please try again in a few minutes — it usually works on the second attempt!';
 
 // ── Helper: Compress image ─────────────────────────────────────────
 
@@ -117,18 +129,107 @@ async function fetchImageAsBase64(url: string): Promise<string | null> {
   return null;
 }
 
+// ── Helper: Add 3BOXES watermark to image ─────────────────────────
+// This is CRITICAL — every saved/downloaded image MUST have the 3BOXES logo
+
+function add3BoxesWatermark(imageDataUrl: string, productName: string): Promise<string> {
+  return new Promise((resolve) => {
+    try {
+      const img = document.createElement('img');
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          // Use the FULL image dimensions — never crop
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(imageDataUrl);
+            return;
+          }
+
+          // Draw the original image at FULL size
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          const w = canvas.width;
+          const h = canvas.height;
+
+          // ── Top-right "3BOXES AI TRY-ON" badge ──
+          ctx.save();
+          ctx.globalAlpha = 0.88;
+          const badgeW = Math.max(Math.floor(w * 0.34), 120);
+          const badgeH = Math.max(Math.floor(h * 0.04), 28);
+          const badgeX = w - badgeW - 12;
+          const badgeY = 12;
+          ctx.fillStyle = '#1c1917';
+          ctx.beginPath();
+          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+          ctx.fill();
+          // Gold border
+          ctx.strokeStyle = 'rgba(218,165,32,0.6)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+          ctx.stroke();
+          // Text
+          ctx.fillStyle = '#daa520';
+          const badgeFontSize = Math.max(10, Math.floor(badgeH * 0.52));
+          ctx.font = `bold ${badgeFontSize}px Arial, Helvetica, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('3BOXES AI TRY-ON', badgeX + badgeW / 2, badgeY + badgeH / 2);
+          ctx.restore();
+
+          // ── Bottom watermark bar ──
+          ctx.save();
+          ctx.globalAlpha = 0.82;
+          const barH = Math.max(40, Math.floor(h * 0.06));
+          const barY = h - barH - 8;
+          ctx.fillStyle = 'rgba(28,25,23,0.75)';
+          ctx.beginPath();
+          ctx.roundRect(w * 0.08, barY, w * 0.84, barH, 8);
+          ctx.fill();
+
+          // Product name (gold)
+          const nameFontSize = Math.max(12, Math.floor(barH * 0.36));
+          ctx.fillStyle = '#daa520';
+          ctx.font = `bold ${nameFontSize}px Arial, Helvetica, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const displayName = (productName || 'Product').substring(0, 40);
+          ctx.fillText(displayName, w / 2, barY + barH * 0.38);
+
+          // "3BOXES GIFTS • AI Style Preview" branding
+          const brandFontSize = Math.max(9, Math.floor(barH * 0.26));
+          ctx.globalAlpha = 0.65;
+          ctx.fillStyle = '#a8a29e';
+          ctx.font = `${brandFontSize}px Arial, Helvetica, sans-serif`;
+          ctx.fillText('3BOXES GIFTS \u2022 AI Style Preview', w / 2, barY + barH * 0.72);
+          ctx.restore();
+
+          resolve(canvas.toDataURL('image/png'));
+        } catch {
+          resolve(imageDataUrl);
+        }
+      };
+      img.onerror = () => resolve(imageDataUrl);
+      img.src = imageDataUrl;
+    } catch {
+      resolve(imageDataUrl);
+    }
+  });
+}
+
 // ── Progress Messages ───────────────────────────────────────────────
 
 const PROGRESS_MESSAGES = [
-  { at: 0, text: 'Analyzing your photo and the product...' },
-  { at: 15, text: 'AI is creating the virtual try-on...' },
-  { at: 30, text: 'Generating your style preview...' },
-  { at: 45, text: 'Almost done — finalizing the image...' },
+  { at: 0, text: 'Uploading your photo to AI service...' },
+  { at: 15, text: 'AI is analyzing your photo and the product...' },
+  { at: 30, text: 'AI is draping the product onto your photo...' },
+  { at: 45, text: 'Almost there — generating the final image...' },
+  { at: 55, text: 'Adding finishing touches...' },
 ];
-
-// ── Client Timeout ─────────────────────────────────────────────────
-
-const CLIENT_TIMEOUT_MS = 50_000; // 50 seconds — never wait more
 
 // ── Component ──────────────────────────────────────────────────────
 
@@ -140,32 +241,68 @@ export function TryOnDialog({
   productImage,
   categorySlug,
   rawProductImage,
+  onBackgroundJob,
+  onResetBackground,
+  onShareToInfluencer,
 }: TryOnDialogProps) {
   const [step, setStep] = useState<Step>('upload');
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
   const [selfieData, setSelfieData] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
+  const [watermarkedResult, setWatermarkedResult] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [errorCode, setErrorCode] = useState<string>('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressText, setProgressText] = useState('');
+  const [spaceWarming, setSpaceWarming] = useState(false);
+  const [spaceReady, setSpaceReady] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [isSlowWarning, setIsSlowWarning] = useState(false);
+
+  // Disclaimer state
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [showDisclaimer, setShowDisclaimer] = useState(false);
+  const [disclaimerChecked, setDisclaimerChecked] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const generatingStartRef = useRef<number>(0);
   const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const elapsedIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ── Pre-warm when dialog opens ──────────────────────────────────
-
+  // ── Pre-warm IDM-VTON Space when dialog opens ───────────────────
   useEffect(() => {
     if (!open) return;
-    // Pre-warm the AI service in the background
-    fetch('/api/virtual-tryon?action=prewarm').catch(() => {});
+
+    setSpaceWarming(true);
+    setSpaceReady(false);
+
+    fetch('/api/try-on/status', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        setSpaceReady(data.spaceRunning === true || data.available === true);
+        setSpaceWarming(false);
+      })
+      .catch(() => {
+        setSpaceWarming(false);
+      });
   }, [open]);
 
-  // ── Reset ────────────────────────────────────────────────────────
+  // ── Elapsed time tracker ──
+  useEffect(() => {
+    if (step !== 'generating') return;
+    generatingStartRef.current = Date.now();
+    setElapsedSeconds(0);
+    elapsedIntervalRef.current = setInterval(() => {
+      if (generatingStartRef.current) {
+        setElapsedSeconds(Math.floor((Date.now() - generatingStartRef.current) / 1000));
+      }
+    }, 1000);
+    return () => {
+      if (elapsedIntervalRef.current) clearInterval(elapsedIntervalRef.current);
+    };
+  }, [step]);
 
+  // ── Reset ────────────────────────────────────────────────────────
   const reset = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -183,16 +320,45 @@ export function TryOnDialog({
     setSelfiePreview(null);
     setSelfieData(null);
     setResultImage(null);
+    setWatermarkedResult(null);
     setErrorMessage('');
-    setErrorCode('');
     setProgressPercent(0);
     setProgressText('');
+    setIsRetrying(false);
     setElapsedSeconds(0);
-    setIsSlowWarning(false);
+    onResetBackground?.();
+  }, [onResetBackground]);
+
+  // ── Disclaimer handlers ──────────────────────────────────────────
+  // KEY FIX: After accepting disclaimer, IMMEDIATELY open file picker
+  // so the user doesn't have to click "Upload" again
+  const handleUploadClick = useCallback(() => {
+    if (!disclaimerAccepted) {
+      setShowDisclaimer(true);
+      return;
+    }
+    fileInputRef.current?.click();
+  }, [disclaimerAccepted]);
+
+  const handleDisclaimerAccept = useCallback(() => {
+    setDisclaimerAccepted(true);
+    setShowDisclaimer(false);
+    setDisclaimerChecked(false);
+    // CRITICAL: Immediately open file picker after accepting — NO second click needed!
+    // Use requestAnimationFrame for more reliable cross-browser behavior
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        fileInputRef.current?.click();
+      }, 50);
+    });
   }, []);
 
-  // ── Handle file selection ────────────────────────────────────────
+  const handleDisclaimerCancel = useCallback(() => {
+    setShowDisclaimer(false);
+    setDisclaimerChecked(false);
+  }, []);
 
+  // ── Handle file selection — INSTANT preview ──────────────────────
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -210,34 +376,45 @@ export function TryOnDialog({
 
       setErrorMessage('');
 
-      // INSTANT PREVIEW: Read the file as data URL and show immediately
+      // KEY FIX: INSTANT PREVIEW — Read file and show IMMEDIATELY
       const reader = new FileReader();
       reader.onload = async (ev) => {
         const originalDataUrl = ev.target?.result as string;
         if (!originalDataUrl) return;
 
-        // Show preview IMMEDIATELY
+        // Show preview IMMEDIATELY with the original image — no waiting!
         setSelfiePreview(originalDataUrl);
         setStep('preview');
 
-        // Compress in the background
+        // Compress in the background (smaller = faster upload to API)
         try {
           const compressed = await compressImage(originalDataUrl, 1024, 0.85);
           setSelfieData(compressed);
         } catch {
+          // If compression fails, use the original
           setSelfieData(originalDataUrl);
         }
       };
       reader.readAsDataURL(file);
+
+      // Reset the file input so the same file can be re-selected
+      e.target.value = '';
     },
     []
   );
 
   // ── Handle drag & drop ───────────────────────────────────────────
-
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
+      e.stopPropagation();
+
+      // Must accept disclaimer first
+      if (!disclaimerAccepted) {
+        setShowDisclaimer(true);
+        return;
+      }
+
       const file = e.dataTransfer.files?.[0];
       if (!file || !file.type.startsWith('image/')) {
         setErrorMessage('Please drop an image file');
@@ -251,6 +428,7 @@ export function TryOnDialog({
         const originalDataUrl = ev.target?.result as string;
         if (!originalDataUrl) return;
 
+        // INSTANT preview
         setSelfiePreview(originalDataUrl);
         setStep('preview');
 
@@ -263,28 +441,197 @@ export function TryOnDialog({
       };
       reader.readAsDataURL(file);
     },
-    []
+    [disclaimerAccepted]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
   }, []);
 
-  // ── Start progress tracking ──────────────────────────────────────
+  // ── Category-aware overlay positioning ──
+  const getCategoryOverlayPosition = useCallback((categorySlug: string): { x: number; y: number; w: number; h: number } => {
+    const cat = (categorySlug || '').toLowerCase();
 
-  const startProgress = useCallback(() => {
-    setProgressPercent(5);
-    setProgressText(PROGRESS_MESSAGES[0].text);
-    setElapsedSeconds(0);
-    setIsSlowWarning(false);
+    if (cat.includes('jewel') || cat.includes('necklace') || cat.includes('pendant') || cat.includes('earring')) {
+      return { x: 0.5, y: 0.38, w: 0.5, h: 0.2 };
+    }
+    if (cat.includes('watch')) {
+      return { x: 0.3, y: 0.6, w: 0.25, h: 0.25 };
+    }
+    if (cat.includes('saree') || cat.includes('fashion') || cat.includes('shirt') || cat.includes('kurta') || cat.includes('dress')) {
+      return { x: 0.5, y: 0.5, w: 0.5, h: 0.4 };
+    }
+    if (cat.includes('fragrance') || cat.includes('perfume')) {
+      return { x: 0.55, y: 0.4, w: 0.25, h: 0.35 };
+    }
+    if (cat.includes('leather') || cat.includes('bag') || cat.includes('wallet')) {
+      return { x: 0.4, y: 0.45, w: 0.35, h: 0.35 };
+    }
+    // Default — center upper body
+    return { x: 0.5, y: 0.45, w: 0.45, h: 0.35 };
+  }, []);
 
-    if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
-    if (elapsedIntervalRef.current) clearInterval(elapsedIntervalRef.current);
+  // ── Canvas overlay fallback ──────────────────────────────────────
+  const generateCanvasOverlay = useCallback(async (
+    selfieDataUrl: string,
+    prodImage: string,
+    prodName: string,
+    prodImageBase64?: string,
+    catSlug?: string,
+  ): Promise<string> => {
+    return new Promise((resolve) => {
+      try {
+        const selfieImg = document.createElement('img');
+        selfieImg.onload = () => {
+          const canvas = document.createElement('canvas');
+          // Use FULL dimensions — never crop
+          const width = selfieImg.naturalWidth || 512;
+          const height = selfieImg.naturalHeight || 680;
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(selfieDataUrl);
+            return;
+          }
 
-    // Progress bar (slower increment — don't reach 100% until real result)
+          // Draw the selfie at FULL size
+          ctx.drawImage(selfieImg, 0, 0, width, height);
+
+          // Subtle vignette
+          const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
+          vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
+          vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.12)');
+          ctx.fillStyle = vignetteGrad;
+          ctx.fillRect(0, 0, width, height);
+
+          // Get overlay position based on category
+          const pos = getCategoryOverlayPosition(catSlug || '');
+          const overlayW = Math.floor(pos.w * width);
+          const overlayH = Math.floor(pos.h * height);
+          const overlayCX = pos.x * width;
+          const overlayCY = pos.y * height;
+
+          const renderProduct = (productImg?: HTMLImageElement) => {
+            if (productImg) {
+              ctx.save();
+              const imgAspect = productImg.naturalWidth / productImg.naturalHeight;
+              const slotAspect = overlayW / overlayH;
+              let drawW = overlayW;
+              let drawH = overlayH;
+
+              if (imgAspect > slotAspect) {
+                drawH = drawW / imgAspect;
+              } else {
+                drawW = drawH * imgAspect;
+              }
+
+              const drawX = overlayCX - drawW / 2;
+              const drawY = overlayCY - drawH / 2;
+
+              // Shadow for depth
+              ctx.shadowColor = 'rgba(0,0,0,0.35)';
+              ctx.shadowBlur = 12;
+              ctx.shadowOffsetX = 2;
+              ctx.shadowOffsetY = 2;
+
+              // Semi-transparent blend
+              ctx.globalAlpha = 0.55;
+
+              // Rounded clip
+              ctx.beginPath();
+              const radius = Math.min(10, drawW * 0.06, drawH * 0.06);
+              ctx.roundRect(drawX, drawY, drawW, drawH, radius);
+              ctx.clip();
+              ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
+              ctx.restore();
+
+              // Gold border
+              ctx.save();
+              ctx.globalAlpha = 0.4;
+              ctx.strokeStyle = '#daa520';
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.roundRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2, radius + 1);
+              ctx.stroke();
+              ctx.restore();
+            }
+
+            resolve(canvas.toDataURL('image/png'));
+          };
+
+          // Try loading product image
+          const productImg = document.createElement('img');
+          productImg.crossOrigin = 'anonymous';
+          let resolved = false;
+
+          const finish = (img?: HTMLImageElement) => {
+            if (resolved) return;
+            resolved = true;
+            renderProduct(img);
+          };
+
+          productImg.onload = () => finish(productImg);
+          productImg.onerror = () => finish();
+
+          // Timeout for product image loading
+          setTimeout(() => finish(), 5000);
+
+          if (prodImageBase64 && prodImageBase64.startsWith('data:')) {
+            productImg.src = prodImageBase64;
+          } else {
+            let imgSrc = prodImage;
+            if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
+              imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
+            } else if (imgSrc.startsWith('//')) {
+              imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
+            }
+            productImg.src = imgSrc;
+          }
+        };
+        selfieImg.onerror = () => resolve(selfieDataUrl);
+        selfieImg.src = selfieDataUrl;
+      } catch {
+        resolve(selfieDataUrl);
+      }
+    });
+  }, [getCategoryOverlayPosition]);
+
+  // ── Generate Try-On ──────────────────────────────────────────────
+  const handleGenerate = useCallback(async () => {
+    if (!selfieData) {
+      setErrorMessage('Please wait for image to finish processing...');
+      return;
+    }
+
+    setStep('generating');
+    setErrorMessage('');
+    setProgressPercent(10);
+    setProgressText('Preparing your photo...');
+    onBackgroundJob?.('generating');
+
+    // Abort any previous request
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    // Pre-resolve product image to base64 (with timeout)
+    let productImageBase64: string | undefined;
+    try {
+      const imgToFetch = rawProductImage || productImage;
+      if (imgToFetch) {
+        productImageBase64 = await Promise.race([
+          fetchImageAsBase64(imgToFetch),
+          new Promise<null>(r => setTimeout(() => r(null), 5000)),
+        ]) || undefined;
+      }
+    } catch {}
+
+    // Start progress simulation
     progressIntervalRef.current = setInterval(() => {
       setProgressPercent(prev => {
-        if (prev >= 90) return prev; // Cap at 90% until real result
+        if (prev >= 90) return prev;
         const next = prev + 1;
         for (let i = PROGRESS_MESSAGES.length - 1; i >= 0; i--) {
           if (next >= PROGRESS_MESSAGES[i].at) {
@@ -294,84 +641,28 @@ export function TryOnDialog({
         }
         return next;
       });
-    }, 800);
+    }, 1500);
 
-    // Elapsed time counter
-    elapsedIntervalRef.current = setInterval(() => {
-      setElapsedSeconds(prev => {
-        const next = prev + 1;
-        // Show warning at 35 seconds
-        if (next >= 35 && !isSlowWarning) {
-          setIsSlowWarning(true);
-        }
-        return next;
-      });
-    }, 1000);
-  }, [isSlowWarning]);
-
-  // ── Stop progress ────────────────────────────────────────────────
-
-  const stopProgress = useCallback(() => {
-    if (progressIntervalRef.current) {
-      clearInterval(progressIntervalRef.current);
-      progressIntervalRef.current = null;
-    }
-    if (elapsedIntervalRef.current) {
-      clearInterval(elapsedIntervalRef.current);
-      elapsedIntervalRef.current = null;
-    }
-  }, []);
-
-  // ── Show error with "try later" message ──────────────────────────
-
-  const showError = useCallback((message: string, code: string) => {
-    stopProgress();
-    setStep('error');
-    setErrorMessage(message);
-    setErrorCode(code);
-  }, [stopProgress]);
-
-  // ── Generate Try-On ──────────────────────────────────────────────
-
-  const handleGenerate = useCallback(async () => {
-    if (!selfieData) {
-      setErrorMessage('Please wait for image to finish processing...');
-      return;
-    }
-
-    setStep('generating');
-    setErrorMessage('');
-    setErrorCode('');
-
-    // Abort any previous request
-    if (abortRef.current) abortRef.current.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    startProgress();
-
-    // Pre-resolve product image to base64
-    let productImageBase64: string | undefined;
-    try {
-      const imgToFetch = rawProductImage || productImage;
-      if (imgToFetch) {
-        productImageBase64 = await fetchImageAsBase64(imgToFetch) || undefined;
+    // HARD 55-second timeout — golden rule: never make user wait more than 60s
+    const timeoutId = setTimeout(() => {
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
       }
-    } catch {}
-
-    // 50-second hard client timeout
-    const clientTimeout = setTimeout(() => {
-      if (controller.signal.aborted) return;
-      controller.abort();
-      console.warn('[try-on] Client timeout (50s) — showing "try later"');
-      showError(
-        'AI service is taking too long. Please try again in a few minutes.',
-        'TIMEOUT'
-      );
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current);
+        elapsedIntervalRef.current = null;
+      }
+      setStep('timeout');
+      setErrorMessage(GENERATE_TIMEOUT_MSG);
     }, CLIENT_TIMEOUT_MS);
 
     try {
-      const response = await fetch('/api/virtual-tryon', {
+      const response = await fetch('/api/try-on', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -385,80 +676,125 @@ export function TryOnDialog({
         signal: controller.signal,
       });
 
-      clearTimeout(clientTimeout);
-      stopProgress();
+      clearTimeout(timeoutId);
+
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
 
       const data = await response.json();
+
+      // Canvas mode — AI unavailable, generate client-side overlay
+      if (data.mode === 'canvas' || data.code === 'AI_CANVAS_MODE') {
+        try {
+          const canvasResult = await generateCanvasOverlay(
+            selfieData,
+            productImage,
+            productName,
+            data.productImageBase64 || productImageBase64,
+            categorySlug,
+          );
+          const watermarked = await add3BoxesWatermark(canvasResult, productName);
+          setResultImage(canvasResult);
+          setWatermarkedResult(watermarked);
+          setProgressPercent(100);
+          setStep('result');
+          onBackgroundJob?.('result');
+        } catch {
+          setStep('timeout');
+          setErrorMessage(GENERATE_TIMEOUT_MSG);
+        }
+        return;
+      }
 
       if (data.success && data.imageUrl) {
         // SUCCESS — show the AI-generated try-on image
         setProgressPercent(100);
+        setProgressText('Done!');
         setResultImage(data.imageUrl);
+
+        // Add 3BOXES watermark — CRITICAL for branding
+        try {
+          const watermarked = await add3BoxesWatermark(data.imageUrl, productName);
+          setWatermarkedResult(watermarked);
+        } catch {
+          setWatermarkedResult(data.imageUrl);
+        }
+
         setStep('result');
+        onBackgroundJob?.('result');
       } else {
-        // ERROR — show honest error with strategy debug info
-        const msg = data.error || 'AI try-on failed. Please try again.';
-        const code = data.errorCode || 'UNKNOWN';
-
-        // Log debug info for troubleshooting
-        if (data.debug) {
-          console.log('[try-on] Debug info:', JSON.stringify(data.debug, null, 2));
-        }
-
-        // Customize message based on error code
-        let userMessage = msg;
-        if (code === 'ZAI_NOT_CONFIGURED') {
-          userMessage = 'AI try-on service is not configured. Please contact support to enable this feature.';
-        } else if (code === 'SERVICE_BUSY' || code === 'ALL_STRATEGIES_FAILED') {
-          userMessage = 'AI service is currently busy. Please try again in a few minutes.';
-        } else if (code === 'TIMEOUT') {
-          userMessage = 'AI service is taking too long. Please try again in a few minutes.';
-        } else if (code === 'SPACE_SLEEPING') {
-          userMessage = 'AI service is waking up. Please try again in 30-60 seconds.';
-        } else if (code === 'NO_PRODUCT_IMAGE') {
-          userMessage = 'Could not load the product image. Please try again.';
-        }
-
-        showError(userMessage, code);
+        // FAILED — show timeout/error
+        setStep('timeout');
+        setErrorMessage(data.error || GENERATE_TIMEOUT_MSG);
       }
     } catch (err) {
-      clearTimeout(clientTimeout);
-      stopProgress();
+      clearTimeout(timeoutId);
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current);
+        elapsedIntervalRef.current = null;
+      }
 
       if (controller.signal.aborted) {
-        // Already handled by timeout
         return;
       }
 
-      // Network error
-      showError(
-        'Network error. Please check your connection and try again.',
-        'NETWORK_ERROR'
+      setStep('timeout');
+      setErrorMessage(
+        err instanceof Error && err.name === 'TimeoutError'
+          ? GENERATE_TIMEOUT_MSG
+          : 'Network error. Please check your connection and try again.'
       );
     }
-  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, startProgress, stopProgress, showError]);
+  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob, generateCanvasOverlay]);
 
   // ── Retry ────────────────────────────────────────────────────────
+  const handleRetry = useCallback(async () => {
+    setIsRetrying(true);
+    setStep('generating');
+    setErrorMessage('');
+    setProgressPercent(5);
+    setProgressText('Reconnecting to AI service...');
 
-  const handleRetry = useCallback(() => {
+    // Re-warm the Space first
+    try {
+      await fetch('/api/try-on/status', { method: 'POST' });
+      await new Promise(r => setTimeout(r, 2000));
+    } catch {}
+
+    setIsRetrying(false);
     handleGenerate();
   }, [handleGenerate]);
 
-  // ── Download result ──────────────────────────────────────────────
-
+  // ── Download result with 3BOXES watermark ────────────────────────
+  // CRITICAL: Always download the WATERMARKED version so 3BOXES branding is included
   const handleDownload = useCallback(() => {
-    if (!resultImage) return;
+    const imageToDownload = watermarkedResult || resultImage;
+    if (!imageToDownload) return;
 
     const link = document.createElement('a');
-    link.href = resultImage;
+    link.href = imageToDownload;
     link.download = `3boxes-tryon-${productName.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 30)}.png`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [resultImage, productName]);
+  }, [resultImage, watermarkedResult, productName]);
+
+  // ── Get category label ──
+  const getCategoryLabel = () => {
+    const cat = (categorySlug || '').toLowerCase();
+    if (cat.includes('saree') || cat.includes('fashion')) return 'see how this outfit looks on you';
+    if (cat.includes('jewelry') || cat.includes('watch')) return 'see how this accessory looks on you';
+    if (cat.includes('fragrance')) return 'see how this fragrance suits you';
+    return 'see how this product looks on you';
+  };
 
   // ── Render ───────────────────────────────────────────────────────
-
   return (
     <Dialog
       open={open}
@@ -467,7 +803,7 @@ export function TryOnDialog({
         onOpenChange(isOpen);
       }}
     >
-      <DialogContent className="max-w-lg border-amber-900/30 bg-stone-950 p-0 overflow-hidden sm:max-w-xl">
+      <DialogContent className="max-w-lg border-amber-900/30 bg-stone-950 p-0 overflow-hidden sm:max-w-xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="relative bg-gradient-to-r from-amber-900/40 via-rose-900/30 to-amber-900/40 px-6 pt-6 pb-4">
           <DialogHeader>
@@ -477,20 +813,124 @@ export function TryOnDialog({
             </DialogTitle>
             <DialogDescription className="text-amber-200/50">
               {step === 'result'
-                ? "Here's how it looks on you!"
-                : step === 'error'
-                ? 'Something went wrong'
+                ? 'Here\'s how it looks on you!'
+                : step === 'timeout'
+                ? 'AI is busy right now'
                 : <>
-                    Upload your selfie and see how{' '}
-                    <span className="text-amber-300">{productName}</span> looks on you
+                    Upload your selfie and{' '}
+                    <span className="text-amber-300">{getCategoryLabel()}</span>
                   </>
               }
             </DialogDescription>
           </DialogHeader>
+
+          {/* Space status indicator */}
+          {step === 'upload' && (
+            <div className="mt-2 flex items-center gap-1.5 text-xs">
+              {spaceWarming ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
+                  <span className="text-amber-300/60">Warming up AI service...</span>
+                </>
+              ) : spaceReady ? (
+                <>
+                  <Zap className="h-3 w-3 text-green-400" />
+                  <span className="text-green-300/60">AI service ready</span>
+                </>
+              ) : (
+                <>
+                  <div className="h-2 w-2 rounded-full bg-amber-400/50" />
+                  <span className="text-amber-300/40">AI service may need warm-up</span>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="px-6 pb-6">
           <AnimatePresence mode="wait">
+            {/* ── Disclaimer Dialog ── */}
+            {showDisclaimer && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="w-full max-w-md rounded-2xl border border-amber-900/30 bg-stone-950 p-6 shadow-2xl"
+                >
+                  <div className="mb-4 flex items-center gap-2">
+                    <ShieldCheck className="h-5 w-5 text-teal-400" />
+                    <h3 className="text-lg font-bold text-amber-100">Selfie Upload Guidelines</h3>
+                  </div>
+
+                  <div className="mb-5 space-y-3 text-sm">
+                    <div>
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-400/70">Accepted</p>
+                      <ul className="space-y-1.5">
+                        <li className="flex items-start gap-2 text-amber-200/70">
+                          <span className="mt-0.5 text-emerald-500">&#10003;</span>
+                          Only clean, clear, well-lit selfies
+                        </li>
+                        <li className="flex items-start gap-2 text-amber-200/70">
+                          <span className="mt-0.5 text-emerald-500">&#10003;</span>
+                          Face must be clearly visible and facing the camera
+                        </li>
+                        <li className="flex items-start gap-2 text-amber-200/70">
+                          <span className="mt-0.5 text-emerald-500">&#10003;</span>
+                          Only your own selfie is permitted
+                        </li>
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-red-400/70">Not Accepted</p>
+                      <ul className="space-y-1.5">
+                        <li className="flex items-start gap-2 text-amber-200/70">
+                          <span className="mt-0.5 text-red-500">&#10007;</span>
+                          Obscene, explicit, or inappropriate images
+                        </li>
+                        <li className="flex items-start gap-2 text-amber-200/70">
+                          <span className="mt-0.5 text-red-500">&#10007;</span>
+                          Blurry, dark, or heavily filtered photos
+                        </li>
+                        <li className="flex items-start gap-2 text-amber-200/70">
+                          <span className="mt-0.5 text-red-500">&#10007;</span>
+                          Group photos or photos with face coverings
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <label className="mb-5 flex cursor-pointer items-start gap-3 rounded-lg border border-amber-900/20 bg-stone-900/40 p-3 transition-colors hover:border-amber-700/30">
+                    <Checkbox
+                      checked={disclaimerChecked}
+                      onCheckedChange={(checked) => setDisclaimerChecked(checked === true)}
+                      className="mt-0.5 data-[state=checked]:bg-teal-600 data-[state=checked]:border-teal-600"
+                    />
+                    <span className="text-xs leading-relaxed text-amber-200/60">
+                      I confirm this is my own selfie and it meets the above guidelines
+                    </span>
+                  </label>
+
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={handleDisclaimerCancel}
+                      className="flex-1 border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleDisclaimerAccept}
+                      disabled={!disclaimerChecked}
+                      className="flex-1 bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Accept & Upload Photo
+                    </Button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+
             {/* ── Step 1: Upload ── */}
             {step === 'upload' && (
               <motion.div
@@ -503,12 +943,10 @@ export function TryOnDialog({
                 {/* Product Preview */}
                 <div className="flex items-center gap-3 rounded-lg border border-amber-900/20 bg-stone-900/60 p-3">
                   <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md">
-                    <Image
+                    <img
                       src={productImage}
                       alt={productName}
-                      fill
-                      className="object-cover"
-                      sizes="56px"
+                      className="absolute inset-0 h-full w-full object-cover"
                     />
                   </div>
                   <div>
@@ -521,7 +959,7 @@ export function TryOnDialog({
                 <div
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={handleUploadClick}
                   className="group flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-amber-900/30 bg-stone-900/30 px-6 py-10 transition-all hover:border-amber-600/40 hover:bg-stone-900/50"
                 >
                   <div className="mb-4 rounded-full bg-amber-900/20 p-4 transition-colors group-hover:bg-amber-900/30">
@@ -531,7 +969,7 @@ export function TryOnDialog({
                     Upload your selfie
                   </p>
                   <p className="mt-1 text-xs text-amber-200/40">
-                    Drag & drop or click to browse · JPG, PNG, WebP
+                    Drag & drop or click to browse &middot; JPG, PNG, WebP
                   </p>
                 </div>
 
@@ -547,16 +985,10 @@ export function TryOnDialog({
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
                     <span className="font-semibold text-amber-300/60">Tips:</span> Use a clear,
-                    well-lit selfie facing the camera for the best results. Full-body or
+                    well-lit selfie facing the camera. Full-body or
                     upper-body photos work best for clothing items.
                   </p>
                 </div>
-
-                {errorMessage && (
-                  <p className="text-sm text-red-400 flex items-center gap-1">
-                    <AlertCircle className="h-4 w-4" /> {errorMessage}
-                  </p>
-                )}
               </motion.div>
             )}
 
@@ -573,12 +1005,10 @@ export function TryOnDialog({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
                     {selfiePreview && (
-                      <Image
+                      <img
                         src={selfiePreview}
                         alt="Your selfie"
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 640px) 50vw, 240px"
+                        className="absolute inset-0 h-full w-full object-cover"
                       />
                     )}
                     <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
@@ -586,12 +1016,10 @@ export function TryOnDialog({
                     </div>
                   </div>
                   <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
-                    <Image
+                    <img
                       src={productImage}
                       alt={productName}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 640px) 50vw, 240px"
+                      className="absolute inset-0 h-full w-full object-cover"
                     />
                     <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
                       Product
@@ -652,49 +1080,45 @@ export function TryOnDialog({
                 <div className="flex flex-col items-center gap-4">
                   <div className="relative">
                     <div className="h-20 w-20 rounded-full bg-amber-900/20 flex items-center justify-center">
-                      <Shirt className="h-10 w-10 text-amber-400 animate-pulse" />
+                      <Sparkles className="h-10 w-10 text-amber-400 animate-pulse" />
                     </div>
                     <div className="absolute -inset-2 rounded-full border-2 border-amber-400/20 animate-ping" />
                   </div>
 
                   <div className="text-center">
                     <p className="text-lg font-semibold text-amber-100">
-                      Creating Your Look
+                      {isRetrying ? 'Retrying...' : 'Creating Your Look'}
                     </p>
                     <p className="mt-1 text-sm text-amber-200/50">{progressText}</p>
                   </div>
                 </div>
 
-                {/* Simple progress indicator */}
+                {/* Progress bar */}
                 <div className="space-y-2">
-                  <div className="h-2 w-full rounded-full bg-stone-800 overflow-hidden">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-stone-800">
                     <div
-                      className="h-full rounded-full bg-amber-500 transition-all duration-500"
+                      className="h-full bg-amber-500 transition-all duration-500"
                       style={{ width: `${progressPercent}%` }}
                     />
                   </div>
-                  <div className="flex items-center justify-between text-xs text-amber-200/40">
-                    <span>{elapsedSeconds}s elapsed</span>
-                    <span>Usually 15-30 seconds</span>
+                  <div className="flex justify-between text-xs text-amber-200/40">
+                    <span>{progressPercent}% complete</span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {elapsedSeconds}s / 55s max
+                    </span>
                   </div>
                 </div>
 
-                {/* Slow warning */}
-                {isSlowWarning && (
-                  <div className="rounded-lg border border-amber-700/30 bg-amber-900/20 p-3">
-                    <div className="flex items-start gap-2">
-                      <Clock className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-amber-300/80">
-                          Taking longer than usual
-                        </p>
-                        <p className="text-xs text-amber-200/50 mt-0.5">
-                          AI service is busy. You can wait or cancel and try again later.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                {/* Info box */}
+                <div className="rounded-lg bg-amber-900/10 p-3">
+                  <p className="text-xs text-amber-200/50">
+                    <span className="font-semibold text-amber-300/60">How it works:</span>{' '}
+                    Our AI analyzes your photo, understands your body shape,
+                    and realistically drapes the product onto your image.
+                    This usually takes 20-40 seconds.
+                  </p>
+                </div>
 
                 {/* Cancel button */}
                 <Button
@@ -711,7 +1135,7 @@ export function TryOnDialog({
             )}
 
             {/* ── Step 4: Result ── */}
-            {step === 'result' && resultImage && (
+            {step === 'result' && (watermarkedResult || resultImage) && (
               <motion.div
                 key="result"
                 initial={{ opacity: 0, scale: 0.95 }}
@@ -719,18 +1143,15 @@ export function TryOnDialog({
                 exit={{ opacity: 0, scale: 0.95 }}
                 className="space-y-4"
               >
-                {/* Result image */}
+                {/* Result image — show watermarked version */}
                 <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
-                  <Image
-                    src={resultImage}
+                  <img
+                    src={watermarkedResult || resultImage!}
                     alt={`${productName} virtual try-on`}
-                    fill
-                    className="object-cover"
-                    sizes="(max-width: 640px) 100vw, 480px"
+                    className="absolute inset-0 h-full w-full object-contain"
                   />
                   <div className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-amber-300 flex items-center gap-1">
-                    <Sparkles className="h-3 w-3" />
-                    AI Try-On
+                    <Sparkles className="h-3 w-3" /> AI Try-On
                   </div>
                 </div>
 
@@ -753,17 +1174,44 @@ export function TryOnDialog({
                   </Button>
                 </div>
 
+                {/* Share to AI Style Gallery — ALWAYS visible after generation */}
+                <div className="rounded-xl border border-amber-600/30 bg-gradient-to-r from-amber-900/20 via-rose-900/15 to-amber-900/20 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Share2 className="h-4 w-4 text-amber-400" />
+                    <p className="text-sm font-semibold text-amber-200">Share Your Style</p>
+                  </div>
+                  <p className="text-xs text-amber-200/50">
+                    Love this look? Share it to the AI Style Gallery so other shoppers can see how it looks!
+                  </p>
+                  <Button
+                    onClick={() => {
+                      const imageToShare = watermarkedResult || resultImage;
+                      if (imageToShare && onShareToInfluencer) {
+                        onShareToInfluencer(imageToShare);
+                      }
+                    }}
+                    className="w-full bg-amber-600 hover:bg-amber-500 text-stone-950 font-semibold gap-2"
+                    size="sm"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    Share to AI Style Gallery
+                  </Button>
+                  <p className="text-[10px] text-amber-200/30 text-center">
+                    By sharing, you consent to your AI-generated image being visible to other shoppers
+                  </p>
+                </div>
+
                 {/* Disclaimer */}
                 <p className="text-center text-xs text-amber-200/30">
-                  AI-generated preview — actual fit may vary
+                  AI-generated preview with 3BOXES watermark &middot; Actual fit may vary
                 </p>
               </motion.div>
             )}
 
-            {/* ── Step 5: Error ── */}
-            {step === 'error' && (
+            {/* ── Step 5: Timeout / Error ── */}
+            {step === 'timeout' && (
               <motion.div
-                key="error"
+                key="timeout"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
@@ -771,55 +1219,25 @@ export function TryOnDialog({
               >
                 <div className="flex flex-col items-center gap-3 text-center">
                   <div className="h-16 w-16 rounded-full bg-amber-900/20 flex items-center justify-center">
-                    <AlertCircle className="h-8 w-8 text-amber-400" />
+                    <Clock className="h-8 w-8 text-amber-400" />
                   </div>
                   <div>
                     <p className="text-lg font-semibold text-amber-100">
-                      Please Try Again Later
+                      AI is Busy Right Now
                     </p>
                     <p className="mt-1 text-sm text-amber-200/60 max-w-sm">
-                      {errorMessage}
+                      {errorMessage || GENERATE_TIMEOUT_MSG}
                     </p>
                   </div>
                 </div>
 
-                {/* Guidance based on error code */}
-                {(errorCode === 'SERVICE_BUSY' || errorCode === 'ALL_STRATEGIES_FAILED') && (
-                  <div className="rounded-lg bg-amber-900/10 p-3">
-                    <p className="text-xs text-amber-200/50">
-                      <span className="font-semibold text-amber-300/60">What happened:</span>{' '}
-                      The AI service is currently handling too many requests.
-                      This is temporary — please try again in 1-2 minutes.
-                    </p>
-                  </div>
-                )}
-
-                {errorCode === 'SPACE_SLEEPING' && (
-                  <div className="rounded-lg bg-amber-900/10 p-3">
-                    <p className="text-xs text-amber-200/50">
-                      <span className="font-semibold text-amber-300/60">AI Warming Up:</span>{' '}
-                      The AI service is waking up from sleep mode. Please try again in 30-60 seconds.
-                    </p>
-                  </div>
-                )}
-
-                {errorCode === 'TIMEOUT' && (
-                  <div className="rounded-lg bg-amber-900/10 p-3">
-                    <p className="text-xs text-amber-200/50">
-                      <span className="font-semibold text-amber-300/60">Timed Out:</span>{' '}
-                      The AI service took too long to respond. Please try again in a few minutes.
-                    </p>
-                  </div>
-                )}
-
-                {errorCode === 'ZAI_NOT_CONFIGURED' && (
-                  <div className="rounded-lg bg-amber-900/10 p-3">
-                    <p className="text-xs text-amber-200/50">
-                      <span className="font-semibold text-amber-300/60">Configuration Required:</span>{' '}
-                      The AI try-on service needs to be configured with API credentials. If you're the site owner, set ZAI_BASE_URL and ZAI_API_KEY environment variables.
-                    </p>
-                  </div>
-                )}
+                <div className="rounded-lg bg-amber-900/10 p-3">
+                  <p className="text-xs text-amber-200/50">
+                    <span className="font-semibold text-amber-300/60">Tip:</span>{' '}
+                    The AI service may be under heavy load. Trying again usually works.
+                    Best results come during off-peak hours.
+                  </p>
+                </div>
 
                 {/* Action buttons */}
                 <div className="flex gap-3">
@@ -827,15 +1245,16 @@ export function TryOnDialog({
                     onClick={handleRetry}
                     className="flex-1 bg-amber-700 hover:bg-amber-600 text-white"
                   >
-                    <RotateCcw className="mr-2 h-4 w-4" />
+                    <RefreshCw className="mr-2 h-4 w-4" />
                     Try Again
                   </Button>
                   <Button
-                    variant="outline"
                     onClick={reset}
+                    variant="outline"
                     className="flex-1 border-amber-900/30 text-amber-200 hover:bg-amber-900/20"
                   >
-                    Cancel
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    New Photo
                   </Button>
                 </div>
               </motion.div>
