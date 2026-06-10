@@ -1,11 +1,11 @@
 /**
- * AI Virtual Try-On API v10 — Fixed for Vercel
+ * AI Virtual Try-On API v11 — Vercel-Production-Ready
  *
  * Key fixes:
- * 1. Better Vercel-specific error messages (internal-api.z.ai is unreachable)
+ * 1. Better Vercel-specific error messages
  * 2. Proper product image resolution
- * 3. IDM-VTON as primary strategy
- * 4. ZAI Image Edit with correct `image` parameter format
+ * 3. Enhanced ZAI connectivity test endpoint
+ * 4. Detailed debug info for Vercel diagnostics
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     // AI failed — honest error with helpful message + debug info
     console.log(`[virtual-tryon] ❌ Failed in ${elapsed}s: ${result.error}`)
     if (result.debugInfo) {
-      console.log(`[virtual-tryon] Debug: strategies=${result.debugInfo.strategiesAttempted.join(',')}, health=${JSON.stringify(result.debugInfo.healthCheck)}`)
+      console.log(`[virtual-tryon] Debug: strategies=${result.debugInfo.strategiesAttempted.join(',')}`)
       console.log(`[virtual-tryon] Strategy errors: ${JSON.stringify(result.debugInfo.strategyErrors)}`)
     }
 
@@ -134,14 +134,11 @@ export async function POST(request: NextRequest) {
     // Detect if ZAI_BASE_URL points to internal-api.z.ai (unreachable from Vercel)
     const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
 
-    // NOTE: We no longer hard-block internal-api.z.ai — the engine will try anyway
-    // and produce better error messages if it truly can't reach the API
-
     let errorMessage = result.error || 'AI try-on is currently unavailable. Please try again in a few minutes.'
     let hint: string | undefined
 
     if (isVercel && isInternalZAI) {
-      hint = 'ZAI_BASE_URL points to internal-api.z.ai which may not be reachable from Vercel servers. If try-on fails, consider using a public API endpoint.'
+      hint = 'ZAI_BASE_URL points to internal-api.z.ai which may not be reachable from Vercel servers. Use the public API endpoint instead (e.g., https://api.z.ai/api/v1).'
     } else if (isVercel && !zaiConfigured) {
       hint = 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel to enable AI-powered virtual try-on.'
     }
@@ -157,6 +154,7 @@ export async function POST(request: NextRequest) {
         isVercel,
         isInternalZAI,
         hint,
+        zaiBaseUrl: zaiConfig?.baseUrl || 'NOT SET',
         strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
         strategyErrors: result.debugInfo?.strategyErrors || {},
         healthCheck: result.debugInfo?.healthCheck || null,
@@ -188,44 +186,125 @@ export async function GET(request: NextRequest) {
     if (!zaiConfigured || !zaiConfig) {
       return NextResponse.json({
         configured: false,
-        error: 'ZAI_BASE_URL and ZAI_API_KEY must be set',
+        error: 'ZAI_BASE_URL and ZAI_API_KEY must be set in Vercel environment variables',
         isVercel,
+        hint: 'Go to Vercel Dashboard → Settings → Environment Variables and add ZAI_BASE_URL and ZAI_API_KEY',
       })
     }
 
-    // Test 1: Simple chat completion to verify API connectivity
+    // Test 1: Simple models list to verify API connectivity
     try {
-      const ZAI = (await import('z-ai-web-dev-sdk')).default
-      const zai = new ZAI({
-        baseUrl: zaiConfig.baseUrl,
-        apiKey: zaiConfig.apiKey,
-        chatId: zaiConfig.chatId || '',
-        token: zaiConfig.token || '',
-        userId: zaiConfig.userId || '',
-      })
-
       const startTime = Date.now()
-      const completion = await zai.chat.completions.create({
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 1,
-        thinking: { type: 'disabled' },
+      const response = await fetch(`${zaiConfig.baseUrl}/models`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${zaiConfig.apiKey}`,
+          'X-Z-AI-From': 'Z',
+        },
+        signal: AbortSignal.timeout(10_000),
       })
-      const chatMs = Date.now() - startTime
+      const elapsed = Date.now() - startTime
 
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => 'unknown')
+        return NextResponse.json({
+          configured: true,
+          connectivityTest: 'FAIL',
+          status: response.status,
+          error: `API returned status ${response.status}: ${errorBody.substring(0, 300)}`,
+          baseUrl: zaiConfig.baseUrl,
+          apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
+          isVercel,
+          elapsedMs: elapsed,
+        })
+      }
+
+      const result = await response.json().catch(() => null)
       return NextResponse.json({
         configured: true,
-        chatTest: 'PASS',
-        chatMs,
+        connectivityTest: 'PASS',
         baseUrl: zaiConfig.baseUrl,
         apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
         isVercel,
-        responsePreview: JSON.stringify(completion).substring(0, 200),
+        elapsedMs: elapsed,
+        modelsAvailable: Array.isArray(result?.data) ? result.data.length : 'unknown',
       })
     } catch (err) {
       const errMsg = (err as Error).message || String(err)
       return NextResponse.json({
         configured: true,
-        chatTest: 'FAIL',
+        connectivityTest: 'FAIL',
+        error: errMsg.substring(0, 500),
+        baseUrl: zaiConfig.baseUrl,
+        apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
+        isVercel,
+      })
+    }
+  }
+
+  // ── Debug endpoint: test ZAI image generation directly ──
+  if (searchParams.get('action') === 'test-zai-image') {
+    const zaiConfigured = isZAIConfigured()
+    const zaiConfig = getZAIConfig()
+    const isVercel = !!process.env.VERCEL
+
+    if (!zaiConfigured || !zaiConfig) {
+      return NextResponse.json({
+        configured: false,
+        error: 'ZAI_BASE_URL and ZAI_API_KEY must be set',
+        isVercel,
+      })
+    }
+
+    try {
+      const startTime = Date.now()
+      const response = await fetch(`${zaiConfig.baseUrl}/images/generations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${zaiConfig.apiKey}`,
+          'X-Z-AI-From': 'Z',
+        },
+        body: JSON.stringify({
+          model: 'cogview-4-plus',
+          prompt: 'A simple red t-shirt on a white background, product photography',
+          size: '1024x1024',
+        }),
+        signal: AbortSignal.timeout(30_000),
+      })
+      const elapsed = Date.now() - startTime
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => 'unknown')
+        return NextResponse.json({
+          configured: true,
+          imageTest: 'FAIL',
+          status: response.status,
+          error: `API returned status ${response.status}: ${errorBody.substring(0, 500)}`,
+          baseUrl: zaiConfig.baseUrl,
+          apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
+          isVercel,
+          elapsedMs: elapsed,
+        })
+      }
+
+      const result = await response.json()
+      const hasImage = !!result?.data?.[0]?.base64 || !!result?.data?.[0]?.url
+      return NextResponse.json({
+        configured: true,
+        imageTest: hasImage ? 'PASS' : 'PARTIAL',
+        hasImage,
+        baseUrl: zaiConfig.baseUrl,
+        apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
+        isVercel,
+        elapsedMs: elapsed,
+        responsePreview: JSON.stringify(result).substring(0, 300),
+      })
+    } catch (err) {
+      const errMsg = (err as Error).message || String(err)
+      return NextResponse.json({
+        configured: true,
+        imageTest: 'FAIL',
         error: errMsg.substring(0, 500),
         baseUrl: zaiConfig.baseUrl,
         apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
@@ -239,42 +318,38 @@ export async function GET(request: NextRequest) {
     const zaiConfigured = isZAIConfigured()
     const isVercel = !!process.env.VERCEL
     const zaiConfig = getZAIConfig()
-    const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
 
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
       zaiConfigured,
-      zaiReachable: zaiConfigured && !isInternalZAI,
+      zaiBaseUrl: zaiConfig?.baseUrl || 'NOT SET',
       isVercel,
-      message: zaiConfigured && !isInternalZAI
-        ? 'ZAI + IDM-VTON ready'
+      message: zaiConfigured
+        ? 'ZAI ready'
         : awake
           ? 'IDM-VTON ready'
-          : 'Warming up IDM-VTON',
+          : 'Warming up',
     })
   }
+
   const statusResult = await checkIDMVTONSpaceStatus()
   const awake = statusResult.awake
   const zaiConfigured = isZAIConfigured()
   const isVercel = !!process.env.VERCEL
   const zaiConfig = getZAIConfig()
-  const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
-  const zaiReachable = zaiConfigured && !isInternalZAI
 
   return NextResponse.json({
     available: true,
     spaceAwake: awake,
     zaiConfigured,
-    zaiReachable,
+    zaiBaseUrl: zaiConfig?.baseUrl || 'NOT SET',
     isVercel,
-    mode: zaiReachable ? 'zai-vlm-edit + idm-vton' : awake ? 'idm-vton' : 'unavailable',
-    message: zaiReachable
-      ? 'ZAI VLM+Edit + IDM-VTON available'
+    mode: zaiConfigured ? 'zai-edit + idm-vton' : awake ? 'idm-vton' : 'unavailable',
+    message: zaiConfigured
+      ? 'ZAI Image Edit + IDM-VTON available'
       : awake
         ? 'IDM-VTON ready — best quality'
-        : isVercel
-          ? 'AI service not configured for Vercel. IDM-VTON is sleeping — try again in 30s.'
-          : 'AI service not configured',
+        : 'AI service not configured',
   })
 }

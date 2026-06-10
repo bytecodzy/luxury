@@ -2,7 +2,6 @@
  * AI Virtual Try-On API (backward-compatible route)
  *
  * Delegates to the same performVirtualTryOn engine as /api/virtual-tryon
- * Strategy: IDM-VTON → ZAI VLM+Edit → ZAI Text-to-Image
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -115,9 +114,6 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[try-on] ❌ Failed in ${elapsed}s: ${result.error}`)
-    if (result.debugInfo) {
-      console.log(`[try-on] Debug: strategies=${result.debugInfo.strategiesAttempted.join(',')}, health=${JSON.stringify(result.debugInfo.healthCheck)}`)
-    }
 
     const zaiConfigured = isZAIConfigured()
     const isVercel = !!process.env.VERCEL
@@ -126,7 +122,7 @@ export async function POST(request: NextRequest) {
 
     let hint: string | undefined
     if (isVercel && isInternalZAI) {
-      hint = 'ZAI_BASE_URL points to internal-api.z.ai which may not be reachable from Vercel. If try-on fails, consider using a public API endpoint.'
+      hint = 'ZAI_BASE_URL points to internal-api.z.ai which may not be reachable from Vercel. Use the public API endpoint instead.'
     } else if (isVercel && !zaiConfigured) {
       hint = 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel.'
     }
@@ -142,6 +138,7 @@ export async function POST(request: NextRequest) {
         isVercel,
         isInternalZAI,
         hint,
+        zaiBaseUrl: zaiConfig?.baseUrl || 'NOT SET',
         strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
         strategyErrors: result.debugInfo?.strategyErrors || {},
         healthCheck: result.debugInfo?.healthCheck || null,
@@ -180,7 +177,7 @@ export async function GET(request: NextRequest) {
     available: true,
     spaceAwake: awake,
     zaiConfigured,
-    mode: zaiConfigured ? 'zai-vlm-edit' : awake ? 'idm-vton' : 'unavailable',
-    message: zaiConfigured ? 'ZAI VLM+Edit ready' : awake ? 'IDM-VTON ready' : 'AI service not configured',
+    mode: zaiConfigured ? 'zai-edit' : awake ? 'idm-vton' : 'unavailable',
+    message: zaiConfigured ? 'ZAI Edit ready' : awake ? 'IDM-VTON ready' : 'AI service not configured',
   })
 }
