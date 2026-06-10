@@ -60,3 +60,36 @@ Stage Summary:
 - Created missing /api/image-proxy route
 - Updated vercel.json with increased memory and new route config
 - All changes compile and API endpoints verified working
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix virtual try-on on Vercel - Vercel-optimized strategy path
+
+Work Log:
+- Read all relevant files: virtual-tryon.ts, zai.ts, huggingface-tryon.ts, route.ts, try-on-dialog.tsx, vercel.json, next.config.ts
+- Investigated ZAI SDK source code to understand images.generations.edit and images.generations.create methods
+- Identified multiple remaining issues causing virtual try-on failure on Vercel:
+  1. VLM analysis wastes 15-30s on Vercel's 50s budget — leaves only 10-20s for actual try-on
+  2. Strategy 1b (ZAI Product Edit) had `!health.spaceAwake` condition — only ran if Space was sleeping, skipping the best ZAI strategy when Space appeared "awake" but IDM-VTON failed
+  3. IDM-VTON ran first on Vercel, wasting 30-40s before ZAI got a chance
+  4. Health check wasted 5-10s on Vercel with unreliable results
+  5. processZAIImageResponse had no error logging — silent failures
+- Implemented comprehensive Vercel-optimized strategy path:
+  - On Vercel: SKIP health check entirely (saves 5-10s)
+  - On Vercel: SKIP VLM analysis entirely (saves 15-30s) — use category-specific fallback prompts
+  - On Vercel: ZAI strategies FIRST (Selfie Edit → Product Edit → Text-to-Image → IDM-VTON)
+  - On Vercel: IDM-VTON only as last resort if time remains
+  - Non-Vercel path preserved: IDM-VTON first if Space awake, then ZAI strategies
+- Fixed Strategy 1b in non-Vercel path: removed `!health.spaceAwake` condition
+- Added detailed error logging in processZAIImageResponse
+- Added Vercel diagnostic logging at start of try-on (baseUrl, apiKey prefix)
+- Added `/api/virtual-tryon?action=test-zai` debug endpoint for testing ZAI connectivity on Vercel
+- Verified: dev server running, API endpoints responding, test-zai endpoint working
+
+Stage Summary:
+- MAJOR FIX: On Vercel, ZAI strategies now get the FULL 50s budget instead of 10-20s
+- On Vercel, strategy order is: ZAI Selfie Edit → ZAI Product Edit → ZAI Generate → IDM-VTON
+- Health check and VLM analysis skipped on Vercel (saves 20-40s)
+- Added test-zai endpoint for Vercel debugging: /api/virtual-tryon?action=test-zai
+- Added comprehensive error logging throughout the try-on pipeline

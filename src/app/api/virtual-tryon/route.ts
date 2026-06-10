@@ -178,6 +178,62 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
+
+  // ── Debug endpoint: test ZAI connectivity directly ──
+  if (searchParams.get('action') === 'test-zai') {
+    const zaiConfigured = isZAIConfigured()
+    const zaiConfig = getZAIConfig()
+    const isVercel = !!process.env.VERCEL
+
+    if (!zaiConfigured || !zaiConfig) {
+      return NextResponse.json({
+        configured: false,
+        error: 'ZAI_BASE_URL and ZAI_API_KEY must be set',
+        isVercel,
+      })
+    }
+
+    // Test 1: Simple chat completion to verify API connectivity
+    try {
+      const ZAI = (await import('z-ai-web-dev-sdk')).default
+      const zai = new ZAI({
+        baseUrl: zaiConfig.baseUrl,
+        apiKey: zaiConfig.apiKey,
+        chatId: zaiConfig.chatId || '',
+        token: zaiConfig.token || '',
+        userId: zaiConfig.userId || '',
+      })
+
+      const startTime = Date.now()
+      const completion = await zai.chat.completions.create({
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        thinking: { type: 'disabled' },
+      })
+      const chatMs = Date.now() - startTime
+
+      return NextResponse.json({
+        configured: true,
+        chatTest: 'PASS',
+        chatMs,
+        baseUrl: zaiConfig.baseUrl,
+        apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
+        isVercel,
+        responsePreview: JSON.stringify(completion).substring(0, 200),
+      })
+    } catch (err) {
+      const errMsg = (err as Error).message || String(err)
+      return NextResponse.json({
+        configured: true,
+        chatTest: 'FAIL',
+        error: errMsg.substring(0, 500),
+        baseUrl: zaiConfig.baseUrl,
+        apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
+        isVercel,
+      })
+    }
+  }
+
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
     const zaiConfigured = isZAIConfigured()
