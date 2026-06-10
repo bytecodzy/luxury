@@ -192,20 +192,27 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    // Test 1: Simple models list to verify API connectivity
+    // Test 1: Lightweight chat/completions call to verify API connectivity
     try {
       const startTime = Date.now()
-      const response = await fetch(`${zaiConfig.baseUrl}/models`, {
-        method: 'GET',
+      const response = await fetch(`${zaiConfig.baseUrl}/chat/completions`, {
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${zaiConfig.apiKey}`,
           'X-Z-AI-From': 'Z',
         },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 1,
+          thinking: { type: 'disabled' },
+        }),
         signal: AbortSignal.timeout(10_000),
       })
       const elapsed = Date.now() - startTime
 
-      if (!response.ok) {
+      // Any non-5xx response means the API is reachable
+      if (response.status >= 500) {
         const errorBody = await response.text().catch(() => 'unknown')
         return NextResponse.json({
           configured: true,
@@ -219,15 +226,14 @@ export async function GET(request: NextRequest) {
         })
       }
 
-      const result = await response.json().catch(() => null)
       return NextResponse.json({
         configured: true,
         connectivityTest: 'PASS',
+        status: response.status,
         baseUrl: zaiConfig.baseUrl,
         apiKeyPrefix: zaiConfig.apiKey.substring(0, 8) + '...',
         isVercel,
         elapsedMs: elapsed,
-        modelsAvailable: Array.isArray(result?.data) ? result.data.length : 'unknown',
       })
     } catch (err) {
       const errMsg = (err as Error).message || String(err)

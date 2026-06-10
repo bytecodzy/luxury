@@ -268,15 +268,26 @@ function buildZAIHeaders(config: { apiKey: string; chatId?: string; userId?: str
 
 /**
  * Quick connectivity check: does the ZAI API respond at all?
- * Uses a lightweight models endpoint call.
+ * Uses a lightweight chat/completions call (same as z-ai-web-dev-sdk).
  */
 async function isZAIReachable(config: { baseUrl: string; apiKey: string }, timeoutMs = HEALTH_CHECK_TIMEOUT_MS): Promise<{ reachable: boolean; status?: number; error?: string }> {
   try {
-    const response = await fetch(`${config.baseUrl}/models`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${config.apiKey}` },
+    // Use /chat/completions (same as z-ai-web-dev-sdk) — /models doesn't exist on ZAI API
+    const response = await fetch(`${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+        'X-Z-AI-From': 'Z',
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        thinking: { type: 'disabled' },
+      }),
       signal: AbortSignal.timeout(timeoutMs),
     })
+    // Any non-5xx response means the API is reachable (even 4xx like 400/bad request)
     return { reachable: response.status < 500, status: response.status }
   } catch (err) {
     const errMsg = (err as Error).message || String(err)
@@ -532,7 +543,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     if (!check.reachable && check.status) {
       // Got a response but it's an error status — API is reachable but something's wrong
       console.log(`[virtual-tryon] ZAI responded with status ${check.status} — attempting strategies anyway`)
-      zaiReachable = true // Still try — the edit endpoint might work even if /models doesn't
+      zaiReachable = true // Still try — the edit endpoint might work even if chat/completions doesn't
     }
   }
 
