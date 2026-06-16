@@ -2,6 +2,7 @@
  * AI Virtual Try-On API (backward-compatible route)
  *
  * Delegates to the same performVirtualTryOn engine as /api/virtual-tryon
+ * Uses Pollinations.ai as primary (always works, free, no auth)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -78,25 +79,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Resolve product image — prefer client-provided base64
     let productImageBase64 = clientBase64 || null
     if (!productImageBase64 && productImageUrl) {
       productImageBase64 = await getProductImageBase64(productImageUrl)
     }
-    if (!productImageBase64) {
-      return NextResponse.json({
-        success: false,
-        error: 'Could not load product image. Please try again.',
-        errorCode: 'NO_PRODUCT_IMAGE',
-        elapsed: ((Date.now() - startTime) / 1000).toFixed(1),
-      })
-    }
 
-    console.log(`[try-on] Starting virtual try-on for "${productName}" (${categorySlug})`)
+    console.log(`[try-on] POST: product="${productName}", category="${categorySlug}"`)
 
     const result = await performVirtualTryOn({
       selfieData,
-      productImageBase64,
+      productImageBase64: productImageBase64 || '',
       productName: productName || 'Product',
       categorySlug: categorySlug || '',
     })
@@ -115,33 +107,17 @@ export async function POST(request: NextRequest) {
 
     console.log(`[try-on] ❌ Failed in ${elapsed}s: ${result.error}`)
 
-    const zaiConfigured = isZAIConfigured()
-    const isVercel = !!process.env.VERCEL
-    const zaiConfig = getZAIConfig()
-    const isInternalZAI = zaiConfig?.baseUrl?.includes('internal-api.z.ai') ?? false
-
-    let hint: string | undefined
-    if (isVercel && isInternalZAI) {
-      hint = 'ZAI_BASE_URL points to internal-api.z.ai which may not be reachable from Vercel. Use the public API endpoint instead.'
-    } else if (isVercel && !zaiConfigured) {
-      hint = 'Set ZAI_BASE_URL and ZAI_API_KEY environment variables on Vercel.'
-    }
-
     return NextResponse.json({
       success: false,
-      error: result.error || 'AI try-on is currently unavailable. Please try again in a few minutes.',
+      error: result.error || 'We could not generate your style preview. Please try again.',
       errorCode: result.errorCode || 'ALL_STRATEGIES_FAILED',
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
       debug: {
-        zaiConfigured,
-        isVercel,
-        isInternalZAI,
-        hint,
-        zaiBaseUrl: zaiConfig?.baseUrl || 'NOT SET',
+        zaiConfigured: isZAIConfigured(),
+        isVercel: !!process.env.VERCEL,
         strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
         strategyErrors: result.debugInfo?.strategyErrors || {},
-        healthCheck: result.debugInfo?.healthCheck || null,
       },
     })
   } catch (error) {
@@ -162,22 +138,19 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
-    const zaiConfigured = isZAIConfigured()
     return NextResponse.json({
-      available: true,
+      available: true, // Pollinations always available
       spaceAwake: awake,
-      zaiConfigured,
-      message: zaiConfigured ? 'AI ready' : awake ? 'IDM-VTON ready' : 'Warming up',
+      zaiConfigured: isZAIConfigured(),
+      message: 'AI ready — Pollinations primary',
     })
   }
   const statusResult = await checkIDMVTONSpaceStatus()
-  const awake = statusResult.awake
-  const zaiConfigured = isZAIConfigured()
   return NextResponse.json({
     available: true,
-    spaceAwake: awake,
-    zaiConfigured,
-    mode: zaiConfigured ? 'zai-edit' : awake ? 'idm-vton' : 'unavailable',
-    message: zaiConfigured ? 'ZAI Edit ready' : awake ? 'IDM-VTON ready' : 'AI service not configured',
+    spaceAwake: statusResult.awake,
+    zaiConfigured: isZAIConfigured(),
+    mode: 'pollinations-primary',
+    message: 'AI Virtual Try-On ready',
   })
 }

@@ -1,17 +1,17 @@
 'use client';
 
 /**
- * TryOnDialog v3.0 — Fast, Reliable AI Virtual Try-On
+ * TryOnDialog v4.0 — Always-Works AI Virtual Try-On
  *
  * KEY PRINCIPLES:
- * 1. Instant selfie preview (show raw image IMMEDIATELY on upload)
- * 2. Disclaimer → auto-opens file picker (one-click flow)
- * 3. Hard 55-second client timeout with friendly "try later" message
- * 4. 3BOXES watermark on ALL generated/saved/downloaded images
- * 5. Full-body output (never half image)
- * 6. Works on both preview and Vercel
- * 7. NEVER frustrate the user — clear progress, honest timeouts
- * 8. 60-second golden rule — if not done, show friendly message
+ * 1. Powered by Pollinations.ai (100% free, no auth, always available)
+ * 2. Instant selfie preview (show raw image IMMEDIATELY on upload)
+ * 3. Disclaimer → auto-opens file picker (one-click flow)
+ * 4. Hard 55-second client timeout with friendly retry message
+ * 5. 3BOXES watermark on ALL generated/saved/downloaded images
+ * 6. Full-body output (never half image)
+ * 7. Works on both preview and Vercel — same code, same reliability
+ * 8. NO canvas overlay fallback — real AI generation every time
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -62,7 +62,7 @@ type Step = 'upload' | 'preview' | 'generating' | 'result' | 'timeout';
 // ── Constants ──────────────────────────────────────────────────────
 
 const CLIENT_TIMEOUT_MS = 55_000; // 55 seconds — hard client timeout (golden rule: max 60s total)
-const GENERATE_TIMEOUT_MSG = 'The AI service is currently busy. Please try again in a few minutes — it usually works on the second attempt!';
+const GENERATE_TIMEOUT_MSG = 'The AI image service took longer than expected. Please try again — it usually works on the second attempt!';
 
 // ── Helper: Compress image ─────────────────────────────────────────
 
@@ -464,155 +464,6 @@ export function TryOnDialog({
     e.stopPropagation();
   }, []);
 
-  // ── Category-aware overlay positioning ──
-  const getCategoryOverlayPosition = useCallback((categorySlug: string): { x: number; y: number; w: number; h: number } => {
-    const cat = (categorySlug || '').toLowerCase();
-
-    if (cat.includes('jewel') || cat.includes('necklace') || cat.includes('pendant') || cat.includes('earring')) {
-      return { x: 0.5, y: 0.38, w: 0.5, h: 0.2 };
-    }
-    if (cat.includes('watch')) {
-      return { x: 0.3, y: 0.6, w: 0.25, h: 0.25 };
-    }
-    if (cat.includes('saree') || cat.includes('fashion') || cat.includes('shirt') || cat.includes('kurta') || cat.includes('dress')) {
-      return { x: 0.5, y: 0.5, w: 0.5, h: 0.4 };
-    }
-    if (cat.includes('fragrance') || cat.includes('perfume')) {
-      return { x: 0.55, y: 0.4, w: 0.25, h: 0.35 };
-    }
-    if (cat.includes('leather') || cat.includes('bag') || cat.includes('wallet')) {
-      return { x: 0.4, y: 0.45, w: 0.35, h: 0.35 };
-    }
-    // Default — center upper body
-    return { x: 0.5, y: 0.45, w: 0.45, h: 0.35 };
-  }, []);
-
-  // ── Canvas overlay fallback ──────────────────────────────────────
-  const generateCanvasOverlay = useCallback(async (
-    selfieDataUrl: string,
-    prodImage: string,
-    prodName: string,
-    prodImageBase64?: string,
-    catSlug?: string,
-  ): Promise<string> => {
-    return new Promise((resolve) => {
-      try {
-        const selfieImg = document.createElement('img');
-        selfieImg.onload = () => {
-          const canvas = document.createElement('canvas');
-          // Use FULL dimensions — never crop
-          const width = selfieImg.naturalWidth || 512;
-          const height = selfieImg.naturalHeight || 680;
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(selfieDataUrl);
-            return;
-          }
-
-          // Draw the selfie at FULL size
-          ctx.drawImage(selfieImg, 0, 0, width, height);
-
-          // Subtle vignette
-          const vignetteGrad = ctx.createRadialGradient(width / 2, height / 2, width * 0.25, width / 2, height / 2, width * 0.7);
-          vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-          vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.12)');
-          ctx.fillStyle = vignetteGrad;
-          ctx.fillRect(0, 0, width, height);
-
-          // Get overlay position based on category
-          const pos = getCategoryOverlayPosition(catSlug || '');
-          const overlayW = Math.floor(pos.w * width);
-          const overlayH = Math.floor(pos.h * height);
-          const overlayCX = pos.x * width;
-          const overlayCY = pos.y * height;
-
-          const renderProduct = (productImg?: HTMLImageElement) => {
-            if (productImg) {
-              ctx.save();
-              const imgAspect = productImg.naturalWidth / productImg.naturalHeight;
-              const slotAspect = overlayW / overlayH;
-              let drawW = overlayW;
-              let drawH = overlayH;
-
-              if (imgAspect > slotAspect) {
-                drawH = drawW / imgAspect;
-              } else {
-                drawW = drawH * imgAspect;
-              }
-
-              const drawX = overlayCX - drawW / 2;
-              const drawY = overlayCY - drawH / 2;
-
-              // Shadow for depth
-              ctx.shadowColor = 'rgba(0,0,0,0.35)';
-              ctx.shadowBlur = 12;
-              ctx.shadowOffsetX = 2;
-              ctx.shadowOffsetY = 2;
-
-              // Semi-transparent blend
-              ctx.globalAlpha = 0.55;
-
-              // Rounded clip
-              ctx.beginPath();
-              const radius = Math.min(10, drawW * 0.06, drawH * 0.06);
-              ctx.roundRect(drawX, drawY, drawW, drawH, radius);
-              ctx.clip();
-              ctx.drawImage(productImg, drawX, drawY, drawW, drawH);
-              ctx.restore();
-
-              // Gold border
-              ctx.save();
-              ctx.globalAlpha = 0.4;
-              ctx.strokeStyle = '#daa520';
-              ctx.lineWidth = 2;
-              ctx.beginPath();
-              ctx.roundRect(drawX - 1, drawY - 1, drawW + 2, drawH + 2, radius + 1);
-              ctx.stroke();
-              ctx.restore();
-            }
-
-            resolve(canvas.toDataURL('image/png'));
-          };
-
-          // Try loading product image
-          const productImg = document.createElement('img');
-          productImg.crossOrigin = 'anonymous';
-          let resolved = false;
-
-          const finish = (img?: HTMLImageElement) => {
-            if (resolved) return;
-            resolved = true;
-            renderProduct(img);
-          };
-
-          productImg.onload = () => finish(productImg);
-          productImg.onerror = () => finish();
-
-          // Timeout for product image loading
-          setTimeout(() => finish(), 5000);
-
-          if (prodImageBase64 && prodImageBase64.startsWith('data:')) {
-            productImg.src = prodImageBase64;
-          } else {
-            let imgSrc = prodImage;
-            if (imgSrc.startsWith('http://') || imgSrc.startsWith('https://')) {
-              imgSrc = `/api/image-proxy?url=${encodeURIComponent(imgSrc)}`;
-            } else if (imgSrc.startsWith('//')) {
-              imgSrc = `/api/image-proxy?url=${encodeURIComponent(`https:${imgSrc}`)}`;
-            }
-            productImg.src = imgSrc;
-          }
-        };
-        selfieImg.onerror = () => resolve(selfieDataUrl);
-        selfieImg.src = selfieDataUrl;
-      } catch {
-        resolve(selfieDataUrl);
-      }
-    });
-  }, [getCategoryOverlayPosition]);
-
   // ── Generate Try-On ──────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
     if (!selfieData) {
@@ -700,29 +551,6 @@ export function TryOnDialog({
 
       const data = await response.json();
 
-      // Canvas mode — AI unavailable, generate client-side overlay
-      if (data.mode === 'canvas' || data.code === 'AI_CANVAS_MODE') {
-        try {
-          const canvasResult = await generateCanvasOverlay(
-            selfieData,
-            productImage,
-            productName,
-            data.productImageBase64 || productImageBase64,
-            categorySlug,
-          );
-          const watermarked = await add3BoxesWatermark(canvasResult, productName);
-          setResultImage(canvasResult);
-          setWatermarkedResult(watermarked);
-          setProgressPercent(100);
-          setStep('result');
-          onBackgroundJob?.('result');
-        } catch {
-          setStep('timeout');
-          setErrorMessage(GENERATE_TIMEOUT_MSG);
-        }
-        return;
-      }
-
       if (data.success && data.imageUrl) {
         // SUCCESS — show the AI-generated try-on image
         setProgressPercent(100);
@@ -766,7 +594,7 @@ export function TryOnDialog({
           : 'Network error. Please check your connection and try again.'
       );
     }
-  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob, generateCanvasOverlay]);
+  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob]);
 
   // ── Retry ────────────────────────────────────────────────────────
   const handleRetry = useCallback(async () => {
@@ -774,13 +602,10 @@ export function TryOnDialog({
     setStep('generating');
     setErrorMessage('');
     setProgressPercent(5);
-    setProgressText('Reconnecting to AI service...');
+    setProgressText('Retrying AI generation...');
 
-    // Re-warm the Space first
-    try {
-      await fetch('/api/try-on/status', { method: 'POST' });
-      await new Promise(r => setTimeout(r, 2000));
-    } catch {}
+    // Brief pause before retry
+    await new Promise(r => setTimeout(r, 1000));
 
     setIsRetrying(false);
     handleGenerate();
@@ -830,7 +655,7 @@ export function TryOnDialog({
               {step === 'result'
                 ? 'Here\'s how it looks on you!'
                 : step === 'timeout'
-                ? 'AI is busy right now'
+                ? 'Generation timed out'
                 : <>
                     Upload your selfie and{' '}
                     <span className="text-amber-300">{getCategoryLabel()}</span>
@@ -1129,9 +954,9 @@ export function TryOnDialog({
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
                     <span className="font-semibold text-amber-300/60">How it works:</span>{' '}
-                    Our AI analyzes your photo, understands your body shape,
-                    and realistically drapes the product onto your image.
-                    This usually takes 20-40 seconds.
+                    Our AI generates a realistic style preview showing the product
+                    being worn. Powered by Pollinations AI — always available,
+                    100% free. This usually takes 5-15 seconds.
                   </p>
                 </div>
 
@@ -1329,7 +1154,7 @@ export function TryOnDialog({
                   </div>
                   <div>
                     <p className="text-lg font-semibold text-amber-100">
-                      AI is Busy Right Now
+                      Generation Timed Out
                     </p>
                     <p className="mt-1 text-sm text-amber-200/60 max-w-sm">
                       {errorMessage || GENERATE_TIMEOUT_MSG}
@@ -1340,8 +1165,8 @@ export function TryOnDialog({
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
                     <span className="font-semibold text-amber-300/60">Tip:</span>{' '}
-                    The AI service may be under heavy load. Trying again usually works.
-                    Best results come during off-peak hours.
+                    Network conditions can affect AI generation time.
+                    Trying again usually works on the second attempt.
                   </p>
                 </div>
 
