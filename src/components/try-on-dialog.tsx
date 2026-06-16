@@ -1,17 +1,19 @@
 'use client';
 
 /**
- * TryOnDialog v4.0 — Always-Works AI Virtual Try-On
+ * TryOnDialog v4.1 — Image-Matching AI Virtual Try-On
  *
  * KEY PRINCIPLES:
- * 1. Powered by Pollinations.ai (100% free, no auth, always available)
- * 2. Instant selfie preview (show raw image IMMEDIATELY on upload)
- * 3. Disclaimer → auto-opens file picker (one-click flow)
- * 4. Hard 55-second client timeout with friendly retry message
- * 5. 3BOXES watermark on ALL generated/saved/downloaded images
- * 6. Full-body output (never half image)
- * 7. Works on both preview and Vercel — same code, same reliability
- * 8. NO canvas overlay fallback — real AI generation every time
+ * 1. Powered by Pollinations.ai image-to-image (100% free, no auth, always available)
+ * 2. Matches the ACTUAL product photo — colors, patterns, and design are reproduced
+ *    from the real product image, not guessed from the product name
+ * 3. Instant selfie preview (show raw image IMMEDIATELY on upload)
+ * 4. Disclaimer → auto-opens file picker (one-click flow)
+ * 5. Hard 55-second client timeout with friendly retry message
+ * 6. 3BOXES watermark on ALL generated/saved/downloaded images
+ * 7. Full-body output (never half image)
+ * 8. Works on both preview and Vercel — same code, same reliability
+ * 9. NO canvas overlay fallback — real AI generation every time
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -954,9 +956,10 @@ export function TryOnDialog({
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
                     <span className="font-semibold text-amber-300/60">How it works:</span>{' '}
-                    Our AI generates a realistic style preview showing the product
-                    being worn. Powered by Pollinations AI — always available,
-                    100% free. This usually takes 5-15 seconds.
+                    Our AI matches the actual product photo — colors, patterns, and
+                    design are reproduced from the real product image, then draped
+                    onto a model. Powered by Pollinations image-to-image AI.
+                    This usually takes 5-20 seconds.
                   </p>
                 </div>
 

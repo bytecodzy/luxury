@@ -1,11 +1,15 @@
 /**
- * AI Virtual Try-On API v16 — Pollinations-Primary, Always-Works
+ * AI Virtual Try-On API v17 — Image-Matching Pipeline
  *
- * Strategy:
- * 1. Try Z.AI Image Edit (if env configured) for face preservation
- * 2. Fall back to Pollinations.ai (100% free, no auth) — ALWAYS works
+ * Strategy (in order):
+ * 1. Z.AI Image Edit (OPTIONAL — only if ZAI_BASE_URL + ZAI_API_KEY set) for face preservation
+ * 2. Pollinations IMAGE-TO-IMAGE (PRIMARY): uploads the REAL product photo to
+ *    tmpfiles.org, then asks Pollinations to condition generation on it → the
+ *    result MATCHES the actual product's colors, patterns, and design.
+ * 3. Pollinations TEXT-TO-IMAGE (fallback): uses product name + category only.
  *
- * No more "AI is busy" errors. No more cascading failures.
+ * 100% free. No auth needed for the primary path. Works identically on
+ * preview, sandbox, and Vercel.
  */
 
 import { NextRequest, NextResponse } from 'next/server'

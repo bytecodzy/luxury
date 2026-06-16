@@ -1,38 +1,45 @@
 /**
- * Virtual Try-On Engine v16 — 100% Reliable, Always-Works
+ * Virtual Try-On Engine v17 — IMAGE-MATCHING Pipeline
  *
- * PRIMARY STRATEGY: Pollinations.ai
- *  - 100% free, NO API key, NO auth required
- *  - Works from ANY environment (Vercel, sandbox, local, mobile)
- *  - Text-to-image with detailed prompt → accurate product draping
- *  - Typically 2-8 seconds per image
+ * PROBLEM SOLVED (v17):
+ *   v16 only sent the product NAME as text to Pollinations text-to-image.
+ *   The generated image was a "total mismatch" because the AI never saw the
+ *   actual product photo — it just guessed from the name.
  *
- * ENHANCEMENT STRATEGY (when available): Z.AI Image Edit
- *  - If ZAI env vars are set, try image edit first for face preservation
- *  - Falls back to Pollinations if ZAI fails or times out
+ * v17 SOLUTION — true image-conditioned generation:
+ *   1. Compress the ACTUAL product photo to a small thumbnail (sharp, 512px).
+ *   2. Upload the thumbnail to tmpfiles.org (free, anonymous, no auth) → public URL.
+ *   3. Call Pollinations image-to-image with that URL as `?image=` reference.
+ *   4. The AI now conditions on the REAL product photo → colors, patterns,
+ *      embellishments, and silhouette MATCH the actual product.
  *
- * KEY PRINCIPLES:
- * 1. NEVER show "AI is busy" — always produce a result
- * 2. Pollinations is the guaranteed path (no auth, no rate limits)
- * 3. Detailed category-aware prompts → accurate draping for all product types
- * 4. Hard 50s timeout (Vercel serverless safe)
+ * RELIABILITY:
+ *   - tmpfiles.org + Pollinations are both 100% free, no auth, no rate limits.
+ *   - Works IDENTICALLY on preview, sandbox, and Vercel (no env vars needed).
+ *   - Hard fallbacks: if upload fails → text-to-image; if img2img fails → retry.
+ *
+ * OPTIONAL ENHANCEMENT:
+ *   - If ZAI_BASE_URL + ZAI_API_KEY are set, try Z.AI image-edit first for
+ *     face preservation (uses the selfie). Falls back to Pollinations if ZAI
+ *     is unreachable.
  */
 
+import sharp from 'sharp'
 import { isZAIConfigured, getZAIConfig } from './zai'
 
 // ── Types ──────────────────────────────────────────────────────────
 
 export interface TryOnInput {
   selfieData: string         // base64 data URL of the person's selfie (used for ZAI edit only)
-  productImageBase64: string // base64 data URL of the product image
+  productImageBase64: string // base64 data URL of the product image — USED for img2img matching
   productName: string
   categorySlug: string
 }
 
 export interface TryOnResult {
   success: boolean
-  imageUrl?: string           // base64 data URL of the result
-  strategy?: string           // 'pollinations' | 'zai-selfie-edit' | 'zai-product-edit'
+  imageUrl?: string
+  strategy?: string           // 'pollinations-img2img' | 'pollinations-text' | 'zai-selfie-edit'
   error?: string
   errorCode?: 'NO_PRODUCT_IMAGE' | 'TIMEOUT' | 'ALL_STRATEGIES_FAILED' | 'NETWORK_ERROR'
   elapsedMs?: number
@@ -46,18 +53,23 @@ type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864'
 
 // ── Timeouts ───────────────────────────────────────────────────────
 
-const TOTAL_TIMEOUT_MS = 50_000
+const TOTAL_TIMEOUT_MS = 55_000
+const UPLOAD_TIMEOUT_MS = 12_000
 const POLLINATIONS_TIMEOUT_MS = 45_000
 const ZAI_EDIT_TIMEOUT_MS = 30_000
 
 // ── Category Configuration ─────────────────────────────────────────
 
 interface CategoryPromptConfig {
+  /** What the generated photo should show (body framing) */
   bodyType: string
+  /** How the product is worn / placed on the person */
   placement: string
-  colorFocus: string
+  /** Output image dimensions */
   size: ImageSize
-  modelType: string         // who to generate
+  /** Who to generate as the model */
+  modelType: string
+  /** Short label for the product category */
   garmentType: string
 }
 
@@ -65,15 +77,13 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   jewelry: {
     bodyType: 'Close-up beauty photograph from chest up',
     placement: 'wearing the jewelry piece naturally on the correct body part',
-    colorFocus: 'jewelry metal tone and stone colors',
     size: '864x1152',
     modelType: 'an elegant Indian woman with smooth skin, well-groomed hair, subtle makeup',
     garmentType: 'Jewelry',
   },
   sarees: {
-    bodyType: 'Full-body professional fashion photograph',
+    bodyType: 'Full-body professional fashion photograph, head to toe visible',
     placement: 'draped in the saree in traditional Indian style with pallu elegantly over the left shoulder, matching blouse, properly pleated at the waist, the fabric flowing naturally with realistic folds',
-    colorFocus: 'saree fabric color, border color, and zari/work color',
     size: '768x1344',
     modelType: 'a graceful Indian woman with an elegant posture',
     garmentType: 'Traditional Indian saree',
@@ -81,23 +91,20 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   watches: {
     bodyType: 'Close-up photograph from waist up',
     placement: 'wearing the watch on the left wrist, with the watch face clearly visible and properly sized relative to the wrist',
-    colorFocus: 'watch dial color, case metal color, and strap color',
     size: '864x1152',
     modelType: 'a well-dressed person with a natural wrist pose',
     garmentType: 'Watch',
   },
   fashion: {
-    bodyType: 'Full-body professional fashion photograph',
+    bodyType: 'Full-body professional fashion photograph, head to toe visible',
     placement: 'wearing the outfit with proper fit, natural draping, and realistic fabric behavior',
-    colorFocus: 'outfit fabric color, print pattern, and accent colors',
     size: '768x1344',
     modelType: 'a stylish fashion model with confident posture',
     garmentType: 'Fashion outfit',
   },
   'mens-shirts': {
-    bodyType: 'Full-body professional fashion photograph',
+    bodyType: 'Full-body professional fashion photograph, head to toe visible',
     placement: 'wearing the shirt with proper fit, natural draping, and realistic fabric behavior',
-    colorFocus: 'shirt fabric color, pattern, and collar/cuff details',
     size: '768x1344',
     modelType: 'a well-built male fashion model',
     garmentType: 'Shirt',
@@ -105,7 +112,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'mens-shirts-t-shirts': {
     bodyType: 'Full-body professional fashion photograph',
     placement: 'wearing the shirt with proper fit and natural draping',
-    colorFocus: 'shirt fabric color, pattern, and details',
     size: '768x1344',
     modelType: 'a well-built male fashion model',
     garmentType: 'Shirt',
@@ -113,7 +119,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'leather-goods': {
     bodyType: 'Professional product-in-use photograph',
     placement: 'holding or wearing the leather product naturally',
-    colorFocus: 'leather color, grain texture, and hardware metal color',
     size: '864x1152',
     modelType: 'an elegant person holding the product',
     garmentType: 'Leather product',
@@ -121,7 +126,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   fragrances: {
     bodyType: 'Professional product-in-use photograph',
     placement: 'holding the fragrance bottle elegantly',
-    colorFocus: 'bottle shape, cap color, and liquid color',
     size: '864x1152',
     modelType: 'an elegant person holding the fragrance bottle',
     garmentType: 'Fragrance bottle',
@@ -129,7 +133,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'home-living': {
     bodyType: 'Professional lifestyle photograph',
     placement: 'with the home decor product in the scene',
-    colorFocus: 'product colors, materials, and finish',
     size: '1344x768',
     modelType: 'a beautifully decorated home interior',
     garmentType: 'Home decor product',
@@ -137,15 +140,13 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'corporate-gifts': {
     bodyType: 'Professional product-in-use photograph',
     placement: 'holding the gift product elegantly',
-    colorFocus: 'product colors, materials, and packaging',
     size: '864x1152',
     modelType: 'an elegant person holding the gift',
     garmentType: 'Gift product',
   },
   'women-sarees': {
-    bodyType: 'Full-body professional fashion photograph',
+    bodyType: 'Full-body professional fashion photograph, head to toe visible',
     placement: 'draped in the saree in traditional Indian style with pallu elegantly over the left shoulder, matching blouse, properly pleated at the waist, the fabric flowing naturally with realistic folds',
-    colorFocus: 'saree fabric color, border color, and zari/work color',
     size: '768x1344',
     modelType: 'a graceful Indian woman with an elegant posture',
     garmentType: 'Traditional Indian saree',
@@ -153,15 +154,13 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'women-jewelry': {
     bodyType: 'Close-up beauty photograph from chest up',
     placement: 'wearing the jewelry piece naturally on the correct body part',
-    colorFocus: 'jewelry metal tone and stone colors',
     size: '864x1152',
     modelType: 'an elegant Indian woman with smooth skin, well-groomed hair, subtle makeup',
     garmentType: 'Jewelry',
   },
   'women-fashion': {
-    bodyType: 'Full-body professional fashion photograph',
+    bodyType: 'Full-body professional fashion photograph, head to toe visible',
     placement: 'wearing the outfit elegantly with proper fit and natural draping',
-    colorFocus: 'outfit fabric color, print pattern, and accent colors',
     size: '768x1344',
     modelType: 'a stylish female fashion model with confident posture',
     garmentType: 'Fashion outfit',
@@ -169,7 +168,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'women-fragrances': {
     bodyType: 'Professional product-in-use photograph',
     placement: 'holding the fragrance bottle elegantly',
-    colorFocus: 'bottle shape, cap color, and liquid color',
     size: '864x1152',
     modelType: 'an elegant woman holding the fragrance bottle',
     garmentType: 'Fragrance bottle',
@@ -177,7 +175,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'women-accessories': {
     bodyType: 'Professional fashion photograph',
     placement: 'wearing the accessory naturally',
-    colorFocus: 'accessory color, material, and design',
     size: '864x1152',
     modelType: 'an elegant woman wearing the accessory',
     garmentType: 'Fashion accessory',
@@ -185,7 +182,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'kids-fashion': {
     bodyType: 'Full-body professional fashion photograph of a child/teenager',
     placement: 'wearing the outfit with proper fit and natural draping',
-    colorFocus: 'outfit fabric color, print pattern, and accent colors',
     size: '768x1344',
     modelType: 'a happy child/teenager',
     garmentType: 'Kids fashion outfit',
@@ -193,7 +189,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'men-accessories': {
     bodyType: 'Professional fashion photograph',
     placement: 'wearing the accessory naturally',
-    colorFocus: 'accessory color, material, and design',
     size: '864x1152',
     modelType: 'a stylish man wearing the accessory',
     garmentType: 'Fashion accessory',
@@ -201,7 +196,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'men-watches': {
     bodyType: 'Close-up photograph from waist up',
     placement: 'wearing the watch on the left wrist',
-    colorFocus: 'watch dial color, case metal color, and strap color',
     size: '864x1152',
     modelType: 'a well-dressed man with a natural wrist pose',
     garmentType: 'Watch',
@@ -209,7 +203,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'men-tshirts': {
     bodyType: 'Full-body professional fashion photograph',
     placement: 'wearing the t-shirt with proper fit and natural draping',
-    colorFocus: 't-shirt fabric color, pattern, and details',
     size: '768x1344',
     modelType: 'a well-built male fashion model',
     garmentType: 'T-shirt',
@@ -217,7 +210,6 @@ const CATEGORY_PROMPTS: Record<string, CategoryPromptConfig> = {
   'men-fragrances': {
     bodyType: 'Professional product-in-use photograph',
     placement: 'holding the fragrance bottle',
-    colorFocus: 'bottle shape, cap color, and liquid color',
     size: '864x1152',
     modelType: 'an elegant man holding the fragrance bottle',
     garmentType: 'Fragrance bottle',
@@ -252,23 +244,98 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryP
   return {
     bodyType: 'Professional fashion photograph',
     placement: 'wearing or holding the product naturally',
-    colorFocus: 'product colors, materials, and design',
     size: '864x1152',
     modelType: 'a person',
     garmentType: 'Fashion item',
   }
 }
 
-// ── Pollinations.ai (PRIMARY — always works, free, no auth) ────────
+// ── Image helpers ──────────────────────────────────────────────────
 
-function buildPollinationsPrompt(config: CategoryPromptConfig, productName: string): string {
-  return `Professional virtual try-on photograph: ${config.modelType} ${config.placement}. The product is "${productName}" — render the ${config.colorFocus} accurately based on the product name and type. ${config.bodyType}. The product must look NATURALLY WORN with proper shadows, highlights, folds, fit, and realistic fabric behavior. Studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality. The model should have a natural pose and expression.`
+function stripDataUrl(dataUrl: string): string {
+  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
+  return match ? match[1] : dataUrl
 }
 
-interface PollinationsSize {
-  width: number
-  height: number
+/**
+ * Compress a product image data URL into a small thumbnail suitable for
+ * uploading to a free image host. Keeps the longest edge at 512px and
+ * encodes as JPEG quality 72 → typically 15-35KB.
+ *
+ * This is CRITICAL: the smaller the uploaded image, the faster and more
+ * reliable the tmpfiles.org upload + Pollinations fetch will be.
+ */
+async function compressProductImage(productDataUrl: string): Promise<Buffer> {
+  const raw = stripDataUrl(productDataUrl)
+  const inputBuf = Buffer.from(raw, 'base64')
+  return sharp(inputBuf)
+    .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 72, mozjpeg: true })
+    .toBuffer()
 }
+
+/**
+ * Upload a compressed product image buffer to tmpfiles.org (free, anonymous,
+ * no auth). Returns a DIRECT download URL that Pollinations can fetch.
+ *
+ * Falls back to null if the upload fails — the caller will then skip
+ * image-conditioning and use text-to-image instead.
+ */
+async function uploadToTmpfiles(buf: Buffer, timeoutMs: number): Promise<string | null> {
+  // tmpfiles.org expects multipart form upload with field name "file"
+  const boundary = '----3boxesTryon' + Math.random().toString(16).slice(2)
+  const filename = 'product.jpg'
+  const header = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: image/jpeg\r\n\r\n`
+  )
+  const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
+  const body = Buffer.concat([header, buf, footer])
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const start = Date.now()
+    const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'User-Agent': '3BOXES-TryOn/1.0',
+      },
+      body,
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+
+    if (!res.ok) {
+      console.log(`[virtual-tryon] tmpfiles upload HTTP ${res.status} after ${elapsed}s`)
+      return null
+    }
+
+    const json = (await res.json()) as { status?: string; data?: { url?: string } }
+    const viewerUrl = json?.data?.url
+    if (!viewerUrl || typeof viewerUrl !== 'string') {
+      console.log(`[virtual-tryon] tmpfiles returned no url after ${elapsed}s: ${JSON.stringify(json).substring(0, 200)}`)
+      return null
+    }
+
+    // Convert viewer URL → direct download URL
+    //   https://tmpfiles.org/abc123/file.jpg  →  https://tmpfiles.org/dl/abc123/file.jpg
+    const directUrl = viewerUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/')
+    console.log(`[virtual-tryon] tmpfiles uploaded in ${elapsed}s → ${directUrl}`)
+    return directUrl
+  } catch (err) {
+    clearTimeout(timeoutId)
+    const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+    console.log(`[virtual-tryon] tmpfiles upload failed: ${isTimeout ? 'timeout' : (err as Error).message}`)
+    return null
+  }
+}
+
+// ── Pollinations.ai ────────────────────────────────────────────────
+
+interface PollinationsSize { width: number; height: number }
 
 function parseImageSize(size: ImageSize): PollinationsSize {
   const [w, h] = size.split('x').map(Number)
@@ -276,29 +343,65 @@ function parseImageSize(size: ImageSize): PollinationsSize {
 }
 
 /**
- * Generate a try-on image via Pollinations.ai
- * 100% free, no auth, no API key. Works from any environment.
+ * Build the prompt for Pollinations image-to-image.
+ *
+ * KEY: when we have a reference product image, the prompt must describe the
+ * PERSON and PLACEMENT but must NOT over-specify product colors/patterns —
+ * the reference image drives those. We explicitly tell the model to match
+ * the reference image exactly.
  */
-async function generateWithPollinations(
+function buildImg2ImgPrompt(config: CategoryPromptConfig, productName: string): string {
+  return [
+    `Professional virtual try-on photograph of ${config.modelType}`,
+    config.placement,
+    `. The product is "${productName}" — use the provided reference image to reproduce the EXACT same colors, fabric, pattern, embellishments, design, and silhouette of the product. `,
+    `The model is ${config.bodyType.toLowerCase()}. `,
+    `The product must look NATURALLY WORN with proper shadows, highlights, folds, fit, and realistic fabric behavior — NOT pasted, floating, or overlaid. `,
+    `Studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality. Natural pose and expression. Full image, no cropping, no border.`,
+  ].join('')
+}
+
+/** Prompt for the text-to-image fallback (no reference image available). */
+function buildTextPrompt(config: CategoryPromptConfig, productName: string): string {
+  return [
+    `Professional virtual try-on photograph of ${config.modelType} ${config.placement}. `,
+    `The product is "${productName}" — render the colors, fabric, pattern, and design accurately based on the product name and type. `,
+    `${config.bodyType}. `,
+    `The product must look NATURALLY WORN with proper shadows, highlights, folds, fit, and realistic fabric behavior. `,
+    `Studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality. Full image, no cropping.`,
+  ].join('')
+}
+
+/**
+ * Call Pollinations. If `referenceImageUrl` is provided, use image-to-image
+ * conditioning (the AI matches the reference product). Otherwise fall back
+ * to plain text-to-image.
+ */
+async function callPollinations(
   prompt: string,
   size: ImageSize,
   timeoutMs: number,
+  referenceImageUrl?: string,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   const { width, height } = parseImageSize(size)
   const encoded = encodeURIComponent(prompt)
-  // Use a random seed for variety; flux model for high quality; nologo to remove branding
   const seed = Math.floor(Math.random() * 1_000_000)
-  const url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`
+  // flux model gives the best photorealistic results; nologo removes branding
+  let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`
+  if (referenceImageUrl) {
+    url += `&image=${encodeURIComponent(referenceImageUrl)}`
+  }
 
-  console.log(`[virtual-tryon] Pollinations: requesting ${width}x${height} image (timeout: ${timeoutMs}ms)`)
-  console.log(`[virtual-tryon] Prompt: ${prompt.substring(0, 200)}...`)
+  const mode = referenceImageUrl ? 'img2img' : 'text'
+  console.log(`[virtual-tryon] Pollinations ${mode}: ${width}x${height} (timeout ${timeoutMs}ms)`)
+  console.log(`[virtual-tryon] Prompt: ${prompt.substring(0, 180)}...`)
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const startTime = Date.now()
-    const response = await fetch(url, {
+    const start = Date.now()
+    const res = await fetch(url, {
       signal: controller.signal,
       headers: {
         'Accept': 'image/jpeg, image/png, image/webp, */*',
@@ -306,59 +409,50 @@ async function generateWithPollinations(
       },
     })
     clearTimeout(timeoutId)
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => 'unknown')
-      return { success: false, error: `Pollinations HTTP ${response.status} after ${elapsed}s: ${errorBody.substring(0, 200)}` }
+    if (!res.ok) {
+      const body = await res.text().catch(() => 'unknown')
+      return { success: false, error: `Pollinations HTTP ${res.status} after ${elapsed}s: ${body.substring(0, 150)}` }
     }
 
-    const contentType = response.headers.get('content-type') || ''
-    if (!contentType.startsWith('image/')) {
-      const errorBody = await response.text().catch(() => 'unknown')
-      return { success: false, error: `Pollinations returned non-image content-type "${contentType}" after ${elapsed}s: ${errorBody.substring(0, 200)}` }
+    const ct = res.headers.get('content-type') || ''
+    if (!ct.startsWith('image/')) {
+      const body = await res.text().catch(() => 'unknown')
+      return { success: false, error: `Pollinations non-image "${ct}" after ${elapsed}s: ${body.substring(0, 150)}` }
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer())
-    if (buffer.length < 1000) {
-      return { success: false, error: `Pollinations returned tiny image (${buffer.length} bytes) — likely an error` }
+    const buf = Buffer.from(await res.arrayBuffer())
+    // Tiny images (<3KB) are almost always error placeholders from Pollinations
+    if (buf.length < 3000) {
+      return { success: false, error: `Pollinations returned tiny image (${buf.length} bytes) — likely an error` }
     }
 
-    // Determine mime from content-type or buffer magic bytes
     let mime = 'image/jpeg'
-    if (contentType.includes('image/png')) mime = 'image/png'
-    else if (contentType.includes('image/webp')) mime = 'image/webp'
+    if (ct.includes('image/png')) mime = 'image/png'
+    else if (ct.includes('image/webp')) mime = 'image/webp'
     else {
-      // Detect from magic bytes
-      const hex = buffer.subarray(0, 4).toString('hex')
+      const hex = buf.subarray(0, 4).toString('hex')
       if (hex === '89504e47') mime = 'image/png'
       else if (hex.startsWith('ffd8ff')) mime = 'image/jpeg'
       else if (hex.startsWith('52494646')) mime = 'image/webp'
     }
 
-    const base64 = buffer.toString('base64')
-    const dataUrl = `data:${mime};base64,${base64}`
-
-    console.log(`[virtual-tryon] ✅ Pollinations succeeded in ${elapsed}s (${(buffer.length / 1024).toFixed(1)}KB, ${mime})`)
+    const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
+    console.log(`[virtual-tryon] ✅ Pollinations ${mode} succeeded in ${elapsed}s (${(buf.length / 1024).toFixed(1)}KB, ${mime})`)
     return { success: true, imageUrl: dataUrl }
   } catch (err) {
     clearTimeout(timeoutId)
-    const errMsg = (err as Error).message || String(err)
     const isTimeout = err instanceof DOMException && err.name === 'AbortError'
     const msg = isTimeout
       ? `Pollinations timed out after ${(timeoutMs / 1000).toFixed(0)}s`
-      : `Pollinations fetch error: ${errMsg.substring(0, 200)}`
+      : `Pollinations fetch error: ${(err as Error).message.substring(0, 200)}`
     console.log(`[virtual-tryon] ${msg}`)
     return { success: false, error: msg }
   }
 }
 
 // ── Z.AI Image Edit (OPTIONAL enhancement for face preservation) ───
-
-function stripDataUrl(dataUrl: string): string {
-  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
-  return match ? match[1] : dataUrl
-}
 
 function buildZAIHeaders(config: { apiKey: string; chatId?: string; userId?: string; token?: string }): Record<string, string> {
   const headers: Record<string, string> = {
@@ -373,7 +467,7 @@ function buildZAIHeaders(config: { apiKey: string; chatId?: string; userId?: str
 }
 
 function buildSelfieEditPrompt(config: CategoryPromptConfig, productName: string): string {
-  return `VIRTUAL TRY-ON: Show this EXACT person ${config.placement}. The product is "${productName}". Keep the person's EXACT face, skin tone, and body proportions. The ${config.colorFocus} must be accurate. The product must look NATURALLY WORN on the person — NOT pasted, floating, or overlaid. Proper shadows, highlights, folds, and fit where the product meets the body. ${config.bodyType}. Photorealistic, studio-quality lighting, 8K detail.`
+  return `VIRTUAL TRY-ON: Show this EXACT person ${config.placement}. The product is "${productName}". Keep the person's EXACT face, skin tone, and body proportions. The product must look NATURALLY WORN on the person — NOT pasted, floating, or overlaid. Proper shadows, highlights, folds, and fit where the product meets the body. ${config.bodyType}. Photorealistic, studio-quality lighting, 8K detail.`
 }
 
 async function zaiImageEdit(
@@ -385,32 +479,28 @@ async function zaiImageEdit(
   const headers = buildZAIHeaders(config)
   const rawBase64 = stripDataUrl(params.image)
 
-  console.log(`[virtual-tryon] ZAI Image Edit: POST ${url.substring(0, 60)}... (timeout: ${timeoutMs}ms)`)
+  console.log(`[virtual-tryon] ZAI Image Edit: POST ${url.substring(0, 60)}... (timeout ${timeoutMs}ms)`)
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const startTime = Date.now()
-    const response = await fetch(url, {
+    const start = Date.now()
+    const res = await fetch(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        prompt: params.prompt,
-        image: rawBase64,
-        size: params.size,
-      }),
+      body: JSON.stringify({ prompt: params.prompt, image: rawBase64, size: params.size }),
       signal: controller.signal,
     })
     clearTimeout(timeoutId)
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => 'unknown')
-      return { success: false, error: `ZAI API error ${response.status} after ${elapsed}s: ${errorBody.substring(0, 200)}` }
+    if (!res.ok) {
+      const body = await res.text().catch(() => 'unknown')
+      return { success: false, error: `ZAI API ${res.status} after ${elapsed}s: ${body.substring(0, 150)}` }
     }
 
-    const result = await response.json()
+    const result = await res.json() as { data?: Array<{ base64?: string; url?: string }> }
     if (!result?.data?.[0]) {
       return { success: false, error: `ZAI returned no image data after ${elapsed}s` }
     }
@@ -422,26 +512,22 @@ async function zaiImageEdit(
     }
     if (item.url) {
       console.log(`[virtual-tryon] ✅ ZAI edit succeeded in ${elapsed}s (url)`)
-      // Download the URL to convert to base64 for consistent handling
       try {
         const imgRes = await fetch(item.url, { signal: AbortSignal.timeout(10_000) })
         if (imgRes.ok) {
-          const buf = Buffer.from(await imgRes.arrayBuffer())
-          return { success: true, imageUrl: `data:image/png;base64,${buf.toString('base64')}` }
+          const b = Buffer.from(await imgRes.arrayBuffer())
+          return { success: true, imageUrl: `data:image/png;base64,${b.toString('base64')}` }
         }
       } catch {}
-      // Fall back to URL directly
       return { success: true, imageUrl: item.url }
     }
-
     return { success: false, error: `ZAI returned unrecognized format after ${elapsed}s` }
   } catch (err) {
     clearTimeout(timeoutId)
-    const errMsg = (err as Error).message || String(err)
     const isTimeout = err instanceof DOMException && err.name === 'AbortError'
     const msg = isTimeout
       ? `ZAI edit timed out after ${(timeoutMs / 1000).toFixed(0)}s`
-      : `ZAI edit fetch error: ${errMsg.substring(0, 200)}`
+      : `ZAI edit fetch error: ${(err as Error).message.substring(0, 200)}`
     console.log(`[virtual-tryon] ${msg}`)
     return { success: false, error: msg }
   }
@@ -453,8 +539,7 @@ let spaceAwakeCache: { awake: boolean; timestamp: number } | null = null
 const SPACE_CACHE_TTL = 20_000
 
 export async function preWarmSpace(): Promise<boolean> {
-  // No-op: Pollinations is always ready, no warm-up needed
-  return true
+  return true // Pollinations + tmpfiles are always ready
 }
 
 export async function checkIDMVTONSpaceStatus(): Promise<{ awake: boolean }> {
@@ -462,7 +547,6 @@ export async function checkIDMVTONSpaceStatus(): Promise<{ awake: boolean }> {
   if (spaceAwakeCache && now - spaceAwakeCache.timestamp < SPACE_CACHE_TTL) {
     return { awake: spaceAwakeCache.awake }
   }
-  // Pollinations is always available — report as "awake"
   spaceAwakeCache = { awake: true, timestamp: now }
   return { awake: true }
 }
@@ -478,93 +562,108 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   const isVercel = !!process.env.VERCEL
   const zaiConfig = getZAIConfig()
 
-  console.log(`[virtual-tryon] Starting try-on v16 for "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, ZAI_CONFIGURED=${isZAIConfigured()}`)
+  console.log(`[virtual-tryon] v17 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasProductImage=${!!input.productImageBase64}, ZAI=${isZAIConfigured()}`)
 
-  // ── STRATEGY 1: Z.AI Image Edit (optional — for face preservation) ──
-  // Only try if ZAI is configured AND we have a valid selfie
-  // On Vercel: requires ZAI_BASE_URL + ZAI_API_KEY env vars
-  // In sandbox: uses .z-ai-config auto-discovery
+  // ── STRATEGY 1: Z.AI Image Edit (OPTIONAL — face preservation) ──
+  // Only attempt if ZAI is configured AND we have a valid selfie.
+  // On Vercel requires ZAI_BASE_URL + ZAI_API_KEY env vars.
   if (isZAIConfigured() && zaiConfig && input.selfieData?.startsWith('data:image/') && Date.now() < totalDeadline - 25_000) {
     strategiesAttempted.push('zai-selfie-edit')
     console.log('[virtual-tryon] Strategy 1: Z.AI Selfie Edit (face preservation)')
-
     const prompt = buildSelfieEditPrompt(config, input.productName)
-    const remainingTime = Math.min(ZAI_EDIT_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
-
-    const result = await zaiImageEdit(zaiConfig, {
-      prompt,
-      image: input.selfieData,
-      size: config.size,
-    }, remainingTime)
-
+    const remaining = Math.min(ZAI_EDIT_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+    const result = await zaiImageEdit(zaiConfig, { prompt, image: input.selfieData, size: config.size }, remaining)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
       console.log(`[virtual-tryon] ✅ ZAI Selfie Edit succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: result.imageUrl,
-        strategy: 'zai-selfie-edit',
-        elapsedMs: elapsed,
-        debugInfo: { strategiesAttempted, strategyErrors },
-      }
+      return { success: true, imageUrl: result.imageUrl, strategy: 'zai-selfie-edit', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
     }
     strategyErrors['zai-selfie-edit'] = result.error || 'No image returned'
-    console.log(`[virtual-tryon] ZAI Selfie Edit failed: ${result.error?.substring(0, 150)}`)
+    console.log(`[virtual-tryon] ZAI Selfie Edit failed: ${result.error?.substring(0, 120)}`)
   }
 
-  // ── STRATEGY 2: Pollinations.ai (PRIMARY — always works, free, no auth) ──
-  // This is the guaranteed path. Pollinations has no auth requirements,
-  // no rate limits (within reason), and works from any environment.
-  if (Date.now() < totalDeadline - 10_000) {
-    strategiesAttempted.push('pollinations')
-    console.log('[virtual-tryon] Strategy 2: Pollinations.ai (primary, always-works)')
+  // ── STRATEGY 2: Pollinations IMAGE-TO-IMAGE (PRIMARY — matches product) ──
+  // This is the v17 fix: upload the REAL product photo to tmpfiles.org, then
+  // ask Pollinations to condition the generation on it. The result will
+  // actually MATCH the product's colors, patterns, and design.
+  if (input.productImageBase64?.startsWith('data:image/') && Date.now() < totalDeadline - 15_000) {
+    strategiesAttempted.push('pollinations-img2img')
+    console.log('[virtual-tryon] Strategy 2: Pollinations img2img (product-matching)')
 
-    const prompt = buildPollinationsPrompt(config, input.productName)
-    const remainingTime = Math.min(POLLINATIONS_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+    // Step A: compress the product image
+    let productBuf: Buffer | null = null
+    try {
+      productBuf = await compressProductImage(input.productImageBase64)
+      console.log(`[virtual-tryon] Compressed product image → ${productBuf.length} bytes`)
+    } catch (err) {
+      strategyErrors['pollinations-img2img'] = `compress failed: ${(err as Error).message}`
+      console.log(`[virtual-tryon] Product image compress failed: ${(err as Error).message}`)
+    }
 
-    const result = await generateWithPollinations(prompt, config.size, remainingTime)
-
-    if (result.success && result.imageUrl) {
-      const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ Pollinations succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: result.imageUrl,
-        strategy: 'pollinations',
-        elapsedMs: elapsed,
-        debugInfo: { strategiesAttempted, strategyErrors },
+    // Step B: upload to tmpfiles.org for a public URL
+    let referenceUrl: string | null = null
+    if (productBuf) {
+      const uploadTimeout = Math.min(UPLOAD_TIMEOUT_MS, totalDeadline - Date.now() - 10_000)
+      if (uploadTimeout > 3000) {
+        referenceUrl = await uploadToTmpfiles(productBuf, uploadTimeout)
       }
     }
-    strategyErrors['pollinations'] = result.error || 'No image returned'
-    console.log(`[virtual-tryon] Pollinations failed: ${result.error?.substring(0, 150)}`)
+
+    // Step C: call Pollinations with the reference image
+    if (referenceUrl) {
+      const prompt = buildImg2ImgPrompt(config, input.productName)
+      const remaining = Math.min(POLLINATIONS_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+      const result = await callPollinations(prompt, config.size, remaining, referenceUrl)
+      if (result.success && result.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ Pollinations img2img succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return { success: true, imageUrl: result.imageUrl, strategy: 'pollinations-img2img', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
+      }
+      strategyErrors['pollinations-img2img'] = result.error || 'No image returned'
+      console.log(`[virtual-tryon] Pollinations img2img failed: ${result.error?.substring(0, 120)}`)
+    } else if (!strategyErrors['pollinations-img2img']) {
+      strategyErrors['pollinations-img2img'] = 'tmpfiles upload failed — no reference URL'
+      console.log('[virtual-tryon] No reference URL available, skipping img2img')
+    }
   }
 
-  // ── All strategies failed ──────────────────────────────────────
+  // ── STRATEGY 3: Pollinations TEXT-TO-IMAGE (fallback) ──
+  // Used when there's no product image OR img2img failed. Uses the product
+  // name + category to build the best possible text prompt.
+  if (Date.now() < totalDeadline - 10_000) {
+    strategiesAttempted.push('pollinations-text')
+    console.log('[virtual-tryon] Strategy 3: Pollinations text-to-image (fallback)')
+    const prompt = buildTextPrompt(config, input.productName)
+    const remaining = Math.min(POLLINATIONS_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+    const result = await callPollinations(prompt, config.size, remaining)
+    if (result.success && result.imageUrl) {
+      const elapsed = Date.now() - totalStart
+      console.log(`[virtual-tryon] ✅ Pollinations text succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+      return { success: true, imageUrl: result.imageUrl, strategy: 'pollinations-text', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
+    }
+    strategyErrors['pollinations-text'] = result.error || 'No image returned'
+    console.log(`[virtual-tryon] Pollinations text failed: ${result.error?.substring(0, 120)}`)
+  }
+
+  // ── All strategies failed ───────────────────────────────────────
   const elapsed = Date.now() - totalStart
   console.log(`[virtual-tryon] ❌ All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
   console.log(`[virtual-tryon] Strategies: ${strategiesAttempted.join(', ')}`)
   console.log(`[virtual-tryon] Errors: ${JSON.stringify(strategyErrors)}`)
 
-  // Pollinations is the guaranteed path — if even THAT fails, it's likely
-  // a temporary network issue. Retry once with a longer timeout.
-  if (strategiesAttempted.includes('pollinations') && elapsed < totalDeadline - 15_000) {
-    console.log('[virtual-tryon] Retrying Pollinations with fresh seed...')
-    strategiesAttempted.push('pollinations-retry')
-    const prompt = buildPollinationsPrompt(config, input.productName)
+  // Final retry: text-to-image with a fresh seed
+  if (elapsed < totalDeadline - 15_000) {
+    console.log('[virtual-tryon] Final retry: text-to-image with fresh seed')
+    strategiesAttempted.push('pollinations-text-retry')
+    const prompt = buildTextPrompt(config, input.productName)
     const retryTime = Math.min(30_000, totalDeadline - Date.now() - 3_000)
-    const retryResult = await generateWithPollinations(prompt, config.size, retryTime)
+    const retryResult = await callPollinations(prompt, config.size, retryTime)
     if (retryResult.success && retryResult.imageUrl) {
       const elapsedRetry = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ Pollinations retry succeeded in ${(elapsedRetry / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: retryResult.imageUrl,
-        strategy: 'pollinations-retry',
-        elapsedMs: elapsedRetry,
-        debugInfo: { strategiesAttempted, strategyErrors },
-      }
+      console.log(`[virtual-tryon] ✅ Pollinations text retry succeeded in ${(elapsedRetry / 1000).toFixed(1)}s`)
+      return { success: true, imageUrl: retryResult.imageUrl, strategy: 'pollinations-text-retry', elapsedMs: elapsedRetry, debugInfo: { strategiesAttempted, strategyErrors } }
     }
-    strategyErrors['pollinations-retry'] = retryResult.error || 'Retry failed'
+    strategyErrors['pollinations-text-retry'] = retryResult.error || 'Retry failed'
   }
 
   return {

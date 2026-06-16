@@ -73,6 +73,7 @@
     "react-dom": "^19.2.6",
     "react-hook-form": "^7.60.0",
     "react-is": "^19.2.7",
+    "sharp": "^0.34.5",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^3.0.3",
     "recharts": "^3.8.1",
