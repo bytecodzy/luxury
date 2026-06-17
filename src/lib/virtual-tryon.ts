@@ -49,7 +49,20 @@
  *    still gets a result (no "AI is busy" error).
  */
 
-import sharp from 'sharp'
+// NOTE: `sharp` is imported LAZILY via getSharp() below — NOT at the top
+// level. This is critical for Vercel: a top-level `import sharp from 'sharp'`
+// would try to load the native binary when the module is first imported (e.g.
+// by the /api/try-on/status route), and if the binary is missing/incompatible
+// in the serverless environment it crashes the entire function with HTTP 500.
+// Lazy-loading confines any sharp failure to the actual try-on request.
+
+let sharpModule: typeof import('sharp') | null = null
+async function getSharp() {
+  if (sharpModule) return sharpModule
+  const mod = await import('sharp')
+  sharpModule = (mod as any).default || mod
+  return sharpModule
+}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -374,6 +387,7 @@ function stripDataUrl(dataUrl: string): string {
  * small enough for fast upload + processing).
  */
 async function compressSelfie(selfieDataUrl: string): Promise<Buffer> {
+  const sharp = await getSharp()
   const raw = stripDataUrl(selfieDataUrl)
   const inputBuf = Buffer.from(raw, 'base64')
   return sharp(inputBuf)
@@ -396,6 +410,7 @@ function bufferToDataUrl(buf: Buffer, mime = 'image/jpeg'): string {
 async function compressProductImageForVLM(productImageBase64: string): Promise<string | null> {
   if (!productImageBase64) return null
   try {
+    const sharp = await getSharp()
     const raw = stripDataUrl(productImageBase64)
     const inputBuf = Buffer.from(raw, 'base64')
     const out = await sharp(inputBuf)
@@ -752,69 +767,94 @@ async function callPollinations(
   referenceImageUrl?: string,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   const { width, height } = parseImageSize(size)
-  const encoded = encodeURIComponent(prompt)
-  const seed = Math.floor(Math.random() * 1_000_000)
-  let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`
-  if (referenceImageUrl) {
-    url += `&image=${encodeURIComponent(referenceImageUrl)}`
-  }
-
   const mode = referenceImageUrl ? 'selfie-img2img' : 'text'
-  console.log(`[virtual-tryon] Pollinations ${mode}: ${width}x${height} (timeout ${timeoutMs}ms)`)
 
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  // Pollinations sometimes returns HTTP 402 "Queue full for IP" when the
+  // caller's IP already has a request in flight. We retry up to 2 times with
+  // a short backoff so transient rate-limiting doesn't fail the try-on.
+  const MAX_RETRIES = 2
+  const RETRY_DELAYS_MS = [4_000, 6_000] // wait 4s, then 6s before retrying
 
-  try {
-    const start = Date.now()
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'Accept': 'image/jpeg, image/png, image/webp, */*',
-        'User-Agent': '3BOXES-VirtualTryOn/1.0',
-      },
-    })
-    clearTimeout(timeoutId)
-    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => 'unknown')
-      return { success: false, error: `Pollinations HTTP ${res.status} after ${elapsed}s: ${body.substring(0, 150)}` }
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]
+      console.log(`[virtual-tryon] Pollinations retry ${attempt}/${MAX_RETRIES} after ${delay}ms backoff...`)
+      await new Promise(r => setTimeout(r, delay))
     }
 
-    const ct = res.headers.get('content-type') || ''
-    if (!ct.startsWith('image/')) {
-      const body = await res.text().catch(() => 'unknown')
-      return { success: false, error: `Pollinations non-image "${ct}" after ${elapsed}s: ${body.substring(0, 150)}` }
+    const encoded = encodeURIComponent(prompt)
+    const seed = Math.floor(Math.random() * 1_000_000)
+    let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`
+    if (referenceImageUrl) {
+      url += `&image=${encodeURIComponent(referenceImageUrl)}`
     }
 
-    const buf = Buffer.from(await res.arrayBuffer())
-    if (buf.length < 3000) {
-      return { success: false, error: `Pollinations returned tiny image (${buf.length} bytes) — likely an error` }
-    }
+    console.log(`[virtual-tryon] Pollinations ${mode}: ${width}x${height} (attempt ${attempt + 1}/${MAX_RETRIES + 1}, timeout ${timeoutMs}ms)`)
 
-    let mime = 'image/jpeg'
-    if (ct.includes('image/png')) mime = 'image/png'
-    else if (ct.includes('image/webp')) mime = 'image/webp'
-    else {
-      const hex = buf.subarray(0, 4).toString('hex')
-      if (hex === '89504e47') mime = 'image/png'
-      else if (hex.startsWith('ffd8ff')) mime = 'image/jpeg'
-      else if (hex.startsWith('52494646')) mime = 'image/webp'
-    }
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
-    const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
-    console.log(`[virtual-tryon] ✅ Pollinations ${mode} succeeded in ${elapsed}s (${(buf.length / 1024).toFixed(1)}KB, ${mime})`)
-    return { success: true, imageUrl: dataUrl }
-  } catch (err) {
-    clearTimeout(timeoutId)
-    const isTimeout = err instanceof DOMException && err.name === 'AbortError'
-    const msg = isTimeout
-      ? `Pollinations timed out after ${(timeoutMs / 1000).toFixed(0)}s`
-      : `Pollinations fetch error: ${(err as Error).message.substring(0, 200)}`
-    console.log(`[virtual-tryon] ${msg}`)
-    return { success: false, error: msg }
+    try {
+      const start = Date.now()
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'Accept': 'image/jpeg, image/png, image/webp, */*',
+          'User-Agent': '3BOXES-VirtualTryOn/1.0',
+        },
+      })
+      clearTimeout(timeoutId)
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+
+      // ── Rate-limited (HTTP 402) — retry with backoff ──
+      if (res.status === 402 && attempt < MAX_RETRIES) {
+        const body = await res.text().catch(() => '')
+        console.log(`[virtual-tryon] Pollinations 402 rate-limited after ${elapsed}s (attempt ${attempt + 1}) — will retry`)
+        continue // retry
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => 'unknown')
+        return { success: false, error: `Pollinations HTTP ${res.status} after ${elapsed}s: ${body.substring(0, 150)}` }
+      }
+
+      const ct = res.headers.get('content-type') || ''
+      if (!ct.startsWith('image/')) {
+        const body = await res.text().catch(() => 'unknown')
+        return { success: false, error: `Pollinations non-image "${ct}" after ${elapsed}s: ${body.substring(0, 150)}` }
+      }
+
+      const buf = Buffer.from(await res.arrayBuffer())
+      if (buf.length < 3000) {
+        return { success: false, error: `Pollinations returned tiny image (${buf.length} bytes) — likely an error` }
+      }
+
+      let mime = 'image/jpeg'
+      if (ct.includes('image/png')) mime = 'image/png'
+      else if (ct.includes('image/webp')) mime = 'image/webp'
+      else {
+        const hex = buf.subarray(0, 4).toString('hex')
+        if (hex === '89504e47') mime = 'image/png'
+        else if (hex.startsWith('ffd8ff')) mime = 'image/jpeg'
+        else if (hex.startsWith('52494646')) mime = 'image/webp'
+      }
+
+      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
+      console.log(`[virtual-tryon] ✅ Pollinations ${mode} succeeded in ${elapsed}s (${(buf.length / 1024).toFixed(1)}KB, ${mime})`)
+      return { success: true, imageUrl: dataUrl }
+    } catch (err) {
+      clearTimeout(timeoutId)
+      const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+      const msg = isTimeout
+        ? `Pollinations timed out after ${(timeoutMs / 1000).toFixed(0)}s`
+        : `Pollinations fetch error: ${(err as Error).message.substring(0, 200)}`
+      console.log(`[virtual-tryon] ${msg} (attempt ${attempt + 1})`)
+      if (attempt < MAX_RETRIES) continue // retry
+      return { success: false, error: msg }
+    }
   }
+
+  return { success: false, error: 'Pollinations failed after all retries' }
 }
 
 // ── Space Status Helpers (kept for backwards compat with API routes) ──
@@ -914,6 +954,18 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   } catch (err) {
     strategyErrors['selfie-compress'] = `compress failed: ${(err as Error).message}`
     console.log(`[virtual-tryon] Selfie compress failed: ${(err as Error).message}`)
+    // ── RAW BUFFER FALLBACK ────────────────────────────────────────
+    // If sharp is unavailable (e.g. native binary missing on Vercel), fall
+    // back to the raw decoded selfie buffer. This is larger but still works
+    // for the tmpfiles.org upload → Pollinations img2img path. The try-on
+    // must NEVER fail just because image compression is unavailable.
+    try {
+      const raw = stripDataUrl(input.selfieData)
+      selfieBuf = Buffer.from(raw, 'base64')
+      console.log(`[virtual-tryon] Using RAW (uncompressed) selfie buffer → ${selfieBuf.length} bytes`)
+    } catch {
+      selfieBuf = null
+    }
   }
 
   // Wait for VLM with a tight deadline so it doesn't push us over budget
