@@ -1,7 +1,9 @@
 /**
- * AI Virtual Try-On API v19 — ZAI IMAGE-EDIT Pipeline
+ * AI Virtual Try-On API v19.1 — Environment-Aware Pipeline
  *
  * Strategy chain (see src/lib/virtual-tryon.ts):
+ *
+ * SANDBOX / LOCAL (ZAI SDK auto-discovers credentials from /etc/.z-ai-config):
  * 1. ZAI image-edit (PRIMARY): real image-to-image edit using the user's
  *    SELFIE as input → preserves the user's face, gender, skin tone,
  *    body type, and hair. The prompt (built from VLM analysis of the
@@ -11,9 +13,14 @@
  * 3. Pollinations img2img (FALLBACK 2): tmpfiles.org + ?image=selfie_url.
  * 4. Pollinations text-to-image (LAST RESORT): always available.
  *
- * 100% free in the sandbox (ZAI SDK auto-discovers credentials).
- * On Vercel: requires ZAI_BASE_URL + ZAI_API_KEY env vars for the primary
- * path; falls back to Pollinations automatically if those are missing.
+ * VERCEL (ZAI public API rejects the sandbox token — "Authentication Failed"):
+ * 1. Pollinations img2img (PRIMARY): upload selfie to tmpfiles.org, pass as
+ *    ?image= reference to Pollinations flux model. 100% free, no auth.
+ * 2. Pollinations text-to-image (FALLBACK): always available.
+ *
+ * The environment detection is in getZAI() which returns null on Vercel,
+ * causing the strategy chain to skip ZAI entirely and go straight to
+ * Pollinations with the full 55s time budget.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -165,19 +172,24 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
+  const isVercel = !!process.env.VERCEL
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'AI ready — ZAI image-edit primary, Pollinations fallback',
+      message: isVercel
+        ? 'AI ready — Pollinations image-to-image (free, no auth needed)'
+        : 'AI ready — ZAI image-edit primary, Pollinations fallback',
     })
   }
   const statusResult = await checkIDMVTONSpaceStatus()
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
-    mode: 'zai-image-edit',
-    message: 'AI Virtual Try-On ready — preserves your face & gender from your selfie using ZAI image-edit',
+    mode: isVercel ? 'pollinations-img2img' : 'zai-image-edit',
+    message: isVercel
+      ? 'AI Virtual Try-On ready — using free Pollinations image-to-image (selfie as reference)'
+      : 'AI Virtual Try-On ready — preserves your face & gender from your selfie using ZAI image-edit',
   })
 }

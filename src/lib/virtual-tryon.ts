@@ -467,6 +467,27 @@ let zaiInstanceCache: any = null
 let zaiInitPromise: Promise<any | null> | null = null
 
 async function getZAI(): Promise<any | null> {
+  // ── VERCEL FAST-PATH ────────────────────────────────────────────
+  // On Vercel, the ZAI SDK cannot authenticate:
+  //   • The public endpoint `api.z.ai/api/v1` REJECTS the `"Z.ai"` apiKey
+  //     with "Authentication Failed" (verified by direct curl tests).
+  //   • The `images.generations.edit` endpoint returns 404 NOT_FOUND on the
+  //     public API (it only exists on `internal-api.z.ai`, which is a private
+  //     network inaccessible from Vercel).
+  //   • The JWT token from the sandbox config is also rejected ("token
+  //     expired or incorrect") on the public API.
+  // Trying to init the SDK on Vercel wastes 15-30s on dead/hung connections
+  // before failing, which pushes the total past Vercel's 60s function limit
+  // and causes the "AI is Busy" error the user sees.
+  //
+  // SOLUTION: skip ZAI entirely on Vercel and go straight to the Pollinations
+  // fallback (100% free, no auth, works from any environment). The sandbox
+  // keeps using ZAI image-edit (best quality, preserves the user's face).
+  if (process.env.VERCEL) {
+    console.log('[virtual-tryon] Vercel environment detected — skipping ZAI, using Pollinations')
+    return null
+  }
+
   if (zaiInstanceCache) return zaiInstanceCache
   if (zaiInitPromise) return zaiInitPromise
 
@@ -826,6 +847,17 @@ export async function isTryOnServiceReady(): Promise<{
   engine: string
   reason?: string
 }> {
+  // On Vercel, ZAI cannot authenticate (public API rejects the sandbox token),
+  // so we always use the Pollinations fallback there. Report it honestly so
+  // the frontend shows the correct "AI service ready" state.
+  if (process.env.VERCEL) {
+    return {
+      ready: true,
+      engine: 'pollinations-img2img',
+      reason: 'Vercel environment — using free Pollinations image-to-image (no auth required)',
+    }
+  }
+
   const zai = await Promise.race([
     getZAI(),
     new Promise<null>(r => setTimeout(() => r(null), 4000)),
