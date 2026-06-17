@@ -1,0 +1,1216 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * TryOnDialog v4.3 — ZAI Image-Edit Virtual Try-On
+     5→ *
+     6→ * KEY PRINCIPLES:
+     7→ * 1. Powered by Z.AI image-edit API (REAL image-to-image edit — preserves
+     8→ *    the user's identity from their selfie, applies the product described
+     9→ *    in the prompt). Falls back to Pollinations if ZAI is unavailable.
+    10→ * 2. PRESERVES THE USER — the user's SELFIE is the edit input image,
+    11→ *    so the AI keeps the user's face, gender, skin tone, and body type.
+    12→ * 3. DESCRIBES THE PRODUCT — VLM analyses the ACTUAL product photo and
+    13→ *    extracts colours, material, pattern, and style. This is fused with
+    14→ *    the product name/description/tags so the prompt accurately reflects
+    15→ *    the EXACT product being tried on (no more "saree → glasses").
+    16→ * 4. GENDER-NEUTRAL prompts — never hardcodes a gender; uses "the person
+    17→ *    in the reference image" so the result matches the user's actual gender.
+    18→ * 5. Instant selfie preview (show raw image IMMEDIATELY on upload)
+    19→ * 6. Disclaimer → auto-opens file picker (one-click flow)
+    20→ * 7. Hard 55-second client timeout with friendly retry message
+    21→ * 8. 3BOXES watermark on ALL generated/saved/downloaded images
+    22→ * 9. Works on both preview and Vercel — ZAI primary, Pollinations fallback
+    23→ * 10. NO canvas overlay fallback — real AI generation every time
+    24→ */
+    25→
+    26→import { useState, useRef, useCallback, useEffect } from 'react';
+    27→import {
+    28→  Dialog,
+    29→  DialogContent,
+    30→  DialogHeader,
+    31→  DialogTitle,
+    32→  DialogDescription,
+    33→} from '@/components/ui/dialog';
+    34→import { Button } from '@/components/ui/button';
+    35→import { motion, AnimatePresence } from 'framer-motion';
+    36→import {
+    37→  Camera,
+    38→  Sparkles,
+    39→  Loader2,
+    40→  RotateCcw,
+    41→  Download,
+    42→  RefreshCw,
+    43→  Zap,
+    44→  ShieldCheck,
+    45→  Clock,
+    46→  Share2,
+    47→  CheckCircle,
+    48→  AlertCircle,
+    49→} from 'lucide-react';
+    50→import { Checkbox } from '@/components/ui/checkbox';
+    51→import { useStore } from '@/lib/store';
+    52→
+    53→// ── Types ──────────────────────────────────────────────────────────
+    54→
+    55→interface TryOnDialogProps {
+    56→  open: boolean;
+    57→  onOpenChange: (open: boolean) => void;
+    58→  productId: string;
+    59→  productName: string;
+    60→  productImage: string;
+    61→  categorySlug?: string;
+    62→  rawProductImage?: string;
+    63→  productImages?: string[];
+    64→  productDescription?: string;
+    65→  productTags?: string[];
+    66→  onBackgroundJob?: (step: 'generating' | 'result') => void;
+    67→  onResetBackground?: () => void;
+    68→  onShareToInfluencer?: (imageDataUrl: string) => void;
+    69→}
+    70→
+    71→type Step = 'upload' | 'preview' | 'generating' | 'result' | 'timeout';
+    72→
+    73→// ── Constants ──────────────────────────────────────────────────────
+    74→
+    75→const CLIENT_TIMEOUT_MS = 55_000; // 55 seconds — hard client timeout (golden rule: max 60s total)
+    76→const GENERATE_TIMEOUT_MSG = 'The AI image service took longer than expected. Please try again — it usually works on the second attempt!';
+    77→
+    78→// ── Helper: Compress image ─────────────────────────────────────────
+    79→
+    80→function compressImage(dataUrl: string, maxSize = 1024, quality = 0.85): Promise<string> {
+    81→  return new Promise((resolve, reject) => {
+    82→    const img = document.createElement('img');
+    83→    img.onload = () => {
+    84→      const canvas = document.createElement('canvas');
+    85→      let { width, height } = img;
+    86→
+    87→      if (width > maxSize || height > maxSize) {
+    88→        if (width > height) {
+    89→          height = Math.round((height * maxSize) / width);
+    90→          width = maxSize;
+    91→        } else {
+    92→          width = Math.round((width * maxSize) / height);
+    93→          height = maxSize;
+    94→        }
+    95→      }
+    96→
+    97→      canvas.width = width;
+    98→      canvas.height = height;
+    99→      const ctx = canvas.getContext('2d');
+   100→      if (!ctx) {
+   101→        reject(new Error('Could not get canvas context'));
+   102→        return;
+   103→      }
+   104→      ctx.drawImage(img, 0, 0, width, height);
+   105→      resolve(canvas.toDataURL('image/jpeg', quality));
+   106→    };
+   107→    img.onerror = () => reject(new Error('Failed to load image'));
+   108→    img.src = dataUrl;
+   109→  });
+   110→}
+   111→
+   112→// ── Helper: Fetch image as base64 ──────────────────────────────────
+   113→
+   114→async function fetchImageAsBase64(url: string): Promise<string | null> {
+   115→  if (url.startsWith('data:')) return url;
+   116→
+   117→  const strategies: string[] = [];
+   118→
+   119→  if (url.startsWith('//')) {
+   120→    strategies.push(`/api/image-proxy?url=${encodeURIComponent(`https:${url}`)}`);
+   121→  } else if (url.startsWith('http://') || url.startsWith('https://')) {
+   122→    strategies.push(`/api/image-proxy?url=${encodeURIComponent(url)}`);
+   123→    strategies.push(url);
+   124→  } else if (url.startsWith('/') && !url.startsWith('/api/')) {
+   125→    strategies.push(url);
+   126→  }
+   127→
+   128→  for (const fetchUrl of strategies) {
+   129→    try {
+   130→      const response = await fetch(fetchUrl, { signal: AbortSignal.timeout(8000) });
+   131→      if (!response.ok) continue;
+   132→      const contentType = response.headers.get('content-type') || '';
+   133→      if (!contentType.startsWith('image/') && !contentType.startsWith('application/octet-stream')) continue;
+   134→      const blob = await response.blob();
+   135→      const base64 = await new Promise<string>((resolve) => {
+   136→        const reader = new FileReader();
+   137→        reader.onloadend = () => resolve(reader.result as string);
+   138→        reader.readAsDataURL(blob);
+   139→      });
+   140→      if (base64.startsWith('data:')) return base64;
+   141→    } catch {}
+   142→  }
+   143→  return null;
+   144→}
+   145→
+   146→// ── Helper: Add 3BOXES watermark to image ─────────────────────────
+   147→// This is CRITICAL — every saved/downloaded image MUST have the 3BOXES logo
+   148→
+   149→function add3BoxesWatermark(imageDataUrl: string, productName: string): Promise<string> {
+   150→  return new Promise((resolve) => {
+   151→    try {
+   152→      const img = document.createElement('img');
+   153→      img.crossOrigin = 'anonymous';
+   154→      img.onload = () => {
+   155→        try {
+   156→          const canvas = document.createElement('canvas');
+   157→          // Use the FULL image dimensions — never crop
+   158→          canvas.width = img.naturalWidth;
+   159→          canvas.height = img.naturalHeight;
+   160→          const ctx = canvas.getContext('2d');
+   161→          if (!ctx) {
+   162→            resolve(imageDataUrl);
+   163→            return;
+   164→          }
+   165→
+   166→          // Draw the original image at FULL size
+   167→          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+   168→
+   169→          const w = canvas.width;
+   170→          const h = canvas.height;
+   171→
+   172→          // ── Top-right "3BOXES AI TRY-ON" badge ──
+   173→          ctx.save();
+   174→          ctx.globalAlpha = 0.88;
+   175→          const badgeW = Math.max(Math.floor(w * 0.34), 120);
+   176→          const badgeH = Math.max(Math.floor(h * 0.04), 28);
+   177→          const badgeX = w - badgeW - 12;
+   178→          const badgeY = 12;
+   179→          ctx.fillStyle = '#1c1917';
+   180→          ctx.beginPath();
+   181→          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+   182→          ctx.fill();
+   183→          // Gold border
+   184→          ctx.strokeStyle = 'rgba(218,165,32,0.6)';
+   185→          ctx.lineWidth = 1;
+   186→          ctx.beginPath();
+   187→          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 6);
+   188→          ctx.stroke();
+   189→          // Text
+   190→          ctx.fillStyle = '#daa520';
+   191→          const badgeFontSize = Math.max(10, Math.floor(badgeH * 0.52));
+   192→          ctx.font = `bold ${badgeFontSize}px Arial, Helvetica, sans-serif`;
+   193→          ctx.textAlign = 'center';
+   194→          ctx.textBaseline = 'middle';
+   195→          ctx.fillText('3BOXES AI TRY-ON', badgeX + badgeW / 2, badgeY + badgeH / 2);
+   196→          ctx.restore();
+   197→
+   198→          // ── Bottom watermark bar ──
+   199→          ctx.save();
+   200→          ctx.globalAlpha = 0.82;
+   201→          const barH = Math.max(40, Math.floor(h * 0.06));
+   202→          const barY = h - barH - 8;
+   203→          ctx.fillStyle = 'rgba(28,25,23,0.75)';
+   204→          ctx.beginPath();
+   205→          ctx.roundRect(w * 0.08, barY, w * 0.84, barH, 8);
+   206→          ctx.fill();
+   207→
+   208→          // Product name (gold)
+   209→          const nameFontSize = Math.max(12, Math.floor(barH * 0.36));
+   210→          ctx.fillStyle = '#daa520';
+   211→          ctx.font = `bold ${nameFontSize}px Arial, Helvetica, sans-serif`;
+   212→          ctx.textAlign = 'center';
+   213→          ctx.textBaseline = 'middle';
+   214→          const displayName = (productName || 'Product').substring(0, 40);
+   215→          ctx.fillText(displayName, w / 2, barY + barH * 0.38);
+   216→
+   217→          // "3BOXES GIFTS • AI Style Preview" branding
+   218→          const brandFontSize = Math.max(9, Math.floor(barH * 0.26));
+   219→          ctx.globalAlpha = 0.65;
+   220→          ctx.fillStyle = '#a8a29e';
+   221→          ctx.font = `${brandFontSize}px Arial, Helvetica, sans-serif`;
+   222→          ctx.fillText('3BOXES GIFTS \u2022 AI Style Preview', w / 2, barY + barH * 0.72);
+   223→          ctx.restore();
+   224→
+   225→          resolve(canvas.toDataURL('image/png'));
+   226→        } catch {
+   227→          resolve(imageDataUrl);
+   228→        }
+   229→      };
+   230→      img.onerror = () => resolve(imageDataUrl);
+   231→      img.src = imageDataUrl;
+   232→    } catch {
+   233→      resolve(imageDataUrl);
+   234→    }
+   235→  });
+   236→}
+   237→
+   238→// ── Progress Messages ───────────────────────────────────────────────
+   239→
+   240→const PROGRESS_MESSAGES = [
+   241→  { at: 0, text: 'Uploading your photo to the AI service...' },
+   242→  { at: 15, text: 'AI is analysing the product photo...' },
+   243→  { at: 30, text: 'AI is draping the product onto your photo...' },
+   244→  { at: 45, text: 'Almost there — generating the final image...' },
+   245→  { at: 55, text: 'Adding finishing touches...' },
+   246→];
+   247→
+   248→// ── Component ──────────────────────────────────────────────────────
+   249→
+   250→export function TryOnDialog({
+   251→  open,
+   252→  onOpenChange,
+   253→  productId,
+   254→  productName,
+   255→  productImage,
+   256→  categorySlug,
+   257→  rawProductImage,
+   258→  productDescription,
+   259→  productTags,
+   260→  onBackgroundJob,
+   261→  onResetBackground,
+   262→  onShareToInfluencer,
+   263→}: TryOnDialogProps) {
+   264→  const [step, setStep] = useState<Step>('upload');
+   265→  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
+   266→  const [selfieData, setSelfieData] = useState<string | null>(null);
+   267→  const [resultImage, setResultImage] = useState<string | null>(null);
+   268→  const [watermarkedResult, setWatermarkedResult] = useState<string | null>(null);
+   269→  const [errorMessage, setErrorMessage] = useState<string>('');
+   270→  const [progressPercent, setProgressPercent] = useState(0);
+   271→  const [progressText, setProgressText] = useState('');
+   272→  const [spaceWarming, setSpaceWarming] = useState(false);
+   273→  const [spaceReady, setSpaceReady] = useState(false);
+   274→  const [isRetrying, setIsRetrying] = useState(false);
+   275→  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+   276→
+   277→  // Disclaimer state
+   278→  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+   279→  const [showDisclaimer, setShowDisclaimer] = useState(false);
+   280→  const [disclaimerChecked, setDisclaimerChecked] = useState(false);
+   281→
+   282→  // Gallery sharing state
+   283→  const [galleryConsent, setGalleryConsent] = useState(false);
+   284→  const [gallerySubmitting, setGallerySubmitting] = useState(false);
+   285→  const [gallerySubmitted, setGallerySubmitted] = useState(false);
+   286→  const [galleryError, setGalleryError] = useState('');
+   287→
+   288→  const { authUser } = useStore();
+   289→
+   290→  const fileInputRef = useRef<HTMLInputElement>(null);
+   291→  const abortRef = useRef<AbortController | null>(null);
+   292→  const generatingStartRef = useRef<number>(0);
+   293→  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null);
+   294→  const elapsedIntervalRef = useRef<NodeJS.Timeout | null>(null);
+   295→
+   296→  // ── Pre-warm IDM-VTON Space when dialog opens ───────────────────
+   297→  useEffect(() => {
+   298→    if (!open) return;
+   299→
+   300→    setSpaceWarming(true);
+   301→    setSpaceReady(false);
+   302→
+   303→    fetch('/api/try-on/status', { method: 'POST' })
+   304→      .then(res => res.json())
+   305→      .then(data => {
+   306→        setSpaceReady(data.spaceRunning === true || data.available === true);
+   307→        setSpaceWarming(false);
+   308→      })
+   309→      .catch(() => {
+   310→        setSpaceWarming(false);
+   311→      });
+   312→  }, [open]);
+   313→
+   314→  // ── Elapsed time tracker ──
+   315→  useEffect(() => {
+   316→    if (step !== 'generating') return;
+   317→    generatingStartRef.current = Date.now();
+   318→    setElapsedSeconds(0);
+   319→    elapsedIntervalRef.current = setInterval(() => {
+   320→      if (generatingStartRef.current) {
+   321→        setElapsedSeconds(Math.floor((Date.now() - generatingStartRef.current) / 1000));
+   322→      }
+   323→    }, 1000);
+   324→    return () => {
+   325→      if (elapsedIntervalRef.current) clearInterval(elapsedIntervalRef.current);
+   326→    };
+   327→  }, [step]);
+   328→
+   329→  // ── Reset ────────────────────────────────────────────────────────
+   330→  const reset = useCallback(() => {
+   331→    if (abortRef.current) {
+   332→      abortRef.current.abort();
+   333→      abortRef.current = null;
+   334→    }
+   335→    if (progressIntervalRef.current) {
+   336→      clearInterval(progressIntervalRef.current);
+   337→      progressIntervalRef.current = null;
+   338→    }
+   339→    if (elapsedIntervalRef.current) {
+   340→      clearInterval(elapsedIntervalRef.current);
+   341→      elapsedIntervalRef.current = null;
+   342→    }
+   343→    setStep('upload');
+   344→    setSelfiePreview(null);
+   345→    setSelfieData(null);
+   346→    setResultImage(null);
+   347→    setWatermarkedResult(null);
+   348→    setErrorMessage('');
+   349→    setProgressPercent(0);
+   350→    setProgressText('');
+   351→    setIsRetrying(false);
+   352→    setElapsedSeconds(0);
+   353→    setGalleryConsent(false);
+   354→    setGallerySubmitting(false);
+   355→    setGallerySubmitted(false);
+   356→    setGalleryError('');
+   357→    onResetBackground?.();
+   358→  }, [onResetBackground]);
+   359→
+   360→  // ── Disclaimer handlers ──────────────────────────────────────────
+   361→  // KEY FIX: After accepting disclaimer, IMMEDIATELY open file picker
+   362→  // so the user doesn't have to click "Upload" again
+   363→  const handleUploadClick = useCallback(() => {
+   364→    if (!disclaimerAccepted) {
+   365→      setShowDisclaimer(true);
+   366→      return;
+   367→    }
+   368→    fileInputRef.current?.click();
+   369→  }, [disclaimerAccepted]);
+   370→
+   371→  const handleDisclaimerAccept = useCallback(() => {
+   372→    setDisclaimerAccepted(true);
+   373→    setShowDisclaimer(false);
+   374→    setDisclaimerChecked(false);
+   375→    // CRITICAL: Immediately open file picker after accepting — NO second click needed!
+   376→    // Use requestAnimationFrame for more reliable cross-browser behavior
+   377→    requestAnimationFrame(() => {
+   378→      setTimeout(() => {
+   379→        fileInputRef.current?.click();
+   380→      }, 50);
+   381→    });
+   382→  }, []);
+   383→
+   384→  const handleDisclaimerCancel = useCallback(() => {
+   385→    setShowDisclaimer(false);
+   386→    setDisclaimerChecked(false);
+   387→  }, []);
+   388→
+   389→  // ── Handle file selection — INSTANT preview ──────────────────────
+   390→  const handleFileSelect = useCallback(
+   391→    async (e: React.ChangeEvent<HTMLInputElement>) => {
+   392→      const file = e.target.files?.[0];
+   393→      if (!file) return;
+   394→
+   395→      if (!file.type.startsWith('image/')) {
+   396→        setErrorMessage('Please upload an image file (JPG, PNG, WebP)');
+   397→        return;
+   398→      }
+   399→
+   400→      if (file.size > 10 * 1024 * 1024) {
+   401→        setErrorMessage('Image must be less than 10MB');
+   402→        return;
+   403→      }
+   404→
+   405→      setErrorMessage('');
+   406→
+   407→      // KEY FIX: INSTANT PREVIEW — Read file and show IMMEDIATELY
+   408→      const reader = new FileReader();
+   409→      reader.onload = async (ev) => {
+   410→        const originalDataUrl = ev.target?.result as string;
+   411→        if (!originalDataUrl) return;
+   412→
+   413→        // Show preview IMMEDIATELY with the original image — no waiting!
+   414→        setSelfiePreview(originalDataUrl);
+   415→        setStep('preview');
+   416→
+   417→        // Compress in the background (smaller = faster upload to API)
+   418→        try {
+   419→          const compressed = await compressImage(originalDataUrl, 1024, 0.85);
+   420→          setSelfieData(compressed);
+   421→        } catch {
+   422→          // If compression fails, use the original
+   423→          setSelfieData(originalDataUrl);
+   424→        }
+   425→      };
+   426→      reader.readAsDataURL(file);
+   427→
+   428→      // Reset the file input so the same file can be re-selected
+   429→      e.target.value = '';
+   430→    },
+   431→    []
+   432→  );
+   433→
+   434→  // ── Handle drag & drop ───────────────────────────────────────────
+   435→  const handleDrop = useCallback(
+   436→    async (e: React.DragEvent) => {
+   437→      e.preventDefault();
+   438→      e.stopPropagation();
+   439→
+   440→      // Must accept disclaimer first
+   441→      if (!disclaimerAccepted) {
+   442→        setShowDisclaimer(true);
+   443→        return;
+   444→      }
+   445→
+   446→      const file = e.dataTransfer.files?.[0];
+   447→      if (!file || !file.type.startsWith('image/')) {
+   448→        setErrorMessage('Please drop an image file');
+   449→        return;
+   450→      }
+   451→
+   452→      setErrorMessage('');
+   453→
+   454→      const reader = new FileReader();
+   455→      reader.onload = async (ev) => {
+   456→        const originalDataUrl = ev.target?.result as string;
+   457→        if (!originalDataUrl) return;
+   458→
+   459→        // INSTANT preview
+   460→        setSelfiePreview(originalDataUrl);
+   461→        setStep('preview');
+   462→
+   463→        try {
+   464→          const compressed = await compressImage(originalDataUrl, 1024, 0.85);
+   465→          setSelfieData(compressed);
+   466→        } catch {
+   467→          setSelfieData(originalDataUrl);
+   468→        }
+   469→      };
+   470→      reader.readAsDataURL(file);
+   471→    },
+   472→    [disclaimerAccepted]
+   473→  );
+   474→
+   475→  const handleDragOver = useCallback((e: React.DragEvent) => {
+   476→    e.preventDefault();
+   477→    e.stopPropagation();
+   478→  }, []);
+   479→
+   480→  // ── Generate Try-On ──────────────────────────────────────────────
+   481→  const handleGenerate = useCallback(async () => {
+   482→    if (!selfieData) {
+   483→      setErrorMessage('Please wait for image to finish processing...');
+   484→      return;
+   485→    }
+   486→
+   487→    setStep('generating');
+   488→    setErrorMessage('');
+   489→    setProgressPercent(10);
+   490→    setProgressText('Preparing your photo...');
+   491→    onBackgroundJob?.('generating');
+   492→
+   493→    // Abort any previous request
+   494→    if (abortRef.current) abortRef.current.abort();
+   495→    const controller = new AbortController();
+   496→    abortRef.current = controller;
+   497→
+   498→    // Pre-resolve product image to base64 (with timeout)
+   499→    let productImageBase64: string | undefined;
+   500→    try {
+   501→      const imgToFetch = rawProductImage || productImage;
+   502→      if (imgToFetch) {
+   503→        productImageBase64 = await Promise.race([
+   504→          fetchImageAsBase64(imgToFetch),
+   505→          new Promise<null>(r => setTimeout(() => r(null), 5000)),
+   506→        ]) || undefined;
+   507→      }
+   508→    } catch {}
+   509→
+   510→    // Start progress simulation
+   511→    progressIntervalRef.current = setInterval(() => {
+   512→      setProgressPercent(prev => {
+   513→        if (prev >= 90) return prev;
+   514→        const next = prev + 1;
+   515→        for (let i = PROGRESS_MESSAGES.length - 1; i >= 0; i--) {
+   516→          if (next >= PROGRESS_MESSAGES[i].at) {
+   517→            setProgressText(PROGRESS_MESSAGES[i].text);
+   518→            break;
+   519→          }
+   520→        }
+   521→        return next;
+   522→      });
+   523→    }, 1500);
+   524→
+   525→    // HARD 55-second timeout — golden rule: never make user wait more than 60s
+   526→    const timeoutId = setTimeout(() => {
+   527→      if (abortRef.current) {
+   528→        abortRef.current.abort();
+   529→        abortRef.current = null;
+   530→      }
+   531→      if (progressIntervalRef.current) {
+   532→        clearInterval(progressIntervalRef.current);
+   533→        progressIntervalRef.current = null;
+   534→      }
+   535→      if (elapsedIntervalRef.current) {
+   536→        clearInterval(elapsedIntervalRef.current);
+   537→        elapsedIntervalRef.current = null;
+   538→      }
+   539→      setStep('timeout');
+   540→      setErrorMessage(GENERATE_TIMEOUT_MSG);
+   541→    }, CLIENT_TIMEOUT_MS);
+   542→
+   543→    try {
+   544→      const response = await fetch('/api/try-on', {
+   545→        method: 'POST',
+   546→        headers: { 'Content-Type': 'application/json' },
+   547→        body: JSON.stringify({
+   548→          productId,
+   549→          selfieData,
+   550→          productImageUrl: rawProductImage || productImage,
+   551→          productImageBase64,
+   552→          productName,
+   553→          categorySlug: categorySlug || '',
+   554→          productDescription: productDescription || '',
+   555→          productTags: productTags || [],
+   556→        }),
+   557→        signal: controller.signal,
+   558→      });
+   559→
+   560→      clearTimeout(timeoutId);
+   561→
+   562→      if (progressIntervalRef.current) {
+   563→        clearInterval(progressIntervalRef.current);
+   564→        progressIntervalRef.current = null;
+   565→      }
+   566→
+   567→      const data = await response.json();
+   568→
+   569→      if (data.success && data.imageUrl) {
+   570→        // SUCCESS — show the AI-generated try-on image
+   571→        setProgressPercent(100);
+   572→        setProgressText('Done!');
+   573→        setResultImage(data.imageUrl);
+   574→
+   575→        // Add 3BOXES watermark — CRITICAL for branding
+   576→        try {
+   577→          const watermarked = await add3BoxesWatermark(data.imageUrl, productName);
+   578→          setWatermarkedResult(watermarked);
+   579→        } catch {
+   580→          setWatermarkedResult(data.imageUrl);
+   581→        }
+   582→
+   583→        setStep('result');
+   584→        onBackgroundJob?.('result');
+   585→      } else {
+   586→        // FAILED — show timeout/error
+   587→        setStep('timeout');
+   588→        setErrorMessage(data.error || GENERATE_TIMEOUT_MSG);
+   589→      }
+   590→    } catch (err) {
+   591→      clearTimeout(timeoutId);
+   592→      if (progressIntervalRef.current) {
+   593→        clearInterval(progressIntervalRef.current);
+   594→        progressIntervalRef.current = null;
+   595→      }
+   596→      if (elapsedIntervalRef.current) {
+   597→        clearInterval(elapsedIntervalRef.current);
+   598→        elapsedIntervalRef.current = null;
+   599→      }
+   600→
+   601→      if (controller.signal.aborted) {
+   602→        return;
+   603→      }
+   604→
+   605→      setStep('timeout');
+   606→      setErrorMessage(
+   607→        err instanceof Error && err.name === 'TimeoutError'
+   608→          ? GENERATE_TIMEOUT_MSG
+   609→          : 'Network error. Please check your connection and try again.'
+   610→      );
+   611→    }
+   612→  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, productDescription, productTags, onBackgroundJob]);
+   613→
+   614→  // ── Retry ────────────────────────────────────────────────────────
+   615→  const handleRetry = useCallback(async () => {
+   616→    setIsRetrying(true);
+   617→    setStep('generating');
+   618→    setErrorMessage('');
+   619→    setProgressPercent(5);
+   620→    setProgressText('Retrying AI generation...');
+   621→
+   622→    // Brief pause before retry
+   623→    await new Promise(r => setTimeout(r, 1000));
+   624→
+   625→    setIsRetrying(false);
+   626→    handleGenerate();
+   627→  }, [handleGenerate]);
+   628→
+   629→  // ── Download result with 3BOXES watermark ────────────────────────
+   630→  // CRITICAL: Always download the WATERMARKED version so 3BOXES branding is included
+   631→  const handleDownload = useCallback(() => {
+   632→    const imageToDownload = watermarkedResult || resultImage;
+   633→    if (!imageToDownload) return;
+   634→
+   635→    const link = document.createElement('a');
+   636→    link.href = imageToDownload;
+   637→    link.download = `3boxes-tryon-${productName.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 30)}.png`;
+   638→    document.body.appendChild(link);
+   639→    link.click();
+   640→    document.body.removeChild(link);
+   641→  }, [resultImage, watermarkedResult, productName]);
+   642→
+   643→  // ── Get category label ──
+   644→  const getCategoryLabel = () => {
+   645→    const cat = (categorySlug || '').toLowerCase();
+   646→    if (cat.includes('saree') || cat.includes('fashion')) return 'see how this outfit looks on you';
+   647→    if (cat.includes('jewelry') || cat.includes('watch')) return 'see how this accessory looks on you';
+   648→    if (cat.includes('fragrance')) return 'see how this fragrance suits you';
+   649→    return 'see how this product looks on you';
+   650→  };
+   651→
+   652→  // ── Render ───────────────────────────────────────────────────────
+   653→  return (
+   654→    <Dialog
+   655→      open={open}
+   656→      onOpenChange={(isOpen) => {
+   657→        if (!isOpen) reset();
+   658→        onOpenChange(isOpen);
+   659→      }}
+   660→    >
+   661→      <DialogContent className="max-w-lg border-amber-900/30 bg-stone-950 p-0 overflow-hidden sm:max-w-xl max-h-[90vh] overflow-y-auto">
+   662→        {/* Header */}
+   663→        <div className="relative bg-gradient-to-r from-amber-900/40 via-rose-900/30 to-amber-900/40 px-6 pt-6 pb-4">
+   664→          <DialogHeader>
+   665→            <DialogTitle className="flex items-center gap-2 text-xl font-bold text-amber-100">
+   666→              <Sparkles className="h-5 w-5 text-amber-400" />
+   667→              AI Virtual Try-On
+   668→            </DialogTitle>
+   669→            <DialogDescription className="text-amber-200/50">
+   670→              {step === 'result'
+   671→                ? 'Here\'s how it looks on you!'
+   672→                : step === 'timeout'
+   673→                ? 'Generation timed out'
+   674→                : <>
+   675→                    Upload your selfie and{' '}
+   676→                    <span className="text-amber-300">{getCategoryLabel()}</span>
+   677→                  </>
+   678→              }
+   679→            </DialogDescription>
+   680→          </DialogHeader>
+   681→
+   682→          {/* Space status indicator */}
+   683→          {step === 'upload' && (
+   684→            <div className="mt-2 flex items-center gap-1.5 text-xs">
+   685→              {spaceWarming ? (
+   686→                <>
+   687→                  <Loader2 className="h-3 w-3 animate-spin text-amber-400" />
+   688→                  <span className="text-amber-300/60">Warming up AI service...</span>
+   689→                </>
+   690→              ) : spaceReady ? (
+   691→                <>
+   692→                  <Zap className="h-3 w-3 text-green-400" />
+   693→                  <span className="text-green-300/60">AI service ready</span>
+   694→                </>
+   695→              ) : (
+   696→                <>
+   697→                  <div className="h-2 w-2 rounded-full bg-amber-400/50" />
+   698→                  <span className="text-amber-300/40">AI service may need warm-up</span>
+   699→                </>
+   700→              )}
+   701→            </div>
+   702→          )}
+   703→        </div>
+   704→
+   705→        <div className="px-6 pb-6">
+   706→          <AnimatePresence mode="wait">
+   707→            {/* ── Disclaimer Dialog ── */}
+   708→            {showDisclaimer && (
+   709→              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4">
+   710→                <motion.div
+   711→                  initial={{ opacity: 0, scale: 0.95 }}
+   712→                  animate={{ opacity: 1, scale: 1 }}
+   713→                  exit={{ opacity: 0, scale: 0.95 }}
+   714→                  className="w-full max-w-md rounded-2xl border border-amber-900/30 bg-stone-950 p-6 shadow-2xl"
+   715→                >
+   716→                  <div className="mb-4 flex items-center gap-2">
+   717→                    <ShieldCheck className="h-5 w-5 text-teal-400" />
+   718→                    <h3 className="text-lg font-bold text-amber-100">Selfie Upload Guidelines</h3>
+   719→                  </div>
+   720→
+   721→                  <div className="mb-5 space-y-3 text-sm">
+   722→                    <div>
+   723→                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-400/70">Accepted</p>
+   724→                      <ul className="space-y-1.5">
+   725→                        <li className="flex items-start gap-2 text-amber-200/70">
+   726→                          <span className="mt-0.5 text-emerald-500">&#10003;</span>
+   727→                          Only clean, clear, well-lit selfies
+   728→                        </li>
+   729→                        <li className="flex items-start gap-2 text-amber-200/70">
+   730→                          <span className="mt-0.5 text-emerald-500">&#10003;</span>
+   731→                          Face must be clearly visible and facing the camera
+   732→                        </li>
+   733→                        <li className="flex items-start gap-2 text-amber-200/70">
+   734→                          <span className="mt-0.5 text-emerald-500">&#10003;</span>
+   735→                          Only your own selfie is permitted
+   736→                        </li>
+   737→                      </ul>
+   738→                    </div>
+   739→                    <div>
+   740→                      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-red-400/70">Not Accepted</p>
+   741→                      <ul className="space-y-1.5">
+   742→                        <li className="flex items-start gap-2 text-amber-200/70">
+   743→                          <span className="mt-0.5 text-red-500">&#10007;</span>
+   744→                          Obscene, explicit, or inappropriate images
+   745→                        </li>
+   746→                        <li className="flex items-start gap-2 text-amber-200/70">
+   747→                          <span className="mt-0.5 text-red-500">&#10007;</span>
+   748→                          Blurry, dark, or heavily filtered photos
+   749→                        </li>
+   750→                        <li className="flex items-start gap-2 text-amber-200/70">
+   751→                          <span className="mt-0.5 text-red-500">&#10007;</span>
+   752→                          Group photos or photos with face coverings
+   753→                        </li>
+   754→                      </ul>
+   755→                    </div>
+   756→                  </div>
+   757→
+   758→                  <label className="mb-5 flex cursor-pointer items-start gap-3 rounded-lg border border-amber-900/20 bg-stone-900/40 p-3 transition-colors hover:border-amber-700/30">
+   759→                    <Checkbox
+   760→                      checked={disclaimerChecked}
+   761→                      onCheckedChange={(checked) => setDisclaimerChecked(checked === true)}
+   762→                      className="mt-0.5 data-[state=checked]:bg-teal-600 data-[state=checked]:border-teal-600"
+   763→                    />
+   764→                    <span className="text-xs leading-relaxed text-amber-200/60">
+   765→                      I confirm this is my own selfie and it meets the above guidelines
+   766→                    </span>
+   767→                  </label>
+   768→
+   769→                  <div className="flex gap-3">
+   770→                    <Button
+   771→                      variant="outline"
+   772→                      onClick={handleDisclaimerCancel}
+   773→                      className="flex-1 border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
+   774→                    >
+   775→                      Cancel
+   776→                    </Button>
+   777→                    <Button
+   778→                      onClick={handleDisclaimerAccept}
+   779→                      disabled={!disclaimerChecked}
+   780→                      className="flex-1 bg-teal-600 text-white hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed"
+   781→                    >
+   782→                      Accept & Upload Photo
+   783→                    </Button>
+   784→                  </div>
+   785→                </motion.div>
+   786→              </div>
+   787→            )}
+   788→
+   789→            {/* ── Step 1: Upload ── */}
+   790→            {step === 'upload' && (
+   791→              <motion.div
+   792→                key="upload"
+   793→                initial={{ opacity: 0, y: 10 }}
+   794→                animate={{ opacity: 1, y: 0 }}
+   795→                exit={{ opacity: 0, y: -10 }}
+   796→                className="space-y-4"
+   797→              >
+   798→                {/* Product Preview */}
+   799→                <div className="flex items-center gap-3 rounded-lg border border-amber-900/20 bg-stone-900/60 p-3">
+   800→                  <div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-md">
+   801→                    <img
+   802→                      src={productImage}
+   803→                      alt={productName}
+   804→                      className="absolute inset-0 h-full w-full object-cover"
+   805→                    />
+   806→                  </div>
+   807→                  <div>
+   808→                    <p className="text-sm font-semibold text-amber-100">{productName}</p>
+   809→                    <p className="text-xs text-amber-200/40">Selected for try-on</p>
+   810→                  </div>
+   811→                </div>
+   812→
+   813→                {/* Upload Area */}
+   814→                <div
+   815→                  onDrop={handleDrop}
+   816→                  onDragOver={handleDragOver}
+   817→                  onClick={handleUploadClick}
+   818→                  className="group flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-amber-900/30 bg-stone-900/30 px-6 py-10 transition-all hover:border-amber-600/40 hover:bg-stone-900/50"
+   819→                >
+   820→                  <div className="mb-4 rounded-full bg-amber-900/20 p-4 transition-colors group-hover:bg-amber-900/30">
+   821→                    <Camera className="h-8 w-8 text-amber-400/60 transition-colors group-hover:text-amber-400" />
+   822→                  </div>
+   823→                  <p className="text-sm font-medium text-amber-200/70">
+   824→                    Upload your selfie
+   825→                  </p>
+   826→                  <p className="mt-1 text-xs text-amber-200/40">
+   827→                    Drag & drop or click to browse &middot; JPG, PNG, WebP
+   828→                  </p>
+   829→                </div>
+   830→
+   831→                <input
+   832→                  ref={fileInputRef}
+   833→                  type="file"
+   834→                  accept="image/jpeg,image/png,image/webp"
+   835→                  className="hidden"
+   836→                  onChange={handleFileSelect}
+   837→                />
+   838→
+   839→                {/* Tips */}
+   840→                <div className="rounded-lg bg-amber-900/10 p-3">
+   841→                  <p className="text-xs text-amber-200/50">
+   842→                    <span className="font-semibold text-amber-300/60">Tips:</span> Use a clear,
+   843→                    well-lit selfie facing the camera. Full-body or
+   844→                    upper-body photos work best for clothing items.
+   845→                  </p>
+   846→                </div>
+   847→              </motion.div>
+   848→            )}
+   849→
+   850→            {/* ── Step 2: Preview ── */}
+   851→            {step === 'preview' && (
+   852→              <motion.div
+   853→                key="preview"
+   854→                initial={{ opacity: 0, y: 10 }}
+   855→                animate={{ opacity: 1, y: 0 }}
+   856→                exit={{ opacity: 0, y: -10 }}
+   857→                className="space-y-4"
+   858→              >
+   859→                {/* Side-by-side preview */}
+   860→                <div className="grid grid-cols-2 gap-3">
+   861→                  <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
+   862→                    {selfiePreview && (
+   863→                      <img
+   864→                        src={selfiePreview}
+   865→                        alt="Your selfie"
+   866→                        className="absolute inset-0 h-full w-full object-cover"
+   867→                      />
+   868→                    )}
+   869→                    <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
+   870→                      You
+   871→                    </div>
+   872→                  </div>
+   873→                  <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
+   874→                    <img
+   875→                      src={productImage}
+   876→                      alt={productName}
+   877→                      className="absolute inset-0 h-full w-full object-cover"
+   878→                    />
+   879→                    <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
+   880→                      Product
+   881→                    </div>
+   882→                  </div>
+   883→                </div>
+   884→
+   885→                {/* Generate button */}
+   886→                <Button
+   887→                  onClick={handleGenerate}
+   888→                  disabled={!selfieData}
+   889→                  className="w-full bg-amber-700 hover:bg-amber-600 text-white font-semibold py-3 text-base"
+   890→                  size="lg"
+   891→                >
+   892→                  {!selfieData ? (
+   893→                    <>
+   894→                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+   895→                      Processing photo...
+   896→                    </>
+   897→                  ) : (
+   898→                    <>
+   899→                      <Sparkles className="mr-2 h-5 w-5" />
+   900→                      Create Virtual Try-On
+   901→                    </>
+   902→                  )}
+   903→                </Button>
+   904→
+   905→                {!selfieData && (
+   906→                  <p className="text-center text-xs text-amber-200/40">
+   907→                    Compressing your photo for faster upload...
+   908→                  </p>
+   909→                )}
+   910→
+   911→                {/* Change photo link */}
+   912→                <button
+   913→                  onClick={() => {
+   914→                    setSelfiePreview(null);
+   915→                    setSelfieData(null);
+   916→                    setStep('upload');
+   917→                  }}
+   918→                  className="mx-auto block text-sm text-amber-400/60 hover:text-amber-400 underline"
+   919→                >
+   920→                  Change photo
+   921→                </button>
+   922→              </motion.div>
+   923→            )}
+   924→
+   925→            {/* ── Step 3: Generating ── */}
+   926→            {step === 'generating' && (
+   927→              <motion.div
+   928→                key="generating"
+   929→                initial={{ opacity: 0, y: 10 }}
+   930→                animate={{ opacity: 1, y: 0 }}
+   931→                exit={{ opacity: 0, y: -10 }}
+   932→                className="space-y-6 py-4"
+   933→              >
+   934→                {/* Animated AI processing visual */}
+   935→                <div className="flex flex-col items-center gap-4">
+   936→                  <div className="relative">
+   937→                    <div className="h-20 w-20 rounded-full bg-amber-900/20 flex items-center justify-center">
+   938→                      <Sparkles className="h-10 w-10 text-amber-400 animate-pulse" />
+   939→                    </div>
+   940→                    <div className="absolute -inset-2 rounded-full border-2 border-amber-400/20 animate-ping" />
+   941→                  </div>
+   942→
+   943→                  <div className="text-center">
+   944→                    <p className="text-lg font-semibold text-amber-100">
+   945→                      {isRetrying ? 'Retrying...' : 'Creating Your Look'}
+   946→                    </p>
+   947→                    <p className="mt-1 text-sm text-amber-200/50">{progressText}</p>
+   948→                  </div>
+   949→                </div>
+   950→
+   951→                {/* Progress bar */}
+   952→                <div className="space-y-2">
+   953→                  <div className="h-2 w-full overflow-hidden rounded-full bg-stone-800">
+   954→                    <div
+   955→                      className="h-full bg-amber-500 transition-all duration-500"
+   956→                      style={{ width: `${progressPercent}%` }}
+   957→                    />
+   958→                  </div>
+   959→                  <div className="flex justify-between text-xs text-amber-200/40">
+   960→                    <span>{progressPercent}% complete</span>
+   961→                    <span className="flex items-center gap-1">
+   962→                      <Clock className="h-3 w-3" />
+   963→                      {elapsedSeconds}s / 55s max
+   964→                    </span>
+   965→                  </div>
+   966→                </div>
+   967→
+   968→                {/* Info box */}
+   969→                <div className="rounded-lg bg-amber-900/10 p-3">
+   970→                  <p className="text-xs text-amber-200/50">
+   971→                    <span className="font-semibold text-amber-300/60">How it works:</span>{' '}
+   972→                    Our AI uses YOUR selfie as the reference image — preserving your
+   973→                    face, gender, and body type — then drapes the product onto you
+   974→                    with realistic fit and folds. We also analyse the actual product
+   975→                    photo so the colours, pattern, and style match exactly.
+   976→                    This usually takes 15–25 seconds.
+   977→                  </p>
+   978→                </div>
+   979→
+   980→                {/* Cancel button */}
+   981→                <Button
+   982→                  variant="ghost"
+   983→                  className="mx-auto text-amber-200/40 hover:text-amber-200"
+   984→                  onClick={() => {
+   985→                    if (abortRef.current) abortRef.current.abort();
+   986→                    reset();
+   987→                  }}
+   988→                >
+   989→                  Cancel
+   990→                </Button>
+   991→              </motion.div>
+   992→            )}
+   993→
+   994→            {/* ── Step 4: Result ── */}
+   995→            {step === 'result' && (watermarkedResult || resultImage) && (
+   996→              <motion.div
+   997→                key="result"
+   998→                initial={{ opacity: 0, scale: 0.95 }}
+   999→                animate={{ opacity: 1, scale: 1 }}
+  1000→                exit={{ opacity: 0, scale: 0.95 }}
+  1001→                className="space-y-4"
+  1002→              >
+  1003→                {/* Result image — show watermarked version */}
+  1004→                <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-amber-900/20 bg-stone-900/40">
+  1005→                  <img
+  1006→                    src={watermarkedResult || resultImage!}
+  1007→                    alt={`${productName} virtual try-on`}
+  1008→                    className="absolute inset-0 h-full w-full object-contain"
+  1009→                  />
+  1010→                  <div className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-amber-300 flex items-center gap-1">
+  1011→                    <Sparkles className="h-3 w-3" /> AI Try-On
+  1012→                  </div>
+  1013→                </div>
+  1014→
+  1015→                {/* Action buttons */}
+  1016→                <div className="flex gap-3">
+  1017→                  <Button
+  1018→                    onClick={handleDownload}
+  1019→                    className="flex-1 bg-amber-700 hover:bg-amber-600 text-white"
+  1020→                  >
+  1021→                    <Download className="mr-2 h-4 w-4" />
+  1022→                    Download
+  1023→                  </Button>
+  1024→                  <Button
+  1025→                    onClick={reset}
+  1026→                    variant="outline"
+  1027→                    className="flex-1 border-amber-900/30 text-amber-200 hover:bg-amber-900/20"
+  1028→                  >
+  1029→                    <RotateCcw className="mr-2 h-4 w-4" />
+  1030→                    Try Again
+  1031→                  </Button>
+  1032→                </div>
+  1033→
+  1034→                {/* Share to AI Style Gallery — with admin approval workflow */}
+  1035→                <div className="rounded-xl border border-amber-600/30 bg-gradient-to-r from-amber-900/20 via-rose-900/15 to-amber-900/20 p-4 space-y-3">
+  1036→                  <div className="flex items-center gap-2">
+  1037→                    <Share2 className="h-4 w-4 text-amber-400" />
+  1038→                    <p className="text-sm font-semibold text-amber-200">Share Your Style</p>
+  1039→                  </div>
+  1040→
+  1041→                  {gallerySubmitted ? (
+  1042→                    /* Success state — pending admin approval */
+  1043→                    <div className="flex flex-col items-center gap-2 py-2">
+  1044→                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-600/20">
+  1045→                        <CheckCircle className="h-5 w-5 text-amber-400" />
+  1046→                      </div>
+  1047→                      <p className="text-sm font-medium text-amber-200">Submitted for Approval!</p>
+  1048→                      <p className="text-xs text-amber-200/50 text-center">
+  1049→                        Your style is being reviewed by our team. It will appear in the AI Style Gallery once approved.
+  1050→                      </p>
+  1051→                      <div className="flex items-center gap-1.5 mt-1 rounded-full bg-amber-600/10 px-3 py-1 border border-amber-600/20">
+  1052→                        <Clock className="h-3 w-3 text-amber-400" />
+  1053→                        <span className="text-[10px] font-medium text-amber-300">Pending Admin Approval</span>
+  1054→                      </div>
+  1055→                    </div>
+  1056→                  ) : (
+  1057→                    <>
+  1058→                      <p className="text-xs text-amber-200/50">
+  1059→                        Love this look? Share it to the AI Style Gallery so other shoppers can get inspired!
+  1060→                      </p>
+  1061→
+  1062→                      {/* Consent checkbox */}
+  1063→                      <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-amber-900/20 bg-stone-900/40 p-2.5 transition-colors hover:border-amber-700/30">
+  1064→                        <Checkbox
+  1065→                          checked={galleryConsent}
+  1066→                          onCheckedChange={(checked) => {
+  1067→                            setGalleryConsent(checked === true);
+  1068→                            setGalleryError('');
+  1069→                          }}
+  1070→                          className="mt-0.5 data-[state=checked]:bg-amber-600 data-[state=checked]:border-amber-600"
+  1071→                        />
+  1072→                        <span className="text-[11px] leading-relaxed text-amber-200/60">
+  1073→                          I consent to my AI-generated style image being displayed in the public gallery after admin review
+  1074→                        </span>
+  1075→                      </label>
+  1076→
+  1077→                      {galleryError && (
+  1078→                        <div className="flex items-center gap-1.5 text-xs text-red-400">
+  1079→                          <AlertCircle className="h-3 w-3" />
+  1080→                          {galleryError}
+  1081→                        </div>
+  1082→                      )}
+  1083→
+  1084→                      <Button
+  1085→                        onClick={async () => {
+  1086→                          if (!galleryConsent) {
+  1087→                            setGalleryError('Please consent to share your image');
+  1088→                            return;
+  1089→                          }
+  1090→                          const imageToShare = watermarkedResult || resultImage;
+  1091→                          if (!imageToShare) return;
+  1092→
+  1093→                          setGallerySubmitting(true);
+  1094→                          setGalleryError('');
+  1095→
+  1096→                          try {
+  1097→                            const res = await fetch('/api/style-gallery', {
+  1098→                              method: 'POST',
+  1099→                              headers: { 'Content-Type': 'application/json' },
+  1100→                              body: JSON.stringify({
+  1101→                                productId,
+  1102→                                productName,
+  1103→                                productImage: productImage,
+  1104→                                userId: authUser?.id || null,
+  1105→                                userName: authUser?.name || 'Anonymous',
+  1106→                                aiGeneratedImage: imageToShare,
+  1107→                                categorySlug: categorySlug || null,
+  1108→                                consentGiven: true,
+  1109→                              }),
+  1110→                            });
+  1111→
+  1112→                            const data = await res.json();
+  1113→
+  1114→                            if (res.ok && data.success) {
+  1115→                              setGallerySubmitted(true);
+  1116→                              // Also call the old callback for backward compat
+  1117→                              if (onShareToInfluencer) {
+  1118→                                onShareToInfluencer(imageToShare);
+  1119→                              }
+  1120→                            } else {
+  1121→                              setGalleryError(data.error || 'Failed to submit. Please try again.');
+  1122→                            }
+  1123→                          } catch {
+  1124→                            setGalleryError('Network error. Please try again.');
+  1125→                          } finally {
+  1126→                            setGallerySubmitting(false);
+  1127→                          }
+  1128→                        }}
+  1129→                        disabled={!galleryConsent || gallerySubmitting}
+  1130→                        className="w-full bg-amber-600 hover:bg-amber-500 text-stone-950 font-semibold gap-2 disabled:opacity-50"
+  1131→                        size="sm"
+  1132→                      >
+  1133→                        {gallerySubmitting ? (
+  1134→                          <>
+  1135→                            <Loader2 className="h-4 w-4 animate-spin" />
+  1136→                            Submitting...
+  1137→                          </>
+  1138→                        ) : (
+  1139→                          <>
+  1140→                            <Share2 className="h-4 w-4" />
+  1141→                            Share to AI Style Gallery
+  1142→                          </>
+  1143→                        )}
+  1144→                      </Button>
+  1145→                      <p className="text-[10px] text-amber-200/30 text-center">
+  1146→                        All submissions are reviewed by our team before being displayed publicly
+  1147→                      </p>
+  1148→                    </>
+  1149→                  )}
+  1150→                </div>
+  1151→
+  1152→                {/* Disclaimer */}
+  1153→                <p className="text-center text-xs text-amber-200/30">
+  1154→                  AI-generated preview with 3BOXES watermark &middot; Actual fit may vary
+  1155→                </p>
+  1156→              </motion.div>
+  1157→            )}
+  1158→
+  1159→            {/* ── Step 5: Timeout / Error ── */}
+  1160→            {step === 'timeout' && (
+  1161→              <motion.div
+  1162→                key="timeout"
+  1163→                initial={{ opacity: 0, y: 10 }}
+  1164→                animate={{ opacity: 1, y: 0 }}
+  1165→                exit={{ opacity: 0, y: -10 }}
+  1166→                className="space-y-4 py-4"
+  1167→              >
+  1168→                <div className="flex flex-col items-center gap-3 text-center">
+  1169→                  <div className="h-16 w-16 rounded-full bg-amber-900/20 flex items-center justify-center">
+  1170→                    <Clock className="h-8 w-8 text-amber-400" />
+  1171→                  </div>
+  1172→                  <div>
+  1173→                    <p className="text-lg font-semibold text-amber-100">
+  1174→                      Generation Timed Out
+  1175→                    </p>
+  1176→                    <p className="mt-1 text-sm text-amber-200/60 max-w-sm">
+  1177→                      {errorMessage || GENERATE_TIMEOUT_MSG}
+  1178→                    </p>
+  1179→                  </div>
+  1180→                </div>
+  1181→
+  1182→                <div className="rounded-lg bg-amber-900/10 p-3">
+  1183→                  <p className="text-xs text-amber-200/50">
+  1184→                    <span className="font-semibold text-amber-300/60">Tip:</span>{' '}
+  1185→                    Network conditions can affect AI generation time.
+  1186→                    Trying again usually works on the second attempt.
+  1187→                  </p>
+  1188→                </div>
+  1189→
+  1190→                {/* Action buttons */}
+  1191→                <div className="flex gap-3">
+  1192→                  <Button
+  1193→                    onClick={handleRetry}
+  1194→                    className="flex-1 bg-amber-700 hover:bg-amber-600 text-white"
+  1195→                  >
+  1196→                    <RefreshCw className="mr-2 h-4 w-4" />
+  1197→                    Try Again
+  1198→                  </Button>
+  1199→                  <Button
+  1200→                    onClick={reset}
+  1201→                    variant="outline"
+  1202→                    className="flex-1 border-amber-900/30 text-amber-200 hover:bg-amber-900/20"
+  1203→                  >
+  1204→                    <RotateCcw className="mr-2 h-4 w-4" />
+  1205→                    New Photo
+  1206→                  </Button>
+  1207→                </div>
+  1208→              </motion.div>
+  1209→            )}
+  1210→          </AnimatePresence>
+  1211→        </div>
+  1212→      </DialogContent>
+  1213→    </Dialog>
+  1214→  );
+  1215→}
+  1216→

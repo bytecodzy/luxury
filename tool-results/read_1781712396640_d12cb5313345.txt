@@ -1,0 +1,1097 @@
+     1→/**
+     2→ * Virtual Try-On Engine v19 — ZAI IMAGE-EDIT Pipeline (Selfie-Preserving)
+     3→ *
+     4→ * ─────────────────────────────────────────────────────────────────────────
+     5→ *  WHY v19?
+     6→ *  ─────────────────────────────────────────────────────────────────────────
+     7→ *  v18 used Pollinations.ai with the selfie URL passed via `?image=`. In
+     8→ *  practice Pollinations does NOT honour that parameter as a true
+     9→ *  image-to-image conditioning signal — it falls back to plain text-to-image
+    10→ *  and produces random people wearing random products. That is exactly what
+    11→ *  the user saw: "dress or saree → showing glasses, selfie not loading".
+    12→ *
+    13→ *  v19 uses the Z.AI `images.generations.edit` endpoint, which is a REAL
+    14→ *  image-to-image edit model:
+    15→ *    • INPUT  = the user's SELFIE (compressed)
+    16→ *    • PROMPT = a rich description of the PRODUCT to drape on the person
+    17→ *    • OUTPUT = the SAME person (face, gender, skin tone, body, hair) now
+    18→ *               wearing/holding the described product, photorealistically
+    19→ *               blended with realistic shadows, folds and lighting.
+    20→ *
+    21→ *  We confirmed in the sandbox that:
+    22→ *    • `zai.images.generations.create({...})` works (≈28s)
+    23→ *    • `zai.images.generations.edit({prompt, images:[{url}], size})` works
+    24→ *      (≈14–18s) and returns a 75–110KB edited PNG.
+    25→ *
+    26→ *  We ALSO use ZAI VLM (`chat.completions.createVision`) to extract a rich
+    27→ *  description of the ACTUAL product photo (colours, pattern, material,
+    28→ *  style, type). This is fused with the product name/description/tags so
+    29→ *  the edit prompt accurately reflects the EXACT product being tried on —
+    30→ *  no more "selected saree → got glasses".
+    31→ *
+    32→ * ─────────────────────────────────────────────────────────────────────────
+    33→ *  STRATEGY CHAIN
+    34→ *  ─────────────────────────────────────────────────────────────────────────
+    35→ *  1. ZAI image-edit (PRIMARY)         — best quality, preserves user.
+    36→ *  2. ZAI text-to-image (FALLBACK 1)   — if edit fails but SDK is alive.
+    37→ *  3. Pollinations img2img (FALLBACK 2) — if ZAI is unavailable, attempt
+    38→ *     to upload the selfie to tmpfiles.org and use it as `?image=`.
+    39→ *  4. Pollinations text-to-image (LAST RESORT) — always available.
+    40→ *
+    41→ *  All paths return the same `{success, imageUrl, strategy}` contract.
+    42→ *
+    43→ * ─────────────────────────────────────────────────────────────────────────
+    44→ *  ENVIRONMENT
+    45→ *  ─────────────────────────────────────────────────────────────────────────
+    46→ *  • Sandbox / preview: ZAI.create() auto-discovers credentials and works.
+    47→ *  • Vercel: requires `ZAI_BASE_URL` and `ZAI_API_KEY` env vars. If they
+    48→ *    are missing, we transparently fall back to Pollinations so the user
+    49→ *    still gets a result (no "AI is busy" error).
+    50→ */
+    51→
+    52→// NOTE: `sharp` is imported LAZILY via getSharp() below — NOT at the top
+    53→// level. This is critical for Vercel: a top-level `import sharp from 'sharp'`
+    54→// would try to load the native binary when the module is first imported (e.g.
+    55→// by the /api/try-on/status route), and if the binary is missing/incompatible
+    56→// in the serverless environment it crashes the entire function with HTTP 500.
+    57→// Lazy-loading confines any sharp failure to the actual try-on request.
+    58→
+    59→let sharpModule: typeof import('sharp') | null = null
+    60→async function getSharp() {
+    61→  if (sharpModule) return sharpModule
+    62→  const mod = await import('sharp')
+    63→  sharpModule = (mod as any).default || mod
+    64→  return sharpModule
+    65→}
+    66→
+    67→// ── Types ──────────────────────────────────────────────────────────
+    68→
+    69→export interface TryOnInput {
+    70→  selfieData: string          // base64 data URL of the person's selfie — USED as the edit input image
+    71→  productImageBase64: string  // base64 data URL of the product image (used by VLM to extract accurate description)
+    72→  productName: string
+    73→  categorySlug: string
+    74→  productDescription?: string
+    75→  productTags?: string[]
+    76→}
+    77→
+    78→export interface TryOnResult {
+    79→  success: boolean
+    80→  imageUrl?: string
+    81→  strategy?: string           // 'zai-image-edit' | 'zai-text-to-image' | 'pollinations-img2img' | 'pollinations-text'
+    82→  error?: string
+    83→  errorCode?: 'NO_SELFIE' | 'TIMEOUT' | 'ALL_STRATEGIES_FAILED' | 'NETWORK_ERROR'
+    84→  elapsedMs?: number
+    85→  debugInfo?: {
+    86→    strategiesAttempted: string[]
+    87→    strategyErrors: Record<string, string>
+    88→  }
+    89→}
+    90→
+    91→type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864' | '1440x720' | '720x1440'
+    92→
+    93→// ── Timeouts ───────────────────────────────────────────────────────
+    94→
+    95→const TOTAL_TIMEOUT_MS = 55_000
+    96→const UPLOAD_TIMEOUT_MS = 12_000
+    97→const POLLINATIONS_TIMEOUT_MS = 45_000
+    98→const ZAI_EDIT_TIMEOUT_MS = 45_000
+    99→const ZAI_TEXT_TIMEOUT_MS = 40_000
+   100→const VLM_TIMEOUT_MS = 18_000
+   101→
+   102→// ── Category Configuration ─────────────────────────────────────────
+   103→
+   104→interface CategoryTryOnConfig {
+   105→  /** How the product is worn / placed on the person's body */
+   106→  placement: string
+   107→  /** Output image dimensions (portrait for full-body, square for accessories) */
+   108→  size: ImageSize
+   109→  /** Short label for the product category */
+   110→  garmentType: string
+   111→  /** Default body framing for the photo */
+   112→  framing: string
+   113→  /** Rich material/fabric description for this category */
+   114→  materialHint: string
+   115→}
+   116→
+   117→const CATEGORY_CONFIG: Record<string, CategoryTryOnConfig> = {
+   118→  jewelry: {
+   119→    placement: 'wearing the jewelry piece naturally on the correct body part (necklace around the neck, earrings on both earlobes, bracelet on the wrist, ring on the finger — choose based on the product type)',
+   120→    size: '864x1152',
+   121→    garmentType: 'jewelry piece',
+   122→    framing: 'upper-body to head-and-shoulders beauty photograph',
+   123→    materialHint: 'polished metal with gemstones, intricate craftsmanship, sparkling highlights',
+   124→  },
+   125→  sarees: {
+   126→    placement: 'draped in the saree in traditional Indian style — pallu elegantly flowing over the left shoulder, matching blouse, neatly pleated at the waist, fabric flowing to the ankles with realistic folds',
+   127→    size: '768x1344',
+   128→    garmentType: 'traditional Indian saree',
+   129→    framing: 'full-body fashion photograph from head to toe',
+   130→    materialHint: 'flowing fabric with rich drape, intricate borders, traditional Indian textile work',
+   131→  },
+   132→  watches: {
+   133→    placement: 'wearing the watch on the left wrist, the watch face clearly visible and properly sized, natural wrist pose',
+   134→    size: '864x1152',
+   135→    garmentType: 'wristwatch',
+   136→    framing: 'waist-up photograph with the wrist visible',
+   137→    materialHint: 'precision timepiece with metal/leather strap, detailed dial, polished case',
+   138→  },
+   139→  fashion: {
+   140→    placement: 'wearing the outfit with proper fit, natural fabric drape, and realistic folds where the fabric meets the body',
+   141→    size: '768x1344',
+   142→    garmentType: 'fashion outfit',
+   143→    framing: 'full-body fashion photograph from head to toe',
+   144→    materialHint: 'quality fabric with natural drape and texture',
+   145→  },
+   146→  'mens-shirts': {
+   147→    placement: 'wearing the shirt buttoned properly with a natural fit, the collar sitting neatly, sleeves at the correct length, fabric draping naturally on the torso',
+   148→    size: '768x1344',
+   149→    garmentType: 'shirt',
+   150→    framing: 'full-body fashion photograph from head to toe',
+   151→    materialHint: 'cotton or blended fabric with a crisp finish, natural folds',
+   152→  },
+   153→  'mens-shirts-t-shirts': {
+   154→    placement: 'wearing the shirt with a natural fit, fabric draping naturally on the torso',
+   155→    size: '768x1344',
+   156→    garmentType: 'shirt',
+   157→    framing: 'full-body fashion photograph',
+   158→    materialHint: 'quality fabric with natural drape',
+   159→  },
+   160→  'leather-goods': {
+   161→    placement: 'holding or wearing the leather product naturally — a bag on the shoulder or in the hand, a wallet held elegantly',
+   162→    size: '864x1152',
+   163→    garmentType: 'leather product',
+   164→    framing: 'upper-body to three-quarter photograph',
+   165→    materialHint: 'genuine leather with rich grain, polished hardware, fine stitching',
+   166→  },
+   167→  fragrances: {
+   168→    placement: 'holding the fragrance bottle elegantly in one hand, the bottle clearly visible with its label and design',
+   169→    size: '864x1152',
+   170→    garmentType: 'fragrance bottle',
+   171→    framing: 'upper-body photograph',
+   172→    materialHint: 'glass bottle with refined design, liquid visible through the glass',
+   173→  },
+   174→  'home-living': {
+   175→    placement: 'with the home decor product naturally placed in the scene beside the person',
+   176→    size: '1344x768',
+   177→    garmentType: 'home decor product',
+   178→    framing: 'lifestyle photograph in a beautifully decorated interior',
+   179→    materialHint: 'premium home decor with refined finish',
+   180→  },
+   181→  'corporate-gifts': {
+   182→    placement: 'holding the gift product elegantly',
+   183→    size: '864x1152',
+   184→    garmentType: 'gift product',
+   185→    framing: 'upper-body photograph',
+   186→    materialHint: 'premium gift product with elegant packaging',
+   187→  },
+   188→  'women-sarees': {
+   189→    placement: 'draped in the saree in traditional Indian style — pallu elegantly flowing over the left shoulder, matching blouse, neatly pleated at the waist, fabric flowing to the ankles with realistic folds',
+   190→    size: '768x1344',
+   191→    garmentType: 'traditional Indian saree',
+   192→    framing: 'full-body fashion photograph from head to toe',
+   193→    materialHint: 'flowing fabric with rich drape, intricate borders, traditional Indian textile work',
+   194→  },
+   195→  'women-jewelry': {
+   196→    placement: 'wearing the jewelry piece naturally on the correct body part (necklace around the neck, earrings on both earlobes, bracelet on the wrist, ring on the finger — choose based on the product type)',
+   197→    size: '864x1152',
+   198→    garmentType: 'jewelry piece',
+   199→    framing: 'upper-body to head-and-shoulders beauty photograph',
+   200→    materialHint: 'polished metal with gemstones, intricate craftsmanship, sparkling highlights',
+   201→  },
+   202→  'women-fashion': {
+   203→    placement: 'wearing the outfit elegantly with proper fit, natural fabric drape, and realistic folds',
+   204→    size: '768x1344',
+   205→    garmentType: 'fashion outfit',
+   206→    framing: 'full-body fashion photograph from head to toe',
+   207→    materialHint: 'quality fabric with natural drape and texture',
+   208→  },
+   209→  'women-fragrances': {
+   210→    placement: 'holding the fragrance bottle elegantly in one hand, the bottle clearly visible',
+   211→    size: '864x1152',
+   212→    garmentType: 'fragrance bottle',
+   213→    framing: 'upper-body photograph',
+   214→    materialHint: 'glass bottle with refined design',
+   215→  },
+   216→  'women-accessories': {
+   217→    placement: 'wearing or holding the accessory naturally',
+   218→    size: '864x1152',
+   219→    garmentType: 'fashion accessory',
+   220→    framing: 'upper-body to three-quarter photograph',
+   221→    materialHint: 'quality material with refined finish',
+   222→  },
+   223→  'kids-fashion': {
+   224→    placement: 'wearing the outfit with proper fit and natural fabric drape',
+   225→    size: '768x1344',
+   226→    garmentType: 'kids fashion outfit',
+   227→    framing: 'full-body photograph of a child/teenager',
+   228→    materialHint: 'comfortable fabric with natural drape',
+   229→  },
+   230→  'men-accessories': {
+   231→    placement: 'wearing or holding the accessory naturally',
+   232→    size: '864x1152',
+   233→    garmentType: 'fashion accessory',
+   234→    framing: 'upper-body to three-quarter photograph',
+   235→    materialHint: 'quality material with refined finish',
+   236→  },
+   237→  'men-watches': {
+   238→    placement: 'wearing the watch on the left wrist, the watch face clearly visible',
+   239→    size: '864x1152',
+   240→    garmentType: 'wristwatch',
+   241→    framing: 'waist-up photograph with the wrist visible',
+   242→    materialHint: 'precision timepiece with metal/leather strap, detailed dial',
+   243→  },
+   244→  'men-tshirts': {
+   245→    placement: 'wearing the t-shirt with a natural fit, fabric draping naturally on the torso',
+   246→    size: '768x1344',
+   247→    garmentType: 't-shirt',
+   248→    framing: 'full-body fashion photograph',
+   249→    materialHint: 'soft cotton fabric with natural drape',
+   250→  },
+   251→  'men-fragrances': {
+   252→    placement: 'holding the fragrance bottle elegantly',
+   253→    size: '864x1152',
+   254→    garmentType: 'fragrance bottle',
+   255→    framing: 'upper-body photograph',
+   256→    materialHint: 'glass bottle with refined design',
+   257→  },
+   258→  'new-arrivals': {
+   259→    placement: 'holding or wearing the product naturally and elegantly',
+   260→    size: '864x1152',
+   261→    garmentType: 'premium product',
+   262→    framing: 'upper-body to three-quarter photograph',
+   263→    materialHint: 'premium material with refined finish',
+   264→  },
+   265→}
+   266→
+   267→function getCategoryConfig(categorySlug: string, productName: string): CategoryTryOnConfig {
+   268→  if (CATEGORY_CONFIG[categorySlug]) {
+   269→    const config = { ...CATEGORY_CONFIG[categorySlug] }
+   270→    // Refine jewelry placement based on product name
+   271→    if (categorySlug.includes('jewel')) {
+   272→      const n = productName.toLowerCase()
+   273→      if (n.includes('earring') || n.includes('jhumka') || n.includes('stud'))
+   274→        config.placement = 'wearing the earrings on both earlobes, the earrings clearly visible and properly positioned'
+   275→      else if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple') || n.includes('haar') || n.includes('mala'))
+   276→        config.placement = 'wearing the necklace around the neck, the chain sitting naturally at the collarbone'
+   277→      else if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle') || n.includes('kada'))
+   278→        config.placement = 'wearing the bracelet on the wrist, properly fitted'
+   279→      else if (n.includes('ring'))
+   280→        config.placement = 'wearing the ring on the finger, the ring clearly visible'
+   281→      else if (n.includes('set') || n.includes('bridal'))
+   282→        config.placement = 'wearing a matching jewelry set — necklace around the neck and earrings on both earlobes'
+   283→    }
+   284→    return config
+   285→  }
+   286→
+   287→  // Fuzzy match
+   288→  const knownSlugs = Object.keys(CATEGORY_CONFIG)
+   289→  const matched = knownSlugs.find(s => categorySlug.includes(s) || s.includes(categorySlug))
+   290→  if (matched) return { ...CATEGORY_CONFIG[matched] }
+   291→
+   292→  return {
+   293→    placement: 'wearing or holding the product naturally and elegantly',
+   294→    size: '864x1152',
+   295→    garmentType: 'product',
+   296→    framing: 'upper-body to three-quarter photograph',
+   297→    materialHint: 'premium material with refined finish',
+   298→  }
+   299→}
+   300→
+   301→// ── Product Description Extractor ──────────────────────────────────
+   302→
+   303→const COLOR_WORDS = [
+   304→  'red', 'crimson', 'maroon', 'burgundy', 'wine',
+   305→  'blue', 'navy', 'royal blue', 'teal', 'turquoise', 'sky blue', 'cobalt',
+   306→  'green', 'emerald', 'olive', 'mint', 'sage', 'forest green',
+   307→  'yellow', 'mustard', 'golden', 'gold', 'amber',
+   308→  'orange', 'coral', 'peach', 'rust',
+   309→  'pink', 'rose', 'magenta', 'fuchsia', 'blush',
+   310→  'purple', 'violet', 'lavender', 'plum', 'mauve',
+   311→  'brown', 'tan', 'beige', 'camel', 'chocolate', 'coffee',
+   312→  'black', 'white', 'ivory', 'cream', 'off-white', 'pearl',
+   313→  'grey', 'gray', 'silver', 'charcoal',
+   314→  'multi', 'multicolor', 'printed', 'floral',
+   315→]
+   316→
+   317→function extractColors(name: string, description?: string, tags?: string[]): string {
+   318→  const text = `${name} ${description || ''} ${(tags || []).join(' ')}`.toLowerCase()
+   319→  const found = new Set<string>()
+   320→  for (const color of COLOR_WORDS) {
+   321→    if (text.includes(color)) found.add(color)
+   322→  }
+   323→  return Array.from(found).slice(0, 3).join(', ')
+   324→}
+   325→
+   326→/**
+   327→ * Build a rich, detailed description of the PRODUCT for the prompt.
+   328→ * This is what tells the AI WHAT to drape on the person.
+   329→ */
+   330→function buildProductDescription(
+   331→  config: CategoryTryOnConfig,
+   332→  input: TryOnInput,
+   333→  vlmDescription?: string,
+   334→): string {
+   335→  const colors = extractColors(input.productName, input.productDescription, input.productTags)
+   336→  const parts: string[] = []
+   337→
+   338→  parts.push(`a ${config.garmentType}`)
+   339→
+   340→  if (colors) {
+   341→    parts.push(`in ${colors}`)
+   342→  }
+   343→
+   344→  // Add the product name for specificity
+   345→  parts.push(`specifically "${input.productName}"`)
+   346→
+   347→  // Add material hint
+   348→  if (config.materialHint) {
+   349→    parts.push(`made of ${config.materialHint}`)
+   350→  }
+   351→
+   352→  // If VLM gave us a description of the actual product photo, USE IT —
+   353→  // this is the single most important signal for matching the product.
+   354→  if (vlmDescription && vlmDescription.trim().length > 10) {
+   355→    parts.push(`(visual reference: ${vlmDescription.trim().substring(0, 280)})`)
+   356→  } else if (input.productDescription) {
+   357→    // Fallback to product description text (first 160 chars)
+   358→    const desc = input.productDescription.substring(0, 160).replace(/\s+/g, ' ').trim()
+   359→    if (desc) {
+   360→      parts.push(`(product details: ${desc})`)
+   361→    }
+   362→  }
+   363→
+   364→  // Add tags if available
+   365→  if (input.productTags && input.productTags.length > 0) {
+   366→    const relevantTags = input.productTags
+   367→      .filter(t => !['new-arrival', 'featured', 'bestseller'].includes(t))
+   368→      .slice(0, 5)
+   369→    if (relevantTags.length > 0) {
+   370→      parts.push(`with ${relevantTags.join(', ')} characteristics`)
+   371→    }
+   372→  }
+   373→
+   374→  return parts.join(' ')
+   375→}
+   376→
+   377→// ── Image helpers ──────────────────────────────────────────────────
+   378→
+   379→function stripDataUrl(dataUrl: string): string {
+   380→  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
+   381→  return match ? match[1] : dataUrl
+   382→}
+   383→
+   384→/**
+   385→ * Compress a selfie data URL into a thumbnail suitable for ZAI image-edit.
+   386→ * Keeps the longest edge at 1024px (enough for the AI to preserve face/body,
+   387→ * small enough for fast upload + processing).
+   388→ */
+   389→async function compressSelfie(selfieDataUrl: string): Promise<Buffer> {
+   390→  const sharp = await getSharp()
+   391→  const raw = stripDataUrl(selfieDataUrl)
+   392→  const inputBuf = Buffer.from(raw, 'base64')
+   393→  return sharp(inputBuf)
+   394→    .resize(1024, 1280, { fit: 'inside', withoutEnlargement: true })
+   395→    .jpeg({ quality: 85, mozjpeg: true })
+   396→    .toBuffer()
+   397→}
+   398→
+   399→/**
+   400→ * Convert a compressed selfie buffer back to a data URL (ZAI edit needs a URL).
+   401→ */
+   402→function bufferToDataUrl(buf: Buffer, mime = 'image/jpeg'): string {
+   403→  return `data:${mime};base64,${buf.toString('base64')}`
+   404→}
+   405→
+   406→/**
+   407→ * Compress a product image for VLM analysis — small is fine, the VLM only
+   408→ * needs to identify colours, type, pattern, material.
+   409→ */
+   410→async function compressProductImageForVLM(productImageBase64: string): Promise<string | null> {
+   411→  if (!productImageBase64) return null
+   412→  try {
+   413→    const sharp = await getSharp()
+   414→    const raw = stripDataUrl(productImageBase64)
+   415→    const inputBuf = Buffer.from(raw, 'base64')
+   416→    const out = await sharp(inputBuf)
+   417→      .resize(768, 768, { fit: 'inside', withoutEnlargement: true })
+   418→      .jpeg({ quality: 75, mozjpeg: true })
+   419→      .toBuffer()
+   420→    return bufferToDataUrl(out)
+   421→  } catch {
+   422→    return null
+   423→  }
+   424→}
+   425→
+   426→/**
+   427→ * Upload a compressed selfie buffer to tmpfiles.org (free, anonymous, no auth).
+   428→ * Used by the Pollinations fallback path.
+   429→ */
+   430→async function uploadToTmpfiles(buf: Buffer, timeoutMs: number): Promise<string | null> {
+   431→  const boundary = '----3boxesTryon' + Math.random().toString(16).slice(2)
+   432→  const filename = 'selfie.jpg'
+   433→  const header = Buffer.from(
+   434→    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: image/jpeg\r\n\r\n`
+   435→  )
+   436→  const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
+   437→  const body = Buffer.concat([header, buf, footer])
+   438→
+   439→  const controller = new AbortController()
+   440→  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+   441→
+   442→  try {
+   443→    const start = Date.now()
+   444→    const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+   445→      method: 'POST',
+   446→      headers: {
+   447→        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+   448→        'User-Agent': '3BOXES-TryOn/1.0',
+   449→      },
+   450→      body,
+   451→      signal: controller.signal,
+   452→    })
+   453→    clearTimeout(timeoutId)
+   454→    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   455→
+   456→    if (!res.ok) {
+   457→      console.log(`[virtual-tryon] tmpfiles upload HTTP ${res.status} after ${elapsed}s`)
+   458→      return null
+   459→    }
+   460→
+   461→    const json = (await res.json()) as { status?: string; data?: { url?: string } }
+   462→    const viewerUrl = json?.data?.url
+   463→    if (!viewerUrl || typeof viewerUrl !== 'string') {
+   464→      console.log(`[virtual-tryon] tmpfiles returned no url after ${elapsed}s`)
+   465→      return null
+   466→    }
+   467→
+   468→    const directUrl = viewerUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/')
+   469→    console.log(`[virtual-tryon] tmpfiles uploaded in ${elapsed}s → ${directUrl.substring(0, 60)}...`)
+   470→    return directUrl
+   471→  } catch (err) {
+   472→    clearTimeout(timeoutId)
+   473→    const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+   474→    console.log(`[virtual-tryon] tmpfiles upload failed: ${isTimeout ? 'timeout' : (err as Error).message}`)
+   475→    return null
+   476→  }
+   477→}
+   478→
+   479→// ── ZAI SDK integration ────────────────────────────────────────────
+   480→
+   481→let zaiInstanceCache: any = null
+   482→let zaiInitPromise: Promise<any | null> | null = null
+   483→
+   484→async function getZAI(): Promise<any | null> {
+   485→  // ── VERCEL FAST-PATH ────────────────────────────────────────────
+   486→  // On Vercel, the ZAI SDK cannot authenticate:
+   487→  //   • The public endpoint `api.z.ai/api/v1` REJECTS the `"Z.ai"` apiKey
+   488→  //     with "Authentication Failed" (verified by direct curl tests).
+   489→  //   • The `images.generations.edit` endpoint returns 404 NOT_FOUND on the
+   490→  //     public API (it only exists on `internal-api.z.ai`, which is a private
+   491→  //     network inaccessible from Vercel).
+   492→  //   • The JWT token from the sandbox config is also rejected ("token
+   493→  //     expired or incorrect") on the public API.
+   494→  // Trying to init the SDK on Vercel wastes 15-30s on dead/hung connections
+   495→  // before failing, which pushes the total past Vercel's 60s function limit
+   496→  // and causes the "AI is Busy" error the user sees.
+   497→  //
+   498→  // SOLUTION: skip ZAI entirely on Vercel and go straight to the Pollinations
+   499→  // fallback (100% free, no auth, works from any environment). The sandbox
+   500→  // keeps using ZAI image-edit (best quality, preserves the user's face).
+   501→  if (process.env.VERCEL) {
+   502→    console.log('[virtual-tryon] Vercel environment detected — skipping ZAI, using Pollinations')
+   503→    return null
+   504→  }
+   505→
+   506→  if (zaiInstanceCache) return zaiInstanceCache
+   507→  if (zaiInitPromise) return zaiInitPromise
+   508→
+   509→  zaiInitPromise = (async () => {
+   510→    try {
+   511→      // Lazy import so the module doesn't crash on cold start if the SDK
+   512→      // has issues — we just fall back to Pollinations.
+   513→      const ZAIModule = await import('z-ai-web-dev-sdk')
+   514→      const ZAI = (ZAIModule as any).default || (ZAIModule as any)
+   515→      const instance = await ZAI.create()
+   516→      if (instance) {
+   517→        zaiInstanceCache = instance
+   518→        console.log('[virtual-tryon] ZAI SDK initialised successfully')
+   519→        return instance
+   520→      }
+   521→    } catch (err) {
+   522→      console.log('[virtual-tryon] ZAI SDK init failed:', err instanceof Error ? err.message : String(err))
+   523→    }
+   524→    return null
+   525→  })()
+   526→
+   527→  return zaiInitPromise
+   528→}
+   529→
+   530→// ── VLM: extract accurate product description from the product photo ──
+   531→
+   532→const productDescriptionCache = new Map<string, string>()
+   533→
+   534→async function analyzeProductImage(
+   535→  productImageBase64: string,
+   536→  productName: string,
+   537→  categorySlug: string,
+   538→): Promise<string | null> {
+   539→  if (!productImageBase64) return null
+   540→
+   541→  const cacheKey = `${productName}::${categorySlug}::${productImageBase64.substring(0, 64)}`
+   542→  const cached = productDescriptionCache.get(cacheKey)
+   543→  if (cached) return cached
+   544→
+   545→  const compressed = await compressProductImageForVLM(productImageBase64)
+   546→  if (!compressed) return null
+   547→
+   548→  const zai = await getZAI()
+   549→  if (!zai) {
+   550→    console.log('[virtual-tryon] VLM skipped — ZAI SDK unavailable')
+   551→    return null
+   552→  }
+   553→
+   554→  const controller = new AbortController()
+   555→  const timeoutId = setTimeout(() => controller.abort(), VLM_TIMEOUT_MS)
+   556→
+   557→  try {
+   558→    console.log('[virtual-tryon] VLM analysing product image...')
+   559→    const start = Date.now()
+   560→    const response = await Promise.race([
+   561→      zai.chat.completions.createVision({
+   562→        messages: [
+   563→          {
+   564→            role: 'user',
+   565→            content: [
+   566→              {
+   567→                type: 'text',
+   568→                text: `You are looking at a product photo for an e-commerce store. The product is named "${productName}" (category: ${categorySlug || 'general'}).
+   569→
+   570→Describe the VISUAL appearance of this product in 60–90 words, focusing ONLY on what is visible. Include:
+   571→- The exact colours (primary + secondary)
+   572→- The material or fabric type (silk, cotton, leather, metal, glass, etc.)
+   573→- The pattern or design (solid, floral, geometric, embroidered, plain, etc.)
+   574→- The style or silhouette (e.g. flowing saree, structured shirt, dainty necklace)
+   575→- Any notable embellishments, borders, prints, or hardware
+   576→
+   577→Output ONLY the description (no introduction, no list markers, no preamble). Be specific and concrete so a text-to-image model can reproduce this EXACT product.`,
+   578→              },
+   579→              {
+   580→                type: 'image_url',
+   581→                image_url: { url: compressed },
+   582→              },
+   583→            ],
+   584→          },
+   585→        ],
+   586→        thinking: { type: 'disabled' },
+   587→      }),
+   588→      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('VLM timeout')), VLM_TIMEOUT_MS)),
+   589→    ])
+   590→
+   591→    clearTimeout(timeoutId)
+   592→    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   593→    const content = response?.choices?.[0]?.message?.content
+   594→    const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map((c: any) => c?.text || '').join(' ') : ''
+   595→    const cleaned = (text || '').trim().replace(/\s+/g, ' ').substring(0, 320)
+   596→
+   597→    if (cleaned.length > 15) {
+   598→      console.log(`[virtual-tryon] VLM described product in ${elapsed}s: ${cleaned.substring(0, 120)}...`)
+   599→      productDescriptionCache.set(cacheKey, cleaned)
+   600→      // Keep cache from growing unbounded
+   601→      if (productDescriptionCache.size > 60) {
+   602→        const firstKey = productDescriptionCache.keys().next().value
+   603→        if (firstKey) productDescriptionCache.delete(firstKey)
+   604→      }
+   605→      return cleaned
+   606→    }
+   607→    console.log(`[virtual-tryon] VLM returned no usable text in ${elapsed}s`)
+   608→    return null
+   609→  } catch (err) {
+   610→    clearTimeout(timeoutId)
+   611→    console.log('[virtual-tryon] VLM failed:', err instanceof Error ? err.message : String(err))
+   612→    return null
+   613→  }
+   614→}
+   615→
+   616→// ── ZAI image-edit (PRIMARY strategy) ──────────────────────────────
+   617→
+   618→function buildEditPrompt(config: CategoryTryOnConfig, productDesc: string): string {
+   619→  return [
+   620→    `Virtual try-on photograph. The person in the reference image is now ${config.placement}.`,
+   621→    `The product being worn is ${productDesc}.`,
+   622→    `ABSOLUTE REQUIREMENT — IDENTITY PRESERVATION: The generated image MUST show the EXACT SAME person as the reference image — identical eyes, nose, mouth, jawline, hairstyle, hair colour, skin tone, age, gender, and facial features. Do NOT generate a new face. Do NOT change the person's gender. Do NOT change the person's age. The face is the most important thing to preserve — if the face does not match the reference, the result is useless.`,
+   623→    `PRODUCT FIDELITY: Reproduce the EXACT colours, pattern, fabric, embellishments, silhouette, and design described above. The product must look NATURALLY WORN with realistic shadows, highlights, fabric folds, and fit where it meets the body — NOT pasted, floating, or overlaid.`,
+   624→    `DO NOT ADD unrelated items: no sunglasses, no eyeglasses, no hats, no scarves, no extra jewellery, no extra clothing, no props — ONLY the product described above. The person's head, face, and hair must remain uncovered and unchanged unless the product itself is a headpiece.`,
+   625→    `${config.framing}, studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality.`,
+   626→    `Natural pose and expression. Full image, no cropping, no border, no text, no watermark.`,
+   627→  ].join(' ')
+   628→}
+   629→
+   630→async function callZAIImageEdit(
+   631→  prompt: string,
+   632→  selfieDataUrl: string,
+   633→  size: ImageSize,
+   634→  timeoutMs: number,
+   635→): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+   636→  const zai = await getZAI()
+   637→  if (!zai) {
+   638→    return { success: false, error: 'ZAI SDK unavailable' }
+   639→  }
+   640→
+   641→  console.log(`[virtual-tryon] ZAI image-edit: ${size} (timeout ${timeoutMs}ms)`)
+   642→  console.log(`[virtual-tryon] Prompt (first 220): ${prompt.substring(0, 220)}...`)
+   643→
+   644→  try {
+   645→    const start = Date.now()
+   646→    const response = await Promise.race([
+   647→      zai.images.generations.edit({
+   648→        prompt,
+   649→        images: [{ url: selfieDataUrl }],
+   650→        size,
+   651→      }),
+   652→      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('ZAI edit timeout')), timeoutMs)),
+   653→    ])
+   654→    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   655→
+   656→    const item = response?.data?.[0]
+   657→    const b64 = item?.base64
+   658→    if (!b64 || typeof b64 !== 'string' || b64.length < 3000) {
+   659→      return { success: false, error: `ZAI edit returned no usable image after ${elapsed}s (base64 length=${b64?.length || 0})` }
+   660→    }
+   661→
+   662→    // Detect format
+   663→    let mime = 'image/png'
+   664→    if (item.format === 'jpeg' || item.format === 'jpg') mime = 'image/jpeg'
+   665→    else if (item.format === 'webp') mime = 'image/webp'
+   666→    else {
+   667→      const head = Buffer.from(b64.substring(0, 8), 'base64').toString('hex')
+   668→      if (head.startsWith('ffd8ff')) mime = 'image/jpeg'
+   669→      else if (head.startsWith('89504e47')) mime = 'image/png'
+   670→      else if (head.startsWith('52494646')) mime = 'image/webp'
+   671→    }
+   672→
+   673→    const dataUrl = `data:${mime};base64,${b64}`
+   674→    const byteLen = Math.floor(b64.length * 0.75)
+   675→    console.log(`[virtual-tryon] ✅ ZAI image-edit succeeded in ${elapsed}s (${(byteLen / 1024).toFixed(1)}KB, ${mime})`)
+   676→    return { success: true, imageUrl: dataUrl }
+   677→  } catch (err) {
+   678→    const msg = err instanceof Error ? err.message : String(err)
+   679→    console.log(`[virtual-tryon] ZAI image-edit failed: ${msg.substring(0, 200)}`)
+   680→    return { success: false, error: msg.substring(0, 200) }
+   681→  }
+   682→}
+   683→
+   684→// ── ZAI text-to-image (FALLBACK 1) ─────────────────────────────────
+   685→
+   686→function buildTextPrompt(config: CategoryTryOnConfig, productDesc: string): string {
+   687→  return [
+   688→    `Virtual try-on photograph of a person ${config.placement}.`,
+   689→    `The product being worn is ${productDesc}.`,
+   690→    `${config.framing}, studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality.`,
+   691→    `The product must look NATURALLY WORN with realistic shadows, highlights, fabric folds, and fit.`,
+   692→    `Natural pose and expression. Full image, no cropping, no border, no text.`,
+   693→  ].join(' ')
+   694→}
+   695→
+   696→async function callZAITextToImage(
+   697→  prompt: string,
+   698→  size: ImageSize,
+   699→  timeoutMs: number,
+   700→): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+   701→  const zai = await getZAI()
+   702→  if (!zai) {
+   703→    return { success: false, error: 'ZAI SDK unavailable' }
+   704→  }
+   705→
+   706→  console.log(`[virtual-tryon] ZAI text-to-image: ${size} (timeout ${timeoutMs}ms)`)
+   707→
+   708→  try {
+   709→    const start = Date.now()
+   710→    const response = await Promise.race([
+   711→      zai.images.generations.create({ prompt, size }),
+   712→      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('ZAI text timeout')), timeoutMs)),
+   713→    ])
+   714→    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   715→
+   716→    const item = response?.data?.[0]
+   717→    const b64 = item?.base64
+   718→    if (!b64 || typeof b64 !== 'string' || b64.length < 3000) {
+   719→      return { success: false, error: `ZAI text returned no usable image after ${elapsed}s` }
+   720→    }
+   721→
+   722→    let mime = 'image/png'
+   723→    if (item.format === 'jpeg' || item.format === 'jpg') mime = 'image/jpeg'
+   724→    else if (item.format === 'webp') mime = 'image/webp'
+   725→    else {
+   726→      const head = Buffer.from(b64.substring(0, 8), 'base64').toString('hex')
+   727→      if (head.startsWith('ffd8ff')) mime = 'image/jpeg'
+   728→      else if (head.startsWith('89504e47')) mime = 'image/png'
+   729→      else if (head.startsWith('52494646')) mime = 'image/webp'
+   730→    }
+   731→
+   732→    const dataUrl = `data:${mime};base64,${b64}`
+   733→    const byteLen = Math.floor(b64.length * 0.75)
+   734→    console.log(`[virtual-tryon] ✅ ZAI text-to-image succeeded in ${elapsed}s (${(byteLen / 1024).toFixed(1)}KB, ${mime})`)
+   735→    return { success: true, imageUrl: dataUrl }
+   736→  } catch (err) {
+   737→    const msg = err instanceof Error ? err.message : String(err)
+   738→    console.log(`[virtual-tryon] ZAI text-to-image failed: ${msg.substring(0, 200)}`)
+   739→    return { success: false, error: msg.substring(0, 200) }
+   740→  }
+   741→}
+   742→
+   743→// ── Pollinations (FALLBACK 2 & LAST RESORT) ────────────────────────
+   744→
+   745→interface PollinationsSize { width: number; height: number }
+   746→
+   747→function parseImageSize(size: ImageSize): PollinationsSize {
+   748→  const [w, h] = size.split('x').map(Number)
+   749→  return { width: w, height: h }
+   750→}
+   751→
+   752→function buildSelfieImg2ImgPrompt(config: CategoryTryOnConfig, productDesc: string): string {
+   753→  return [
+   754→    `Virtual try-on photograph. The person in the reference image is now ${config.placement}.`,
+   755→    `The product being worn is ${productDesc}.`,
+   756→    `CRITICAL: Keep the EXACT same face, gender, skin tone, body type, body proportions, hair, and age as the person in the reference image. Do NOT change the person's identity or gender.`,
+   757→    `The product must look NATURALLY WORN with realistic shadows, highlights, fabric folds, and fit where it meets the body — NOT pasted, floating, or overlaid.`,
+   758→    `${config.framing}, studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality.`,
+   759→    `Natural pose and expression. Full image, no cropping, no border, no text.`,
+   760→  ].join(' ')
+   761→}
+   762→
+   763→async function callPollinations(
+   764→  prompt: string,
+   765→  size: ImageSize,
+   766→  timeoutMs: number,
+   767→  referenceImageUrl?: string,
+   768→): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+   769→  const { width, height } = parseImageSize(size)
+   770→  const mode = referenceImageUrl ? 'selfie-img2img' : 'text'
+   771→
+   772→  // Pollinations sometimes returns HTTP 402 "Queue full for IP" when the
+   773→  // caller's IP already has a request in flight. We retry up to 2 times with
+   774→  // a short backoff so transient rate-limiting doesn't fail the try-on.
+   775→  const MAX_RETRIES = 2
+   776→  const RETRY_DELAYS_MS = [4_000, 6_000] // wait 4s, then 6s before retrying
+   777→
+   778→  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+   779→    if (attempt > 0) {
+   780→      const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]
+   781→      console.log(`[virtual-tryon] Pollinations retry ${attempt}/${MAX_RETRIES} after ${delay}ms backoff...`)
+   782→      await new Promise(r => setTimeout(r, delay))
+   783→    }
+   784→
+   785→    const encoded = encodeURIComponent(prompt)
+   786→    const seed = Math.floor(Math.random() * 1_000_000)
+   787→    let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`
+   788→    if (referenceImageUrl) {
+   789→      url += `&image=${encodeURIComponent(referenceImageUrl)}`
+   790→    }
+   791→
+   792→    console.log(`[virtual-tryon] Pollinations ${mode}: ${width}x${height} (attempt ${attempt + 1}/${MAX_RETRIES + 1}, timeout ${timeoutMs}ms)`)
+   793→
+   794→    const controller = new AbortController()
+   795→    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+   796→
+   797→    try {
+   798→      const start = Date.now()
+   799→      const res = await fetch(url, {
+   800→        signal: controller.signal,
+   801→        headers: {
+   802→          'Accept': 'image/jpeg, image/png, image/webp, */*',
+   803→          'User-Agent': '3BOXES-VirtualTryOn/1.0',
+   804→        },
+   805→      })
+   806→      clearTimeout(timeoutId)
+   807→      const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   808→
+   809→      // ── Rate-limited (HTTP 402) — retry with backoff ──
+   810→      if (res.status === 402 && attempt < MAX_RETRIES) {
+   811→        const body = await res.text().catch(() => '')
+   812→        console.log(`[virtual-tryon] Pollinations 402 rate-limited after ${elapsed}s (attempt ${attempt + 1}) — will retry`)
+   813→        continue // retry
+   814→      }
+   815→
+   816→      if (!res.ok) {
+   817→        const body = await res.text().catch(() => 'unknown')
+   818→        return { success: false, error: `Pollinations HTTP ${res.status} after ${elapsed}s: ${body.substring(0, 150)}` }
+   819→      }
+   820→
+   821→      const ct = res.headers.get('content-type') || ''
+   822→      if (!ct.startsWith('image/')) {
+   823→        const body = await res.text().catch(() => 'unknown')
+   824→        return { success: false, error: `Pollinations non-image "${ct}" after ${elapsed}s: ${body.substring(0, 150)}` }
+   825→      }
+   826→
+   827→      const buf = Buffer.from(await res.arrayBuffer())
+   828→      if (buf.length < 3000) {
+   829→        return { success: false, error: `Pollinations returned tiny image (${buf.length} bytes) — likely an error` }
+   830→      }
+   831→
+   832→      let mime = 'image/jpeg'
+   833→      if (ct.includes('image/png')) mime = 'image/png'
+   834→      else if (ct.includes('image/webp')) mime = 'image/webp'
+   835→      else {
+   836→        const hex = buf.subarray(0, 4).toString('hex')
+   837→        if (hex === '89504e47') mime = 'image/png'
+   838→        else if (hex.startsWith('ffd8ff')) mime = 'image/jpeg'
+   839→        else if (hex.startsWith('52494646')) mime = 'image/webp'
+   840→      }
+   841→
+   842→      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
+   843→      console.log(`[virtual-tryon] ✅ Pollinations ${mode} succeeded in ${elapsed}s (${(buf.length / 1024).toFixed(1)}KB, ${mime})`)
+   844→      return { success: true, imageUrl: dataUrl }
+   845→    } catch (err) {
+   846→      clearTimeout(timeoutId)
+   847→      const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+   848→      const msg = isTimeout
+   849→        ? `Pollinations timed out after ${(timeoutMs / 1000).toFixed(0)}s`
+   850→        : `Pollinations fetch error: ${(err as Error).message.substring(0, 200)}`
+   851→      console.log(`[virtual-tryon] ${msg} (attempt ${attempt + 1})`)
+   852→      if (attempt < MAX_RETRIES) continue // retry
+   853→      return { success: false, error: msg }
+   854→    }
+   855→  }
+   856→
+   857→  return { success: false, error: 'Pollinations failed after all retries' }
+   858→}
+   859→
+   860→// ── Space Status Helpers (kept for backwards compat with API routes) ──
+   861→
+   862→let spaceAwakeCache: { awake: boolean; timestamp: number } | null = null
+   863→const SPACE_CACHE_TTL = 20_000
+   864→
+   865→export async function preWarmSpace(): Promise<boolean> {
+   866→  // Trigger ZAI init in the background so the first real request is faster.
+   867→  void getZAI()
+   868→  return true
+   869→}
+   870→
+   871→export async function checkIDMVTONSpaceStatus(): Promise<{ awake: boolean }> {
+   872→  const now = Date.now()
+   873→  if (spaceAwakeCache && now - spaceAwakeCache.timestamp < SPACE_CACHE_TTL) {
+   874→    return { awake: spaceAwakeCache.awake }
+   875→  }
+   876→  spaceAwakeCache = { awake: true, timestamp: now }
+   877→  return { awake: true }
+   878→}
+   879→
+   880→/**
+   881→ * Lightweight check used by /api/try-on/status — verifies that the ZAI SDK
+   882→ * can be initialised within a short window. Does NOT make a network call
+   883→ * to the LLM endpoint (that would be too slow for a status check).
+   884→ */
+   885→export async function isTryOnServiceReady(): Promise<{
+   886→  ready: boolean
+   887→  engine: string
+   888→  reason?: string
+   889→}> {
+   890→  // On Vercel, ZAI cannot authenticate (public API rejects the sandbox token),
+   891→  // so we always use the Pollinations fallback there. Report it honestly so
+   892→  // the frontend shows the correct "AI service ready" state.
+   893→  if (process.env.VERCEL) {
+   894→    return {
+   895→      ready: true,
+   896→      engine: 'pollinations-img2img',
+   897→      reason: 'Vercel environment — using free Pollinations image-to-image (no auth required)',
+   898→    }
+   899→  }
+   900→
+   901→  const zai = await Promise.race([
+   902→    getZAI(),
+   903→    new Promise<null>(r => setTimeout(() => r(null), 4000)),
+   904→  ])
+   905→  if (zai) {
+   906→    return { ready: true, engine: 'zai-image-edit' }
+   907→  }
+   908→  return {
+   909→    ready: true, // Pollinations fallback is always available
+   910→    engine: 'pollinations-fallback',
+   911→    reason: 'ZAI SDK unavailable — will use Pollinations fallback',
+   912→  }
+   913→}
+   914→
+   915→// ── Main Try-On Function ───────────────────────────────────────────
+   916→
+   917→export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResult> {
+   918→  const totalStart = Date.now()
+   919→  const totalDeadline = totalStart + TOTAL_TIMEOUT_MS
+   920→  const config = getCategoryConfig(input.categorySlug, input.productName)
+   921→  const strategiesAttempted: string[] = []
+   922→  const strategyErrors: Record<string, string> = {}
+   923→  const isVercel = !!process.env.VERCEL
+   924→
+   925→  console.log(`[virtual-tryon] v19 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+   926→
+   927→  // Validate selfie
+   928→  if (!input.selfieData?.startsWith('data:image/')) {
+   929→    return {
+   930→      success: false,
+   931→      error: 'A valid selfie image is required.',
+   932→      errorCode: 'NO_SELFIE',
+   933→      elapsedMs: Date.now() - totalStart,
+   934→      debugInfo: { strategiesAttempted, strategyErrors },
+   935→    }
+   936→  }
+   937→
+   938→  // ── STEP A: VLM-analyse the product photo for an accurate description ──
+   939→  // This runs in parallel with selfie compression and is the single most
+   940→  // important signal for matching the actual product (no more "saree → glasses").
+   941→  let vlmDescription: string | null = null
+   942→  const vlmPromise = (async () => {
+   943→    if (input.productImageBase64) {
+   944→      return await analyzeProductImage(input.productImageBase64, input.productName, input.categorySlug)
+   945→    }
+   946→    return null
+   947→  })()
+   948→
+   949→  // Compress the selfie in parallel (used by all strategies)
+   950→  let selfieBuf: Buffer | null = null
+   951→  try {
+   952→    selfieBuf = await compressSelfie(input.selfieData)
+   953→    console.log(`[virtual-tryon] Compressed selfie → ${selfieBuf.length} bytes`)
+   954→  } catch (err) {
+   955→    strategyErrors['selfie-compress'] = `compress failed: ${(err as Error).message}`
+   956→    console.log(`[virtual-tryon] Selfie compress failed: ${(err as Error).message}`)
+   957→    // ── RAW BUFFER FALLBACK ────────────────────────────────────────
+   958→    // If sharp is unavailable (e.g. native binary missing on Vercel), fall
+   959→    // back to the raw decoded selfie buffer. This is larger but still works
+   960→    // for the tmpfiles.org upload → Pollinations img2img path. The try-on
+   961→    // must NEVER fail just because image compression is unavailable.
+   962→    try {
+   963→      const raw = stripDataUrl(input.selfieData)
+   964→      selfieBuf = Buffer.from(raw, 'base64')
+   965→      console.log(`[virtual-tryon] Using RAW (uncompressed) selfie buffer → ${selfieBuf.length} bytes`)
+   966→    } catch {
+   967→      selfieBuf = null
+   968→    }
+   969→  }
+   970→
+   971→  // Wait for VLM with a tight deadline so it doesn't push us over budget
+   972→  try {
+   973→    vlmDescription = await Promise.race([
+   974→      vlmPromise,
+   975→      new Promise<null>(r => setTimeout(() => r(null), VLM_TIMEOUT_MS)),
+   976→    ])
+   977→  } catch {
+   978→    vlmDescription = null
+   979→  }
+   980→
+   981→  // Build the rich product description (uses VLM output if available)
+   982→  const productDesc = buildProductDescription(config, input, vlmDescription || undefined)
+   983→  console.log(`[virtual-tryon] Product description: ${productDesc.substring(0, 200)}...`)
+   984→
+   985→  // ── STRATEGY 1: ZAI image-edit (PRIMARY) ─────────────────────────
+   986→  // Real image-to-image edit — preserves the user's face/gender/body from
+   987→  // the selfie input and applies the product described in the prompt.
+   988→  if (selfieBuf && Date.now() < totalDeadline - 15_000) {
+   989→    strategiesAttempted.push('zai-image-edit')
+   990→    console.log('[virtual-tryon] Strategy 1: ZAI image-edit (selfie-preserving)')
+   991→
+   992→    const selfieDataUrl = bufferToDataUrl(selfieBuf)
+   993→    const prompt = buildEditPrompt(config, productDesc)
+   994→    const remaining = Math.min(ZAI_EDIT_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+   995→    if (remaining > 10_000) {
+   996→      const result = await callZAIImageEdit(prompt, selfieDataUrl, config.size, remaining)
+   997→      if (result.success && result.imageUrl) {
+   998→        const elapsed = Date.now() - totalStart
+   999→        console.log(`[virtual-tryon] ✅ ZAI image-edit succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+  1000→        return { success: true, imageUrl: result.imageUrl, strategy: 'zai-image-edit', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
+  1001→      }
+  1002→      strategyErrors['zai-image-edit'] = result.error || 'No image returned'
+  1003→      console.log(`[virtual-tryon] ZAI image-edit failed: ${result.error?.substring(0, 120)}`)
+  1004→    } else {
+  1005→      strategyErrors['zai-image-edit'] = 'insufficient time budget'
+  1006→      console.log('[virtual-tryon] Skipping ZAI image-edit — insufficient time budget')
+  1007→    }
+  1008→  } else if (!selfieBuf) {
+  1009→    console.log('[virtual-tryon] Skipping ZAI image-edit — no compressed selfie available')
+  1010→  }
+  1011→
+  1012→  // ── STRATEGY 2: ZAI text-to-image (FALLBACK 1) ──────────────────
+  1013→  // Uses the same rich product prompt but generates from scratch (no
+  1014→  // identity preservation). Better than Pollinations because ZAI's model
+  1015→  // is more prompt-faithful.
+  1016→  if (Date.now() < totalDeadline - 12_000) {
+  1017→    strategiesAttempted.push('zai-text-to-image')
+  1018→    console.log('[virtual-tryon] Strategy 2: ZAI text-to-image (fallback)')
+  1019→
+  1020→    const prompt = buildTextPrompt(config, productDesc)
+  1021→    const remaining = Math.min(ZAI_TEXT_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+  1022→    if (remaining > 10_000) {
+  1023→      const result = await callZAITextToImage(prompt, config.size, remaining)
+  1024→      if (result.success && result.imageUrl) {
+  1025→        const elapsed = Date.now() - totalStart
+  1026→        console.log(`[virtual-tryon] ✅ ZAI text-to-image succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+  1027→        return { success: true, imageUrl: result.imageUrl, strategy: 'zai-text-to-image', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
+  1028→      }
+  1029→      strategyErrors['zai-text-to-image'] = result.error || 'No image returned'
+  1030→      console.log(`[virtual-tryon] ZAI text-to-image failed: ${result.error?.substring(0, 120)}`)
+  1031→    } else {
+  1032→      strategyErrors['zai-text-to-image'] = 'insufficient time budget'
+  1033→    }
+  1034→  }
+  1035→
+  1036→  // ── STRATEGY 3: Pollinations img2img (FALLBACK 2) ───────────────
+  1037→  // Upload the selfie to tmpfiles.org and pass it as the `?image=` reference.
+  1038→  // Note: Pollinations doesn't truly honour this for identity preservation,
+  1039→  // but it's a useful resilience fallback when ZAI is unreachable.
+  1040→  if (selfieBuf && Date.now() < totalDeadline - 18_000) {
+  1041→    strategiesAttempted.push('pollinations-img2img')
+  1042→    console.log('[virtual-tryon] Strategy 3: Pollinations img2img (fallback)')
+  1043→
+  1044→    const uploadTimeout = Math.min(UPLOAD_TIMEOUT_MS, totalDeadline - Date.now() - 15_000)
+  1045→    let selfieUrl: string | null = null
+  1046→    if (uploadTimeout > 3000) {
+  1047→      selfieUrl = await uploadToTmpfiles(selfieBuf, uploadTimeout)
+  1048→    }
+  1049→    if (selfieUrl) {
+  1050→      const prompt = buildSelfieImg2ImgPrompt(config, productDesc)
+  1051→      const remaining = Math.min(POLLINATIONS_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+  1052→      const result = await callPollinations(prompt, config.size, remaining, selfieUrl)
+  1053→      if (result.success && result.imageUrl) {
+  1054→        const elapsed = Date.now() - totalStart
+  1055→        console.log(`[virtual-tryon] ✅ Pollinations img2img succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+  1056→        return { success: true, imageUrl: result.imageUrl, strategy: 'pollinations-img2img', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
+  1057→      }
+  1058→      strategyErrors['pollinations-img2img'] = result.error || 'No image returned'
+  1059→    } else {
+  1060→      strategyErrors['pollinations-img2img'] = 'tmpfiles upload failed'
+  1061→      console.log('[virtual-tryon] tmpfiles upload failed — skipping Pollinations img2img')
+  1062→    }
+  1063→  }
+  1064→
+  1065→  // ── STRATEGY 4: Pollinations text-to-image (LAST RESORT) ────────
+  1066→  if (Date.now() < totalDeadline - 10_000) {
+  1067→    strategiesAttempted.push('pollinations-text')
+  1068→    console.log('[virtual-tryon] Strategy 4: Pollinations text-to-image (last resort)')
+  1069→
+  1070→    const prompt = buildTextPrompt(config, productDesc)
+  1071→    const remaining = Math.min(POLLINATIONS_TIMEOUT_MS, totalDeadline - Date.now() - 3_000)
+  1072→    if (remaining > 5000) {
+  1073→      const result = await callPollinations(prompt, config.size, remaining)
+  1074→      if (result.success && result.imageUrl) {
+  1075→        const elapsed = Date.now() - totalStart
+  1076→        console.log(`[virtual-tryon] ✅ Pollinations text succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+  1077→        return { success: true, imageUrl: result.imageUrl, strategy: 'pollinations-text', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
+  1078→      }
+  1079→      strategyErrors['pollinations-text'] = result.error || 'No image returned'
+  1080→    }
+  1081→  }
+  1082→
+  1083→  // ── All strategies failed ───────────────────────────────────────
+  1084→  const elapsed = Date.now() - totalStart
+  1085→  console.log(`[virtual-tryon] ❌ All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
+  1086→  console.log(`[virtual-tryon] Strategies: ${strategiesAttempted.join(', ')}`)
+  1087→  console.log(`[virtual-tryon] Errors: ${JSON.stringify(strategyErrors)}`)
+  1088→
+  1089→  return {
+  1090→    success: false,
+  1091→    error: 'We could not generate your style preview right now. Please try again in a moment.',
+  1092→    errorCode: 'ALL_STRATEGIES_FAILED',
+  1093→    elapsedMs: elapsed,
+  1094→    debugInfo: { strategiesAttempted, strategyErrors },
+  1095→  }
+  1096→}
+  1097→
