@@ -494,7 +494,7 @@ export async function extractColorsFromProductImage(imageBase64: string): Promis
     const sorted = Array.from(buckets.values()).sort((a, b) =>
       (b.count * (b.satSum / b.count)) - (a.count * (a.satSum / a.count))
     )
-    const top = sorted.slice(0, 3)
+    const top = sorted.slice(0, 4)
     const names = top.map(bucket => {
       const avgR = Math.round(bucket.r / bucket.count)
       const avgG = Math.round(bucket.g / bucket.count)
@@ -502,8 +502,31 @@ export async function extractColorsFromProductImage(imageBase64: string): Promis
       return rgbToColorName(avgR, avgG, avgB)
     })
 
-    // Deduplicate (e.g. "bright red" and "red" → keep both, they reinforce)
-    const unique = Array.from(new Set(names))
+    // Deduplicate by BASE colour name — if "red" and "bright red" both appear,
+    // keep only "bright red" (the more descriptive/vibrant variant). This
+    // prevents FLUX from averaging two reds into a muted medium-red.
+    const byBase = new Map<string, string>()
+    for (const name of names) {
+      const base = name.replace(/^(bright |dark )/, '').trim()
+      const existing = byBase.get(base)
+      // Prefer "bright" variant over plain, and plain over "dark"
+      if (!existing) {
+        byBase.set(base, name)
+      } else if (name.startsWith('bright ') && !existing.startsWith('bright ')) {
+        byBase.set(base, name) // upgrade to bright
+      }
+    }
+    // Preserve original frequency order
+    const unique: string[] = []
+    for (const name of names) {
+      const base = name.replace(/^(bright |dark )/, '').trim()
+      const chosen = byBase.get(base)
+      if (chosen === name && !unique.includes(name)) {
+        unique.push(name)
+        byBase.delete(base) // only add once
+      }
+      if (unique.length >= 2) break // max 2 colours to keep the prompt focused
+    }
     console.log(`[virtual-tryon] Image-extracted colours: ${unique.join(', ')} (from ${buckets.size} vibrant buckets)`)
     return unique.join(', ')
   } catch (err) {
