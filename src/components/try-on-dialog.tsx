@@ -1,25 +1,25 @@
 'use client';
 
 /**
- * TryOnDialog v4.3 — ZAI Image-Edit Virtual Try-On
+ * TryOnDialog v4.4 — Direct ZAI Image-Edit Virtual Try-On
  *
  * KEY PRINCIPLES:
- * 1. Powered by Z.AI image-edit API (REAL image-to-image edit — preserves
- *    the user's identity from their selfie, applies the product described
- *    in the prompt). Falls back to Pollinations if ZAI is unavailable.
+ * 1. Powered by Z.AI image-edit API (REAL image-to-image edit — passes BOTH
+ *    the user's selfie AND the product photo to ZAI, which preserves the
+ *    user's face/gender AND renders the exact product).
  * 2. PRESERVES THE USER — the user's SELFIE is the edit input image,
  *    so the AI keeps the user's face, gender, skin tone, and body type.
- * 3. DESCRIBES THE PRODUCT — VLM analyses the ACTUAL product photo and
- *    extracts colours, material, pattern, and style. This is fused with
- *    the product name/description/tags so the prompt accurately reflects
- *    the EXACT product being tried on (no more "saree → glasses").
+ * 3. RENDERS THE EXACT PRODUCT — the PRODUCT PHOTO is also passed to the
+ *    edit API, so the AI reproduces the exact colours, pattern, fabric,
+ *    and design (no more "saree → glasses").
  * 4. GENDER-NEUTRAL prompts — never hardcodes a gender; uses "the person
  *    in the reference image" so the result matches the user's actual gender.
  * 5. Instant selfie preview (show raw image IMMEDIATELY on upload)
  * 6. Disclaimer → auto-opens file picker (one-click flow)
  * 7. Hard 55-second client timeout with friendly retry message
  * 8. 3BOXES watermark on ALL generated/saved/downloaded images
- * 9. Works on both preview and Vercel — ZAI primary, Pollinations fallback
+ * 9. Works on both preview and Vercel — ZAI primary (local), Pollinations
+ *    fallback (Vercel / ZAI-down)
  * 10. NO canvas overlay fallback — real AI generation every time
  */
 
@@ -969,11 +969,10 @@ export function TryOnDialog({
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
                     <span className="font-semibold text-amber-300/60">How it works:</span>{' '}
-                    Our AI uses YOUR selfie as the reference image — preserving your
-                    face, gender, and body type — then drapes the product onto you
-                    with realistic fit and folds. We also analyse the actual product
-                    photo so the colours, pattern, and style match exactly.
-                    This usually takes 15–25 seconds.
+                    Our AI uses YOUR selfie AND the actual product photo together —
+                    preserving your face, gender, and body type while rendering the
+                    exact product with realistic fit, folds, and colours.
+                    This usually takes 20–25 seconds.
                   </p>
                 </div>
 

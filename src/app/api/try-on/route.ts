@@ -1,26 +1,20 @@
 /**
- * AI Virtual Try-On API v19.1 — Environment-Aware Pipeline
+ * AI Virtual Try-On API v21 — Direct ZAI + Pollinations Fallback
  *
- * Strategy chain (see src/lib/virtual-tryon.ts):
+ * Strategy (see src/lib/virtual-tryon.ts):
  *
- * SANDBOX / LOCAL (ZAI SDK auto-discovers credentials from /etc/.z-ai-config):
- * 1. ZAI image-edit (PRIMARY): real image-to-image edit using the user's
- *    SELFIE as input → preserves the user's face, gender, skin tone,
- *    body type, and hair. The prompt (built from VLM analysis of the
- *    product photo + product name/description/tags) tells the model
- *    exactly what product to drape on the person.
- * 2. ZAI text-to-image (FALLBACK 1): same rich prompt, no input image.
- * 3. Pollinations img2img (FALLBACK 2): tmpfiles.org + ?image=selfie_url.
- * 4. Pollinations text-to-image (LAST RESORT): always available.
+ * LOCAL / SANDBOX:
+ *   1. Direct ZAI image-edit (PRIMARY): calls ZAI's images.generations.edit
+ *      with BOTH the selfie and the product image (edit-both strategy).
+ *      Preserves the user's face/gender AND renders the exact product.
+ *      Completes in 20-27s.
+ *   2. Pollinations img2img (FALLBACK): if ZAI is temporarily down, uses
+ *      the product image as the Pollinations ?image= reference.
  *
- * VERCEL (ZAI public API rejects the sandbox token — "Authentication Failed"):
- * 1. Pollinations img2img (PRIMARY): upload selfie to tmpfiles.org, pass as
- *    ?image= reference to Pollinations flux model. 100% free, no auth.
- * 2. Pollinations text-to-image (FALLBACK): always available.
- *
- * The environment detection is in getZAI() which returns null on Vercel,
- * causing the strategy chain to skip ZAI entirely and go straight to
- * Pollinations with the full 55s time budget.
+ * VERCEL (ZAI auth fails on the public API):
+ *   1. Pollinations img2img with product image reference — ensures the
+ *      correct product is always shown. The person is a model matching
+ *      the category's gender.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -28,8 +22,22 @@ import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/li
 
 export const maxDuration = 60
 
-// ── Product Image Helpers (kept for backwards compat — product image
-//    is no longer the primary reference, but may be used for color hints) ──
+// ── Product Image Helpers ──────────────────────────────────────────
+
+async function fetchImageAsBase64(url: string): Promise<string | null> {
+  try {
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'image/*,*/*;q=0.8' },
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!r.ok) return null
+    const ct = r.headers.get('content-type') || 'image/jpeg'
+    const mime = ct.split(';')[0].trim()
+    if (!mime.startsWith('image/')) return null
+    const buf = Buffer.from(await r.arrayBuffer())
+    return `data:${mime};base64,${buf.toString('base64')}`
+  } catch { return null }
+}
 
 async function getProductImageBase64(imagePath: string): Promise<string | null> {
   if (!imagePath) return null
@@ -64,21 +72,6 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
   return null
 }
 
-async function fetchImageAsBase64(url: string): Promise<string | null> {
-  try {
-    const r = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'image/*,*/*;q=0.8' },
-      signal: AbortSignal.timeout(10_000),
-    })
-    if (!r.ok) return null
-    const ct = r.headers.get('content-type') || 'image/jpeg'
-    const mime = ct.split(';')[0].trim()
-    if (!mime.startsWith('image/')) return null
-    const buf = Buffer.from(await r.arrayBuffer())
-    return `data:${mime};base64,${buf.toString('base64')}`
-  } catch { return null }
-}
-
 // ── POST /api/try-on ───────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -109,7 +102,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Resolve product image (optional — used for color hints, not as primary reference)
+    // Resolve product image (needed by both the ai-proxy and Pollinations fallback)
     let productImageBase64 = clientBase64 || null
     if (!productImageBase64 && productImageUrl) {
       productImageBase64 = await getProductImageBase64(productImageUrl)
@@ -135,6 +128,11 @@ export async function POST(request: NextRequest) {
         imageUrl: result.imageUrl,
         strategy: result.strategy,
         elapsed: parseFloat(elapsed),
+        debug: {
+          isVercel: !!process.env.VERCEL,
+          strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
+          strategyErrors: result.debugInfo?.strategyErrors || {},
+        },
       })
     }
 
@@ -172,24 +170,30 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
+  const hasProxyUrl = !!process.env.ZAI_PROXY_URL
   const isVercel = !!process.env.VERCEL
+
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: isVercel
+      message: process.env.VERCEL
         ? 'AI ready — Pollinations image-to-image (free, no auth needed)'
         : 'AI ready — ZAI image-edit primary, Pollinations fallback',
     })
   }
+
   const statusResult = await checkIDMVTONSpaceStatus()
+  const engine = process.env.VERCEL ? 'pollinations-img2img' : (statusResult.awake ? 'zai-image-edit' : 'pollinations-fallback')
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
-    mode: isVercel ? 'pollinations-img2img' : 'zai-image-edit',
-    message: isVercel
-      ? 'AI Virtual Try-On ready — using free Pollinations image-to-image (selfie as reference)'
-      : 'AI Virtual Try-On ready — preserves your face & gender from your selfie using ZAI image-edit',
+    mode: engine,
+    message: process.env.VERCEL
+      ? 'AI Virtual Try-On ready — using Pollinations image-to-image (free, no auth needed)'
+      : statusResult.awake
+        ? 'AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product)'
+        : 'AI Virtual Try-On ready — using Pollinations fallback',
   })
 }
