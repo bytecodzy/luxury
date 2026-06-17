@@ -1,5 +1,5 @@
 /**
- * AI Virtual Try-On API v21 — Direct ZAI + Pollinations Fallback
+ * AI Virtual Try-On API v22 — Direct ZAI + Pollinations (Selfie Reference + Image Colours)
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
@@ -8,13 +8,15 @@
  *      with BOTH the selfie and the product image (edit-both strategy).
  *      Preserves the user's face/gender AND renders the exact product.
  *      Completes in 20-27s.
- *   2. Pollinations img2img (FALLBACK): if ZAI is temporarily down, uses
- *      the product image as the Pollinations ?image= reference.
+ *   2. Pollinations selfie-img2img (FALLBACK): if ZAI is temporarily down,
+ *      uploads the selfie as ?image= reference + extracts real colours
+ *      from the product image via sharp.
  *
  * VERCEL (ZAI auth fails on the public API):
- *   1. Pollinations img2img with product image reference — ensures the
- *      correct product is always shown. The person is a model matching
- *      the category's gender.
+ *   1. Pollinations selfie-img2img — uploads the user's SELFIE as the
+ *      ?image= reference (preserves face/gender/features) AND extracts
+ *      the REAL colours from the actual product image via sharp (so the
+ *      product colours match the photo, not just the name).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -179,21 +181,21 @@ export async function GET(request: NextRequest) {
       available: true,
       spaceAwake: awake,
       message: process.env.VERCEL
-        ? 'AI ready — Pollinations image-to-image (free, no auth needed)'
-        : 'AI ready — ZAI image-edit primary, Pollinations fallback',
+        ? 'AI ready — Pollinations selfie-img2img + real product colours (free, no auth needed)'
+        : 'AI ready — ZAI image-edit primary, Pollinations selfie-img2img fallback',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  const engine = process.env.VERCEL ? 'pollinations-img2img' : (statusResult.awake ? 'zai-image-edit' : 'pollinations-fallback')
+  const engine = process.env.VERCEL ? 'pollinations-selfie-img2img' : (statusResult.awake ? 'zai-image-edit' : 'pollinations-selfie-img2img')
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: process.env.VERCEL
-      ? 'AI Virtual Try-On ready — using Pollinations image-to-image (free, no auth needed)'
+      ? 'AI Virtual Try-On ready — uses your selfie as reference + extracts real colours from the product image (free, no auth needed)'
       : statusResult.awake
         ? 'AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product)'
-        : 'AI Virtual Try-On ready — using Pollinations fallback',
+        : 'AI Virtual Try-On ready — using Pollinations selfie-img2img fallback',
   })
 }
