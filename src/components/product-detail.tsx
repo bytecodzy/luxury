@@ -757,6 +757,8 @@ export function ProductDetail() {
           rawProductImage={safeImages[0] || '/images/hero.png'}
           categorySlug={product.categorySlug}
           productImages={safeImages.map(img => getProxiedImageUrl(img, product.platform))}
+          productDescription={product.description}
+          productTags={product.tags}
           onBackgroundJob={handleBackgroundJob}
           onResetBackground={handleResetBackground}
           onShareToInfluencer={(imageDataUrl) => {

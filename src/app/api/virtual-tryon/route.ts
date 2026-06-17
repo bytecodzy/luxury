@@ -1,20 +1,20 @@
 /**
- * AI Virtual Try-On API v17 — Image-Matching Pipeline
+ * AI Virtual Try-On API v18 — Selfie-Preserving Pipeline
  *
- * Strategy (in order):
- * 1. Z.AI Image Edit (OPTIONAL — only if ZAI_BASE_URL + ZAI_API_KEY set) for face preservation
- * 2. Pollinations IMAGE-TO-IMAGE (PRIMARY): uploads the REAL product photo to
- *    tmpfiles.org, then asks Pollinations to condition generation on it → the
- *    result MATCHES the actual product's colors, patterns, and design.
- * 3. Pollinations TEXT-TO-IMAGE (fallback): uses product name + category only.
+ * Strategy:
+ * 1. Pollinations SELFIE img2img (PRIMARY): uploads the user's SELFIE to
+ *    tmpfiles.org, then asks Pollinations to condition generation on it.
+ *    The AI PRESERVES the user's face, gender, skin tone, and body type
+ *    from the selfie, and ADDS the product described in the text prompt.
+ * 2. Pollinations TEXT-TO-IMAGE (fallback): uses a detailed product
+ *    description if the selfie upload fails.
  *
- * 100% free. No auth needed for the primary path. Works identically on
- * preview, sandbox, and Vercel.
+ * 100% free. No auth needed. No env vars needed. Works identically on
+ * preview, sandbox, and Vercel. No ZAI dependency.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/lib/virtual-tryon'
-import { isZAIConfigured, getZAIConfig } from '@/lib/zai'
 
 export const maxDuration = 60
 
@@ -74,7 +74,16 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now()
   try {
     const body = await request.json()
-    const { productId, selfieData, productImageUrl, productImageBase64: clientBase64, productName, categorySlug } = body
+    const {
+      productId,
+      selfieData,
+      productImageUrl,
+      productImageBase64: clientBase64,
+      productName,
+      categorySlug,
+      productDescription,
+      productTags,
+    } = body
 
     if (!productId || !selfieData) {
       return NextResponse.json(
@@ -89,13 +98,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Resolve product image — prefer client-provided base64 over URL fetch
+    // Resolve product image (optional — used for color hints, not as primary reference)
     let productImageBase64 = clientBase64 || null
     if (!productImageBase64 && productImageUrl) {
       productImageBase64 = await getProductImageBase64(productImageUrl)
     }
-    // Product image is optional for Pollinations (which uses text prompts)
-    // but required for ZAI edit-both strategy. Don't fail if missing.
 
     console.log(`[virtual-tryon] POST: productId=${productId}, product="${productName}", category="${categorySlug}", hasSelfie=${!!selfieData}, hasProductImg=${!!productImageBase64}`)
 
@@ -104,6 +111,8 @@ export async function POST(request: NextRequest) {
       productImageBase64: productImageBase64 || '',
       productName: productName || 'Product',
       categorySlug: categorySlug || '',
+      productDescription: productDescription || '',
+      productTags: Array.isArray(productTags) ? productTags : [],
     })
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
@@ -132,7 +141,6 @@ export async function POST(request: NextRequest) {
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
       debug: {
-        zaiConfigured: isZAIConfigured(),
         isVercel: !!process.env.VERCEL,
         strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
         strategyErrors: result.debugInfo?.strategyErrors || {},
@@ -155,66 +163,15 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
 
-  // ── Debug endpoint: test ZAI connectivity directly ──
-  if (searchParams.get('action') === 'test-zai') {
-    const zaiConfigured = isZAIConfigured()
-    const zaiConfig = getZAIConfig()
-    const isVercel = !!process.env.VERCEL
-
-    if (!zaiConfigured || !zaiConfig) {
-      return NextResponse.json({
-        configured: false,
-        note: 'ZAI not configured — Pollinations.ai will be used as primary (100% free, no auth needed)',
-        isVercel,
-      })
-    }
-
-    try {
-      const startTime = Date.now()
-      const response = await fetch(`${zaiConfig.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${zaiConfig.apiKey}`,
-          'X-Z-AI-From': 'Z',
-        },
-        body: JSON.stringify({
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 1,
-          thinking: { type: 'disabled' },
-        }),
-        signal: AbortSignal.timeout(10_000),
-      })
-      const elapsed = Date.now() - startTime
-
-      return NextResponse.json({
-        configured: true,
-        connectivityTest: response.status < 500 ? 'PASS' : 'FAIL',
-        status: response.status,
-        baseUrl: zaiConfig.baseUrl,
-        isVercel,
-        elapsedMs: elapsed,
-      })
-    } catch (err) {
-      return NextResponse.json({
-        configured: true,
-        connectivityTest: 'FAIL',
-        error: (err as Error).message?.substring(0, 200),
-        baseUrl: zaiConfig.baseUrl,
-        isVercel,
-        note: 'ZAI unreachable — Pollinations.ai will be used as fallback (always works)',
-      })
-    }
-  }
-
   // ── Default status endpoint ──
+  void searchParams
+  void preWarmSpace
   const statusResult = await checkIDMVTONSpaceStatus()
   return NextResponse.json({
     available: true, // Pollinations is always available
     spaceAwake: statusResult.awake,
-    zaiConfigured: isZAIConfigured(),
     isVercel: !!process.env.VERCEL,
-    mode: 'pollinations-primary' + (isZAIConfigured() ? ' + zai-edit-optional' : ''),
-    message: 'AI Virtual Try-On ready — Pollinations.ai (100% free, no auth) is primary strategy',
+    mode: 'pollinations-selfie-img2img',
+    message: 'AI Virtual Try-On ready — preserves your face & gender from your selfie. 100% free, no auth.',
   })
 }

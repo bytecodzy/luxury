@@ -1,19 +1,22 @@
 'use client';
 
 /**
- * TryOnDialog v4.1 — Image-Matching AI Virtual Try-On
+ * TryOnDialog v4.2 — Selfie-Preserving AI Virtual Try-On
  *
  * KEY PRINCIPLES:
  * 1. Powered by Pollinations.ai image-to-image (100% free, no auth, always available)
- * 2. Matches the ACTUAL product photo — colors, patterns, and design are reproduced
- *    from the real product image, not guessed from the product name
- * 3. Instant selfie preview (show raw image IMMEDIATELY on upload)
- * 4. Disclaimer → auto-opens file picker (one-click flow)
- * 5. Hard 55-second client timeout with friendly retry message
- * 6. 3BOXES watermark on ALL generated/saved/downloaded images
- * 7. Full-body output (never half image)
- * 8. Works on both preview and Vercel — same code, same reliability
- * 9. NO canvas overlay fallback — real AI generation every time
+ * 2. PRESERVES THE USER — the user's SELFIE is used as the img2img reference,
+ *    so the AI keeps the user's face, gender, skin tone, and body type
+ * 3. DESCRIBES THE PRODUCT — a rich prompt (from name + description + tags +
+ *    category) tells the AI exactly what product to drape on the person
+ * 4. GENDER-NEUTRAL prompts — never hardcodes a gender; uses "the person in
+ *    the reference image" so the result matches the user's actual gender
+ * 5. Instant selfie preview (show raw image IMMEDIATELY on upload)
+ * 6. Disclaimer → auto-opens file picker (one-click flow)
+ * 7. Hard 55-second client timeout with friendly retry message
+ * 8. 3BOXES watermark on ALL generated/saved/downloaded images
+ * 9. Works on both preview and Vercel — same code, same reliability
+ * 10. NO canvas overlay fallback — real AI generation every time
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -54,6 +57,8 @@ interface TryOnDialogProps {
   categorySlug?: string;
   rawProductImage?: string;
   productImages?: string[];
+  productDescription?: string;
+  productTags?: string[];
   onBackgroundJob?: (step: 'generating' | 'result') => void;
   onResetBackground?: () => void;
   onShareToInfluencer?: (imageDataUrl: string) => void;
@@ -246,6 +251,8 @@ export function TryOnDialog({
   productImage,
   categorySlug,
   rawProductImage,
+  productDescription,
+  productTags,
   onBackgroundJob,
   onResetBackground,
   onShareToInfluencer,
@@ -540,6 +547,8 @@ export function TryOnDialog({
           productImageBase64,
           productName,
           categorySlug: categorySlug || '',
+          productDescription: productDescription || '',
+          productTags: productTags || [],
         }),
         signal: controller.signal,
       });
@@ -596,7 +605,7 @@ export function TryOnDialog({
           : 'Network error. Please check your connection and try again.'
       );
     }
-  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, onBackgroundJob]);
+  }, [selfieData, productId, productImage, productName, categorySlug, rawProductImage, productDescription, productTags, onBackgroundJob]);
 
   // ── Retry ────────────────────────────────────────────────────────
   const handleRetry = useCallback(async () => {
@@ -956,10 +965,10 @@ export function TryOnDialog({
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
                     <span className="font-semibold text-amber-300/60">How it works:</span>{' '}
-                    Our AI matches the actual product photo — colors, patterns, and
-                    design are reproduced from the real product image, then draped
-                    onto a model. Powered by Pollinations image-to-image AI.
-                    This usually takes 5-20 seconds.
+                    Our AI uses YOUR selfie as the reference image — preserving your
+                    face, gender, and body type — then drapes the product onto you
+                    with realistic fit and folds. Powered by Pollinations AI.
+                    This usually takes 10-25 seconds.
                   </p>
                 </div>
 

@@ -1,17 +1,25 @@
 /**
- * AI Virtual Try-On API (backward-compatible route)
+ * AI Virtual Try-On API v18 — Selfie-Preserving Pipeline
  *
- * Delegates to the same performVirtualTryOn engine as /api/virtual-tryon
- * Uses Pollinations.ai as primary (always works, free, no auth)
+ * Strategy:
+ * 1. Pollinations SELFIE img2img (PRIMARY): uploads the user's SELFIE to
+ *    tmpfiles.org, then asks Pollinations to condition generation on it.
+ *    The AI PRESERVES the user's face, gender, skin tone, and body type
+ *    from the selfie, and ADDS the product described in the text prompt.
+ * 2. Pollinations TEXT-TO-IMAGE (fallback): uses a detailed product
+ *    description if the selfie upload fails.
+ *
+ * 100% free. No auth needed. No env vars needed. Works identically on
+ * preview, sandbox, and Vercel. No ZAI dependency.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/lib/virtual-tryon'
-import { isZAIConfigured, getZAIConfig } from '@/lib/zai'
 
 export const maxDuration = 60
 
-// ── Product Image Helpers ──────────────────────────────────────────
+// ── Product Image Helpers (kept for backwards compat — product image
+//    is no longer the primary reference, but may be used for color hints) ──
 
 async function getProductImageBase64(imagePath: string): Promise<string | null> {
   if (!imagePath) return null
@@ -22,7 +30,10 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
     try {
       const u = new URL(imagePath, 'http://localhost')
       const orig = u.searchParams.get('url')
-      if (orig) { const r = await fetchImageAsBase64(orig.startsWith('//') ? `https:${orig}` : orig); if (r) return r }
+      if (orig) {
+        const r = await fetchImageAsBase64(orig.startsWith('//') ? `https:${orig}` : orig)
+        if (r) return r
+      }
     } catch {}
   }
   const base = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
@@ -64,7 +75,16 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now()
   try {
     const body = await request.json()
-    const { productId, selfieData, productImageUrl, productImageBase64: clientBase64, productName, categorySlug } = body
+    const {
+      productId,
+      selfieData,
+      productImageUrl,
+      productImageBase64: clientBase64,
+      productName,
+      categorySlug,
+      productDescription,
+      productTags,
+    } = body
 
     if (!productId || !selfieData) {
       return NextResponse.json(
@@ -79,18 +99,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Resolve product image (optional — used for color hints, not as primary reference)
     let productImageBase64 = clientBase64 || null
     if (!productImageBase64 && productImageUrl) {
       productImageBase64 = await getProductImageBase64(productImageUrl)
     }
 
-    console.log(`[try-on] POST: product="${productName}", category="${categorySlug}"`)
+    console.log(`[try-on] POST: product="${productName}", category="${categorySlug}", hasSelfie=${!!selfieData}, hasProductImg=${!!productImageBase64}, hasDesc=${!!productDescription}`)
 
     const result = await performVirtualTryOn({
       selfieData,
       productImageBase64: productImageBase64 || '',
       productName: productName || 'Product',
       categorySlug: categorySlug || '',
+      productDescription: productDescription || '',
+      productTags: Array.isArray(productTags) ? productTags : [],
     })
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
@@ -106,6 +129,10 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`[try-on] ❌ Failed in ${elapsed}s: ${result.error}`)
+    if (result.debugInfo) {
+      console.log(`[try-on] Strategies: ${result.debugInfo.strategiesAttempted.join(',')}`)
+      console.log(`[try-on] Errors: ${JSON.stringify(result.debugInfo.strategyErrors)}`)
+    }
 
     return NextResponse.json({
       success: false,
@@ -114,7 +141,6 @@ export async function POST(request: NextRequest) {
       strategy: result.strategy,
       elapsed: parseFloat(elapsed),
       debug: {
-        zaiConfigured: isZAIConfigured(),
         isVercel: !!process.env.VERCEL,
         strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
         strategyErrors: result.debugInfo?.strategyErrors || {},
@@ -141,7 +167,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true, // Pollinations always available
       spaceAwake: awake,
-      zaiConfigured: isZAIConfigured(),
       message: 'AI ready — Pollinations primary',
     })
   }
@@ -149,8 +174,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
-    zaiConfigured: isZAIConfigured(),
-    mode: 'pollinations-primary',
-    message: 'AI Virtual Try-On ready',
+    mode: 'pollinations-selfie-img2img',
+    message: 'AI Virtual Try-On ready — preserves your face & gender from your selfie',
   })
 }
