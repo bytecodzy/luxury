@@ -1,16 +1,19 @@
 /**
- * AI Virtual Try-On API v18 — Selfie-Preserving Pipeline
+ * AI Virtual Try-On API v19 — ZAI IMAGE-EDIT Pipeline
  *
- * Strategy:
- * 1. Pollinations SELFIE img2img (PRIMARY): uploads the user's SELFIE to
- *    tmpfiles.org, then asks Pollinations to condition generation on it.
- *    The AI PRESERVES the user's face, gender, skin tone, and body type
- *    from the selfie, and ADDS the product described in the text prompt.
- * 2. Pollinations TEXT-TO-IMAGE (fallback): uses a detailed product
- *    description if the selfie upload fails.
+ * Strategy chain (see src/lib/virtual-tryon.ts):
+ * 1. ZAI image-edit (PRIMARY): real image-to-image edit using the user's
+ *    SELFIE as input → preserves the user's face, gender, skin tone,
+ *    body type, and hair. The prompt (built from VLM analysis of the
+ *    product photo + product name/description/tags) tells the model
+ *    exactly what product to drape on the person.
+ * 2. ZAI text-to-image (FALLBACK 1): same rich prompt, no input image.
+ * 3. Pollinations img2img (FALLBACK 2): tmpfiles.org + ?image=selfie_url.
+ * 4. Pollinations text-to-image (LAST RESORT): always available.
  *
- * 100% free. No auth needed. No env vars needed. Works identically on
- * preview, sandbox, and Vercel. No ZAI dependency.
+ * 100% free in the sandbox (ZAI SDK auto-discovers credentials).
+ * On Vercel: requires ZAI_BASE_URL + ZAI_API_KEY env vars for the primary
+ * path; falls back to Pollinations automatically if those are missing.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -165,16 +168,16 @@ export async function GET(request: NextRequest) {
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
     return NextResponse.json({
-      available: true, // Pollinations always available
+      available: true,
       spaceAwake: awake,
-      message: 'AI ready — Pollinations primary',
+      message: 'AI ready — ZAI image-edit primary, Pollinations fallback',
     })
   }
   const statusResult = await checkIDMVTONSpaceStatus()
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
-    mode: 'pollinations-selfie-img2img',
-    message: 'AI Virtual Try-On ready — preserves your face & gender from your selfie',
+    mode: 'zai-image-edit',
+    message: 'AI Virtual Try-On ready — preserves your face & gender from your selfie using ZAI image-edit',
   })
 }

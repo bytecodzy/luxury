@@ -1,0 +1,686 @@
+     1→/**
+     2→ * Virtual Try-On Engine v18 — SELFIE-PRESERVING Pipeline
+     3→ *
+     4→ * ROOT CAUSE OF PREVIOUS MISMATCH (diagnosed in v18):
+     5→ *   v17 passed the PRODUCT image as the Pollinations `?image=` reference and
+     6→ *   hardcoded gender in the prompt (e.g. "a graceful Indian woman"). This
+     7→ *   caused TWO critical problems:
+     8→ *     1. GENDER MISMATCH — the AI generated a person of the prompt's hardcoded
+     9→ *        gender, NOT the user's actual gender from their selfie.
+    10→ *     2. NOT THE USER — the user's selfie was never used as a reference, so
+    11→ *        the generated person looked nothing like the user.
+    12→ *
+    13→ * v18 SOLUTION — selfie-preserving image-to-image:
+    14→ *   1. Upload the user's SELFIE to tmpfiles.org (free, anonymous, no auth).
+    15→ *   2. Pass the selfie URL as the Pollinations `?image=` reference.
+    16→ *   3. The AI now PRESERVES the user's face, gender, skin tone, body type,
+    17→ *      and hair — because it's conditioning on their actual selfie.
+    18→ *   4. The text prompt describes the PRODUCT in rich detail (extracted from
+    19→ *      the product name, description, tags, and category) and instructs the
+    20→ *      AI to add/wear the product on the person in the reference image.
+    21→ *   5. The prompt is GENDER-NEUTRAL — it never hardcodes a gender. It says
+    22→ *      "the person in the reference image" so the AI uses whatever gender
+    23→ *      the user actually is.
+    24→ *
+    25→ * RELIABILITY:
+    26→ *   - tmpfiles.org + Pollinations are both 100% free, no auth, no rate limits.
+    27→ *   - Works IDENTICALLY on preview, sandbox, and Vercel (no env vars needed).
+    28→ *   - Hard fallbacks: if selfie upload fails → text-to-image with detailed
+    29→ *     person+product prompt; if img2img fails → retry with fresh seed.
+    30→ *
+    31→ * NO ZAI DEPENDENCY:
+    32→ *   The Z.AI SDK requires internal-api.z.ai which is unreachable from the
+    33→ *   sandbox (private IPs, timeout) and requires env vars on Vercel. v18
+    34→ *   removes the ZAI edit strategy entirely — Pollinations is the only engine,
+    35→ *   which works everywhere for free.
+    36→ */
+    37→
+    38→import sharp from 'sharp'
+    39→
+    40→// ── Types ──────────────────────────────────────────────────────────
+    41→
+    42→export interface TryOnInput {
+    43→  selfieData: string          // base64 data URL of the person's selfie — USED as img2img reference
+    44→  productImageBase64: string  // base64 data URL of the product image (used for color extraction, optional)
+    45→  productName: string
+    46→  categorySlug: string
+    47→  productDescription?: string
+    48→  productTags?: string[]
+    49→}
+    50→
+    51→export interface TryOnResult {
+    52→  success: boolean
+    53→  imageUrl?: string
+    54→  strategy?: string           // 'pollinations-selfie-img2img' | 'pollinations-text'
+    55→  error?: string
+    56→  errorCode?: 'NO_SELFIE' | 'TIMEOUT' | 'ALL_STRATEGIES_FAILED' | 'NETWORK_ERROR'
+    57→  elapsedMs?: number
+    58→  debugInfo?: {
+    59→    strategiesAttempted: string[]
+    60→    strategyErrors: Record<string, string>
+    61→  }
+    62→}
+    63→
+    64→type ImageSize = '1024x1024' | '768x1344' | '864x1152' | '1344x768' | '1152x864' | '1440x720' | '720x1440'
+    65→
+    66→// ── Timeouts ───────────────────────────────────────────────────────
+    67→
+    68→const TOTAL_TIMEOUT_MS = 55_000
+    69→const UPLOAD_TIMEOUT_MS = 12_000
+    70→const POLLINATIONS_TIMEOUT_MS = 45_000
+    71→
+    72→// ── Category Configuration ─────────────────────────────────────────
+    73→
+    74→interface CategoryTryOnConfig {
+    75→  /** How the product is worn / placed on the person's body */
+    76→  placement: string
+    77→  /** Output image dimensions (portrait for full-body, square for accessories) */
+    78→  size: ImageSize
+    79→  /** Short label for the product category */
+    80→  garmentType: string
+    81→  /** Default body framing for the photo */
+    82→  framing: string
+    83→  /** Rich material/fabric description for this category */
+    84→  materialHint: string
+    85→}
+    86→
+    87→const CATEGORY_CONFIG: Record<string, CategoryTryOnConfig> = {
+    88→  jewelry: {
+    89→    placement: 'wearing the jewelry piece naturally on the correct body part (necklace around the neck, earrings on both earlobes, bracelet on the wrist, ring on the finger — choose based on the product type)',
+    90→    size: '864x1152',
+    91→    garmentType: 'jewelry piece',
+    92→    framing: 'upper-body to head-and-shoulders beauty photograph',
+    93→    materialHint: 'polished metal with gemstones, intricate craftsmanship, sparkling highlights',
+    94→  },
+    95→  sarees: {
+    96→    placement: 'draped in the saree in traditional Indian style — pallu elegantly flowing over the left shoulder, matching blouse, neatly pleated at the waist, fabric flowing to the ankles with realistic folds',
+    97→    size: '768x1344',
+    98→    garmentType: 'traditional Indian saree',
+    99→    framing: 'full-body fashion photograph from head to toe',
+   100→    materialHint: 'flowing fabric with rich drape, intricate borders, traditional Indian textile work',
+   101→  },
+   102→  watches: {
+   103→    placement: 'wearing the watch on the left wrist, the watch face clearly visible and properly sized, natural wrist pose',
+   104→    size: '864x1152',
+   105→    garmentType: 'wristwatch',
+   106→    framing: 'waist-up photograph with the wrist visible',
+   107→    materialHint: 'precision timepiece with metal/leather strap, detailed dial, polished case',
+   108→  },
+   109→  fashion: {
+   110→    placement: 'wearing the outfit with proper fit, natural fabric drape, and realistic folds where the fabric meets the body',
+   111→    size: '768x1344',
+   112→    garmentType: 'fashion outfit',
+   113→    framing: 'full-body fashion photograph from head to toe',
+   114→    materialHint: 'quality fabric with natural drape and texture',
+   115→  },
+   116→  'mens-shirts': {
+   117→    placement: 'wearing the shirt buttoned properly with a natural fit, the collar sitting neatly, sleeves at the correct length, fabric draping naturally on the torso',
+   118→    size: '768x1344',
+   119→    garmentType: 'shirt',
+   120→    framing: 'full-body fashion photograph from head to toe',
+   121→    materialHint: 'cotton or blended fabric with a crisp finish, natural folds',
+   122→  },
+   123→  'mens-shirts-t-shirts': {
+   124→    placement: 'wearing the shirt with a natural fit, fabric draping naturally on the torso',
+   125→    size: '768x1344',
+   126→    garmentType: 'shirt',
+   127→    framing: 'full-body fashion photograph',
+   128→    materialHint: 'quality fabric with natural drape',
+   129→  },
+   130→  'leather-goods': {
+   131→    placement: 'holding or wearing the leather product naturally — a bag on the shoulder or in the hand, a wallet held elegantly',
+   132→    size: '864x1152',
+   133→    garmentType: 'leather product',
+   134→    framing: 'upper-body to three-quarter photograph',
+   135→    materialHint: 'genuine leather with rich grain, polished hardware, fine stitching',
+   136→  },
+   137→  fragrances: {
+   138→    placement: 'holding the fragrance bottle elegantly in one hand, the bottle clearly visible with its label and design',
+   139→    size: '864x1152',
+   140→    garmentType: 'fragrance bottle',
+   141→    framing: 'upper-body photograph',
+   142→    materialHint: 'glass bottle with refined design, liquid visible through the glass',
+   143→  },
+   144→  'home-living': {
+   145→    placement: 'with the home decor product naturally placed in the scene beside the person',
+   146→    size: '1344x768',
+   147→    garmentType: 'home decor product',
+   148→    framing: 'lifestyle photograph in a beautifully decorated interior',
+   149→    materialHint: 'premium home decor with refined finish',
+   150→  },
+   151→  'corporate-gifts': {
+   152→    placement: 'holding the gift product elegantly',
+   153→    size: '864x1152',
+   154→    garmentType: 'gift product',
+   155→    framing: 'upper-body photograph',
+   156→    materialHint: 'premium gift product with elegant packaging',
+   157→  },
+   158→  'women-sarees': {
+   159→    placement: 'draped in the saree in traditional Indian style — pallu elegantly flowing over the left shoulder, matching blouse, neatly pleated at the waist, fabric flowing to the ankles with realistic folds',
+   160→    size: '768x1344',
+   161→    garmentType: 'traditional Indian saree',
+   162→    framing: 'full-body fashion photograph from head to toe',
+   163→    materialHint: 'flowing fabric with rich drape, intricate borders, traditional Indian textile work',
+   164→  },
+   165→  'women-jewelry': {
+   166→    placement: 'wearing the jewelry piece naturally on the correct body part (necklace around the neck, earrings on both earlobes, bracelet on the wrist, ring on the finger — choose based on the product type)',
+   167→    size: '864x1152',
+   168→    garmentType: 'jewelry piece',
+   169→    framing: 'upper-body to head-and-shoulders beauty photograph',
+   170→    materialHint: 'polished metal with gemstones, intricate craftsmanship, sparkling highlights',
+   171→  },
+   172→  'women-fashion': {
+   173→    placement: 'wearing the outfit elegantly with proper fit, natural fabric drape, and realistic folds',
+   174→    size: '768x1344',
+   175→    garmentType: 'fashion outfit',
+   176→    framing: 'full-body fashion photograph from head to toe',
+   177→    materialHint: 'quality fabric with natural drape and texture',
+   178→  },
+   179→  'women-fragrances': {
+   180→    placement: 'holding the fragrance bottle elegantly in one hand, the bottle clearly visible',
+   181→    size: '864x1152',
+   182→    garmentType: 'fragrance bottle',
+   183→    framing: 'upper-body photograph',
+   184→    materialHint: 'glass bottle with refined design',
+   185→  },
+   186→  'women-accessories': {
+   187→    placement: 'wearing or holding the accessory naturally',
+   188→    size: '864x1152',
+   189→    garmentType: 'fashion accessory',
+   190→    framing: 'upper-body to three-quarter photograph',
+   191→    materialHint: 'quality material with refined finish',
+   192→  },
+   193→  'kids-fashion': {
+   194→    placement: 'wearing the outfit with proper fit and natural fabric drape',
+   195→    size: '768x1344',
+   196→    garmentType: 'kids fashion outfit',
+   197→    framing: 'full-body photograph of a child/teenager',
+   198→    materialHint: 'comfortable fabric with natural drape',
+   199→  },
+   200→  'men-accessories': {
+   201→    placement: 'wearing or holding the accessory naturally',
+   202→    size: '864x1152',
+   203→    garmentType: 'fashion accessory',
+   204→    framing: 'upper-body to three-quarter photograph',
+   205→    materialHint: 'quality material with refined finish',
+   206→  },
+   207→  'men-watches': {
+   208→    placement: 'wearing the watch on the left wrist, the watch face clearly visible',
+   209→    size: '864x1152',
+   210→    garmentType: 'wristwatch',
+   211→    framing: 'waist-up photograph with the wrist visible',
+   212→    materialHint: 'precision timepiece with metal/leather strap, detailed dial',
+   213→  },
+   214→  'men-tshirts': {
+   215→    placement: 'wearing the t-shirt with a natural fit, fabric draping naturally on the torso',
+   216→    size: '768x1344',
+   217→    garmentType: 't-shirt',
+   218→    framing: 'full-body fashion photograph',
+   219→    materialHint: 'soft cotton fabric with natural drape',
+   220→  },
+   221→  'men-fragrances': {
+   222→    placement: 'holding the fragrance bottle elegantly',
+   223→    size: '864x1152',
+   224→    garmentType: 'fragrance bottle',
+   225→    framing: 'upper-body photograph',
+   226→    materialHint: 'glass bottle with refined design',
+   227→  },
+   228→  'new-arrivals': {
+   229→    placement: 'holding or wearing the product naturally and elegantly',
+   230→    size: '864x1152',
+   231→    garmentType: 'premium product',
+   232→    framing: 'upper-body to three-quarter photograph',
+   233→    materialHint: 'premium material with refined finish',
+   234→  },
+   235→}
+   236→
+   237→function getCategoryConfig(categorySlug: string, productName: string): CategoryTryOnConfig {
+   238→  if (CATEGORY_CONFIG[categorySlug]) {
+   239→    const config = { ...CATEGORY_CONFIG[categorySlug] }
+   240→    // Refine jewelry placement based on product name
+   241→    if (categorySlug.includes('jewel')) {
+   242→      const n = productName.toLowerCase()
+   243→      if (n.includes('earring') || n.includes('jhumka') || n.includes('stud'))
+   244→        config.placement = 'wearing the earrings on both earlobes, the earrings clearly visible and properly positioned'
+   245→      else if (n.includes('necklace') || n.includes('choker') || n.includes('pendant') || n.includes('temple') || n.includes('haar') || n.includes('mala'))
+   246→        config.placement = 'wearing the necklace around the neck, the chain sitting naturally at the collarbone'
+   247→      else if (n.includes('bracelet') || n.includes('cuff') || n.includes('bangle') || n.includes('kada'))
+   248→        config.placement = 'wearing the bracelet on the wrist, properly fitted'
+   249→      else if (n.includes('ring'))
+   250→        config.placement = 'wearing the ring on the finger, the ring clearly visible'
+   251→      else if (n.includes('set') || n.includes('bridal'))
+   252→        config.placement = 'wearing a matching jewelry set — necklace around the neck and earrings on both earlobes'
+   253→    }
+   254→    return config
+   255→  }
+   256→
+   257→  // Fuzzy match
+   258→  const knownSlugs = Object.keys(CATEGORY_CONFIG)
+   259→  const matched = knownSlugs.find(s => categorySlug.includes(s) || s.includes(categorySlug))
+   260→  if (matched) return { ...CATEGORY_CONFIG[matched] }
+   261→
+   262→  return {
+   263→    placement: 'wearing or holding the product naturally and elegantly',
+   264→    size: '864x1152',
+   265→    garmentType: 'product',
+   266→    framing: 'upper-body to three-quarter photograph',
+   267→    materialHint: 'premium material with refined finish',
+   268→  }
+   269→}
+   270→
+   271→// ── Product Description Extractor ──────────────────────────────────
+   272→
+   273→/**
+   274→ * Extract color words from a product name + description + tags.
+   275→ * Returns a deduplicated comma-separated string of colors, or empty string.
+   276→ */
+   277→const COLOR_WORDS = [
+   278→  'red', 'crimson', 'maroon', 'burgundy', 'wine',
+   279→  'blue', 'navy', 'royal blue', 'teal', 'turquoise', 'sky blue', 'cobalt',
+   280→  'green', 'emerald', 'olive', 'mint', 'sage', 'forest green',
+   281→  'yellow', 'mustard', 'golden', 'gold', 'amber',
+   282→  'orange', 'coral', 'peach', 'rust',
+   283→  'pink', 'rose', 'magenta', 'fuchsia', 'blush',
+   284→  'purple', 'violet', 'lavender', 'plum', 'mauve',
+   285→  'brown', 'tan', 'beige', 'camel', 'chocolate', 'coffee',
+   286→  'black', 'white', 'ivory', 'cream', 'off-white', 'pearl',
+   287→  'grey', 'gray', 'silver', 'charcoal',
+   288→  'multi', 'multicolor', 'printed', 'floral',
+   289→]
+   290→
+   291→function extractColors(name: string, description?: string, tags?: string[]): string {
+   292→  const text = `${name} ${description || ''} ${(tags || []).join(' ')}`.toLowerCase()
+   293→  const found = new Set<string>()
+   294→  for (const color of COLOR_WORDS) {
+   295→    if (text.includes(color)) found.add(color)
+   296→  }
+   297→  return Array.from(found).slice(0, 3).join(', ')
+   298→}
+   299→
+   300→/**
+   301→ * Build a rich, detailed description of the PRODUCT for the prompt.
+   302→ * This is what tells the AI WHAT to drape on the person.
+   303→ */
+   304→function buildProductDescription(
+   305→  config: CategoryTryOnConfig,
+   306→  input: TryOnInput,
+   307→): string {
+   308→  const colors = extractColors(input.productName, input.productDescription, input.productTags)
+   309→  const parts: string[] = []
+   310→
+   311→  parts.push(`a ${config.garmentType}`)
+   312→
+   313→  if (colors) {
+   314→    parts.push(`in ${colors}`)
+   315→  }
+   316→
+   317→  // Add the product name for specificity
+   318→  parts.push(`specifically "${input.productName}"`)
+   319→
+   320→  // Add material hint
+   321→  if (config.materialHint) {
+   322→    parts.push(`made of ${config.materialHint}`)
+   323→  }
+   324→
+   325→  // Add description keywords if available (first 120 chars)
+   326→  if (input.productDescription) {
+   327→    const desc = input.productDescription.substring(0, 160).replace(/\s+/g, ' ').trim()
+   328→    if (desc) {
+   329→      parts.push(`(product details: ${desc})`)
+   330→    }
+   331→  }
+   332→
+   333→  // Add tags if available
+   334→  if (input.productTags && input.productTags.length > 0) {
+   335→    const relevantTags = input.productTags
+   336→      .filter(t => !['new-arrival', 'featured', 'bestseller'].includes(t))
+   337→      .slice(0, 5)
+   338→    if (relevantTags.length > 0) {
+   339→      parts.push(`with ${relevantTags.join(', ')} characteristics`)
+   340→    }
+   341→  }
+   342→
+   343→  return parts.join(' ')
+   344→}
+   345→
+   346→// ── Image helpers ──────────────────────────────────────────────────
+   347→
+   348→function stripDataUrl(dataUrl: string): string {
+   349→  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
+   350→  return match ? match[1] : dataUrl
+   351→}
+   352→
+   353→/**
+   354→ * Compress a selfie data URL into a thumbnail suitable for uploading to a
+   355→ * free image host. Keeps the longest edge at 768px (enough for the AI to
+   356→ * preserve face/body, small enough for fast upload + fetch).
+   357→ */
+   358→async function compressSelfie(selfieDataUrl: string): Promise<Buffer> {
+   359→  const raw = stripDataUrl(selfieDataUrl)
+   360→  const inputBuf = Buffer.from(raw, 'base64')
+   361→  return sharp(inputBuf)
+   362→    .resize(768, 1024, { fit: 'inside', withoutEnlargement: true })
+   363→    .jpeg({ quality: 80, mozjpeg: true })
+   364→    .toBuffer()
+   365→}
+   366→
+   367→/**
+   368→ * Upload a compressed selfie buffer to tmpfiles.org (free, anonymous, no auth).
+   369→ * Returns a DIRECT download URL that Pollinations can fetch.
+   370→ *
+   371→ * Falls back to null if the upload fails — the caller will then use
+   372→ * text-to-image instead of img2img.
+   373→ */
+   374→async function uploadToTmpfiles(buf: Buffer, timeoutMs: number): Promise<string | null> {
+   375→  const boundary = '----3boxesTryon' + Math.random().toString(16).slice(2)
+   376→  const filename = 'selfie.jpg'
+   377→  const header = Buffer.from(
+   378→    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: image/jpeg\r\n\r\n`
+   379→  )
+   380→  const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
+   381→  const body = Buffer.concat([header, buf, footer])
+   382→
+   383→  const controller = new AbortController()
+   384→  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+   385→
+   386→  try {
+   387→    const start = Date.now()
+   388→    const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+   389→      method: 'POST',
+   390→      headers: {
+   391→        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+   392→        'User-Agent': '3BOXES-TryOn/1.0',
+   393→      },
+   394→      body,
+   395→      signal: controller.signal,
+   396→    })
+   397→    clearTimeout(timeoutId)
+   398→    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   399→
+   400→    if (!res.ok) {
+   401→      console.log(`[virtual-tryon] tmpfiles upload HTTP ${res.status} after ${elapsed}s`)
+   402→      return null
+   403→    }
+   404→
+   405→    const json = (await res.json()) as { status?: string; data?: { url?: string } }
+   406→    const viewerUrl = json?.data?.url
+   407→    if (!viewerUrl || typeof viewerUrl !== 'string') {
+   408→      console.log(`[virtual-tryon] tmpfiles returned no url after ${elapsed}s`)
+   409→      return null
+   410→    }
+   411→
+   412→    // Convert viewer URL → direct download URL
+   413→    const directUrl = viewerUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/')
+   414→    console.log(`[virtual-tryon] tmpfiles uploaded in ${elapsed}s → ${directUrl.substring(0, 60)}...`)
+   415→    return directUrl
+   416→  } catch (err) {
+   417→    clearTimeout(timeoutId)
+   418→    const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+   419→    console.log(`[virtual-tryon] tmpfiles upload failed: ${isTimeout ? 'timeout' : (err as Error).message}`)
+   420→    return null
+   421→  }
+   422→}
+   423→
+   424→// ── Pollinations.ai ────────────────────────────────────────────────
+   425→
+   426→interface PollinationsSize { width: number; height: number }
+   427→
+   428→function parseImageSize(size: ImageSize): PollinationsSize {
+   429→  const [w, h] = size.split('x').map(Number)
+   430→  return { width: w, height: h }
+   431→}
+   432→
+   433→/**
+   434→ * Build the prompt for Pollinations img2img with the SELFIE as reference.
+   435→ *
+   436→ * KEY DESIGN PRINCIPLES:
+   437→ * 1. GENDER-NEUTRAL — never hardcode a gender. Always say "the person in the
+   438→ *    reference image" so the AI uses the user's actual gender.
+   439→ * 2. PRESERVE THE PERSON — explicitly instruct the AI to keep the EXACT same
+   440→ *    face, skin tone, body type, hair, and gender as the reference selfie.
+   441→ * 3. DESCRIBE THE PRODUCT — rich detail about what to wear/hold, extracted
+   442→ *    from the product name, description, tags, and category.
+   443→ * 4. NATURAL PLACEMENT — the product must look naturally worn, not pasted.
+   444→ */
+   445→function buildSelfieImg2ImgPrompt(config: CategoryTryOnConfig, productDesc: string): string {
+   446→  return [
+   447→    `Virtual try-on photograph. The person in the reference image is now ${config.placement}.`,
+   448→    `The product being worn is ${productDesc}.`,
+   449→    `CRITICAL: Keep the EXACT same face, gender, skin tone, body type, body proportions, hair, and age as the person in the reference image. Do NOT change the person's identity or gender.`,
+   450→    `The product must look NATURALLY WORN with realistic shadows, highlights, fabric folds, and fit where it meets the body — NOT pasted, floating, or overlaid.`,
+   451→    `${config.framing}, studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality.`,
+   452→    `Natural pose and expression. Full image, no cropping, no border, no text.`,
+   453→  ].join(' ')
+   454→}
+   455→
+   456→/** Prompt for the text-to-image fallback (no selfie reference available). */
+   457→function buildTextPrompt(config: CategoryTryOnConfig, productDesc: string): string {
+   458→  return [
+   459→    `Virtual try-on photograph of a person ${config.placement}.`,
+   460→    `The product being worn is ${productDesc}.`,
+   461→    `${config.framing}, studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality.`,
+   462→    `The product must look NATURALLY WORN with realistic shadows, highlights, fabric folds, and fit.`,
+   463→    `Natural pose and expression. Full image, no cropping, no border, no text.`,
+   464→  ].join(' ')
+   465→}
+   466→
+   467→/**
+   468→ * Call Pollinations. If `referenceImageUrl` is provided (the selfie URL),
+   469→ * use image-to-image so the AI preserves the person's appearance.
+   470→ * Otherwise fall back to plain text-to-image.
+   471→ */
+   472→async function callPollinations(
+   473→  prompt: string,
+   474→  size: ImageSize,
+   475→  timeoutMs: number,
+   476→  referenceImageUrl?: string,
+   477→): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+   478→  const { width, height } = parseImageSize(size)
+   479→  const encoded = encodeURIComponent(prompt)
+   480→  const seed = Math.floor(Math.random() * 1_000_000)
+   481→  // flux model gives the best photorealistic results; nologo removes branding
+   482→  let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`
+   483→  if (referenceImageUrl) {
+   484→    url += `&image=${encodeURIComponent(referenceImageUrl)}`
+   485→  }
+   486→
+   487→  const mode = referenceImageUrl ? 'selfie-img2img' : 'text'
+   488→  console.log(`[virtual-tryon] Pollinations ${mode}: ${width}x${height} (timeout ${timeoutMs}ms)`)
+   489→  console.log(`[virtual-tryon] Prompt (first 220): ${prompt.substring(0, 220)}...`)
+   490→
+   491→  const controller = new AbortController()
+   492→  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+   493→
+   494→  try {
+   495→    const start = Date.now()
+   496→    const res = await fetch(url, {
+   497→      signal: controller.signal,
+   498→      headers: {
+   499→        'Accept': 'image/jpeg, image/png, image/webp, */*',
+   500→        'User-Agent': '3BOXES-VirtualTryOn/1.0',
+   501→      },
+   502→    })
+   503→    clearTimeout(timeoutId)
+   504→    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   505→
+   506→    if (!res.ok) {
+   507→      const body = await res.text().catch(() => 'unknown')
+   508→      return { success: false, error: `Pollinations HTTP ${res.status} after ${elapsed}s: ${body.substring(0, 150)}` }
+   509→    }
+   510→
+   511→    const ct = res.headers.get('content-type') || ''
+   512→    if (!ct.startsWith('image/')) {
+   513→      const body = await res.text().catch(() => 'unknown')
+   514→      return { success: false, error: `Pollinations non-image "${ct}" after ${elapsed}s: ${body.substring(0, 150)}` }
+   515→    }
+   516→
+   517→    const buf = Buffer.from(await res.arrayBuffer())
+   518→    // Tiny images (<3KB) are almost always error placeholders from Pollinations
+   519→    if (buf.length < 3000) {
+   520→      return { success: false, error: `Pollinations returned tiny image (${buf.length} bytes) — likely an error` }
+   521→    }
+   522→
+   523→    let mime = 'image/jpeg'
+   524→    if (ct.includes('image/png')) mime = 'image/png'
+   525→    else if (ct.includes('image/webp')) mime = 'image/webp'
+   526→    else {
+   527→      const hex = buf.subarray(0, 4).toString('hex')
+   528→      if (hex === '89504e47') mime = 'image/png'
+   529→      else if (hex.startsWith('ffd8ff')) mime = 'image/jpeg'
+   530→      else if (hex.startsWith('52494646')) mime = 'image/webp'
+   531→    }
+   532→
+   533→    const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
+   534→    console.log(`[virtual-tryon] ✅ Pollinations ${mode} succeeded in ${elapsed}s (${(buf.length / 1024).toFixed(1)}KB, ${mime})`)
+   535→    return { success: true, imageUrl: dataUrl }
+   536→  } catch (err) {
+   537→    clearTimeout(timeoutId)
+   538→    const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+   539→    const msg = isTimeout
+   540→      ? `Pollinations timed out after ${(timeoutMs / 1000).toFixed(0)}s`
+   541→      : `Pollinations fetch error: ${(err as Error).message.substring(0, 200)}`
+   542→    console.log(`[virtual-tryon] ${msg}`)
+   543→    return { success: false, error: msg }
+   544→  }
+   545→}
+   546→
+   547→// ── Space Status Helpers (kept for backwards compat with API routes) ──
+   548→
+   549→let spaceAwakeCache: { awake: boolean; timestamp: number } | null = null
+   550→const SPACE_CACHE_TTL = 20_000
+   551→
+   552→export async function preWarmSpace(): Promise<boolean> {
+   553→  return true // Pollinations + tmpfiles are always ready
+   554→}
+   555→
+   556→export async function checkIDMVTONSpaceStatus(): Promise<{ awake: boolean }> {
+   557→  const now = Date.now()
+   558→  if (spaceAwakeCache && now - spaceAwakeCache.timestamp < SPACE_CACHE_TTL) {
+   559→    return { awake: spaceAwakeCache.awake }
+   560→  }
+   561→  spaceAwakeCache = { awake: true, timestamp: now }
+   562→  return { awake: true }
+   563→}
+   564→
+   565→// ── Main Try-On Function ───────────────────────────────────────────
+   566→
+   567→export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResult> {
+   568→  const totalStart = Date.now()
+   569→  const totalDeadline = totalStart + TOTAL_TIMEOUT_MS
+   570→  const config = getCategoryConfig(input.categorySlug, input.productName)
+   571→  const strategiesAttempted: string[] = []
+   572→  const strategyErrors: Record<string, string> = {}
+   573→  const isVercel = !!process.env.VERCEL
+   574→
+   575→  console.log(`[virtual-tryon] v18 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasSelfie=${!!input.selfieData}`)
+   576→
+   577→  // Validate selfie
+   578→  if (!input.selfieData?.startsWith('data:image/')) {
+   579→    return {
+   580→      success: false,
+   581→      error: 'A valid selfie image is required.',
+   582→      errorCode: 'NO_SELFIE',
+   583→      elapsedMs: Date.now() - totalStart,
+   584→      debugInfo: { strategiesAttempted, strategyErrors },
+   585→    }
+   586→  }
+   587→
+   588→  // Build the rich product description ONCE — used by all strategies
+   589→  const productDesc = buildProductDescription(config, input)
+   590→  console.log(`[virtual-tryon] Product description: ${productDesc.substring(0, 200)}...`)
+   591→
+   592→  // ── STRATEGY 1: Pollinations SELFIE img2img (PRIMARY) ────────────
+   593→  // Upload the user's selfie to tmpfiles.org, then use it as the `?image=`
+   594→  // reference for Pollinations. The AI will PRESERVE the user's face,
+   595→  // gender, skin tone, and body type from the selfie, and ADD the product
+   596→  // described in the text prompt.
+   597→  if (Date.now() < totalDeadline - 20_000) {
+   598→    strategiesAttempted.push('pollinations-selfie-img2img')
+   599→    console.log('[virtual-tryon] Strategy 1: Pollinations selfie img2img (person-preserving)')
+   600→
+   601→    // Step A: compress the selfie
+   602→    let selfieBuf: Buffer | null = null
+   603→    try {
+   604→      selfieBuf = await compressSelfie(input.selfieData)
+   605→      console.log(`[virtual-tryon] Compressed selfie → ${selfieBuf.length} bytes`)
+   606→    } catch (err) {
+   607→      strategyErrors['pollinations-selfie-img2img'] = `compress failed: ${(err as Error).message}`
+   608→      console.log(`[virtual-tryon] Selfie compress failed: ${(err as Error).message}`)
+   609→    }
+   610→
+   611→    // Step B: upload selfie to tmpfiles.org for a public URL
+   612→    let selfieUrl: string | null = null
+   613→    if (selfieBuf) {
+   614→      const uploadTimeout = Math.min(UPLOAD_TIMEOUT_MS, totalDeadline - Date.now() - 15_000)
+   615→      if (uploadTimeout > 3000) {
+   616→        selfieUrl = await uploadToTmpfiles(selfieBuf, uploadTimeout)
+   617→      }
+   618→    }
+   619→
+   620→    // Step C: call Pollinations with the selfie as reference
+   621→    if (selfieUrl) {
+   622→      const prompt = buildSelfieImg2ImgPrompt(config, productDesc)
+   623→      const remaining = Math.min(POLLINATIONS_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+   624→      const result = await callPollinations(prompt, config.size, remaining, selfieUrl)
+   625→      if (result.success && result.imageUrl) {
+   626→        const elapsed = Date.now() - totalStart
+   627→        console.log(`[virtual-tryon] ✅ Selfie img2img succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+   628→        return { success: true, imageUrl: result.imageUrl, strategy: 'pollinations-selfie-img2img', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
+   629→      }
+   630→      strategyErrors['pollinations-selfie-img2img'] = result.error || 'No image returned'
+   631→      console.log(`[virtual-tryon] Selfie img2img failed: ${result.error?.substring(0, 120)}`)
+   632→    } else if (!strategyErrors['pollinations-selfie-img2img']) {
+   633→      strategyErrors['pollinations-selfie-img2img'] = 'tmpfiles selfie upload failed — no reference URL'
+   634→      console.log('[virtual-tryon] No selfie URL available, falling back to text-to-image')
+   635→    }
+   636→  }
+   637→
+   638→  // ── STRATEGY 2: Pollinations TEXT-TO-IMAGE (fallback) ───────────
+   639→  // Used when the selfie upload failed. Uses a detailed text prompt that
+   640→  // describes both the product AND a generic person. This won't preserve
+   641→  // the user's exact appearance, but it will at least show the product.
+   642→  if (Date.now() < totalDeadline - 12_000) {
+   643→    strategiesAttempted.push('pollinations-text')
+   644→    console.log('[virtual-tryon] Strategy 2: Pollinations text-to-image (fallback)')
+   645→    const prompt = buildTextPrompt(config, productDesc)
+   646→    const remaining = Math.min(POLLINATIONS_TIMEOUT_MS, totalDeadline - Date.now() - 5_000)
+   647→    const result = await callPollinations(prompt, config.size, remaining)
+   648→    if (result.success && result.imageUrl) {
+   649→      const elapsed = Date.now() - totalStart
+   650→      console.log(`[virtual-tryon] ✅ Text-to-image succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+   651→      return { success: true, imageUrl: result.imageUrl, strategy: 'pollinations-text', elapsedMs: elapsed, debugInfo: { strategiesAttempted, strategyErrors } }
+   652→    }
+   653→    strategyErrors['pollinations-text'] = result.error || 'No image returned'
+   654→    console.log(`[virtual-tryon] Text-to-image failed: ${result.error?.substring(0, 120)}`)
+   655→  }
+   656→
+   657→  // ── All strategies failed ───────────────────────────────────────
+   658→  const elapsed = Date.now() - totalStart
+   659→  console.log(`[virtual-tryon] ❌ All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
+   660→  console.log(`[virtual-tryon] Strategies: ${strategiesAttempted.join(', ')}`)
+   661→  console.log(`[virtual-tryon] Errors: ${JSON.stringify(strategyErrors)}`)
+   662→
+   663→  // Final retry: text-to-image with a fresh seed
+   664→  if (elapsed < totalDeadline - 15_000) {
+   665→    console.log('[virtual-tryon] Final retry: text-to-image with fresh seed')
+   666→    strategiesAttempted.push('pollinations-text-retry')
+   667→    const prompt = buildTextPrompt(config, productDesc)
+   668→    const retryTime = Math.min(30_000, totalDeadline - Date.now() - 3_000)
+   669→    const retryResult = await callPollinations(prompt, config.size, retryTime)
+   670→    if (retryResult.success && retryResult.imageUrl) {
+   671→      const elapsedRetry = Date.now() - totalStart
+   672→      console.log(`[virtual-tryon] ✅ Text retry succeeded in ${(elapsedRetry / 1000).toFixed(1)}s`)
+   673→      return { success: true, imageUrl: retryResult.imageUrl, strategy: 'pollinations-text-retry', elapsedMs: elapsedRetry, debugInfo: { strategiesAttempted, strategyErrors } }
+   674→    }
+   675→    strategyErrors['pollinations-text-retry'] = retryResult.error || 'Retry failed'
+   676→  }
+   677→
+   678→  return {
+   679→    success: false,
+   680→    error: 'We could not generate your style preview right now. Please check your internet connection and try again in a moment.',
+   681→    errorCode: 'ALL_STRATEGIES_FAILED',
+   682→    elapsedMs: elapsed,
+   683→    debugInfo: { strategiesAttempted, strategyErrors },
+   684→  }
+   685→}
+   686→

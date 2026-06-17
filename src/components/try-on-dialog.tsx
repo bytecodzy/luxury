@@ -1,21 +1,25 @@
 'use client';
 
 /**
- * TryOnDialog v4.2 — Selfie-Preserving AI Virtual Try-On
+ * TryOnDialog v4.3 — ZAI Image-Edit Virtual Try-On
  *
  * KEY PRINCIPLES:
- * 1. Powered by Pollinations.ai image-to-image (100% free, no auth, always available)
- * 2. PRESERVES THE USER — the user's SELFIE is used as the img2img reference,
- *    so the AI keeps the user's face, gender, skin tone, and body type
- * 3. DESCRIBES THE PRODUCT — a rich prompt (from name + description + tags +
- *    category) tells the AI exactly what product to drape on the person
- * 4. GENDER-NEUTRAL prompts — never hardcodes a gender; uses "the person in
- *    the reference image" so the result matches the user's actual gender
+ * 1. Powered by Z.AI image-edit API (REAL image-to-image edit — preserves
+ *    the user's identity from their selfie, applies the product described
+ *    in the prompt). Falls back to Pollinations if ZAI is unavailable.
+ * 2. PRESERVES THE USER — the user's SELFIE is the edit input image,
+ *    so the AI keeps the user's face, gender, skin tone, and body type.
+ * 3. DESCRIBES THE PRODUCT — VLM analyses the ACTUAL product photo and
+ *    extracts colours, material, pattern, and style. This is fused with
+ *    the product name/description/tags so the prompt accurately reflects
+ *    the EXACT product being tried on (no more "saree → glasses").
+ * 4. GENDER-NEUTRAL prompts — never hardcodes a gender; uses "the person
+ *    in the reference image" so the result matches the user's actual gender.
  * 5. Instant selfie preview (show raw image IMMEDIATELY on upload)
  * 6. Disclaimer → auto-opens file picker (one-click flow)
  * 7. Hard 55-second client timeout with friendly retry message
  * 8. 3BOXES watermark on ALL generated/saved/downloaded images
- * 9. Works on both preview and Vercel — same code, same reliability
+ * 9. Works on both preview and Vercel — ZAI primary, Pollinations fallback
  * 10. NO canvas overlay fallback — real AI generation every time
  */
 
@@ -234,8 +238,8 @@ function add3BoxesWatermark(imageDataUrl: string, productName: string): Promise<
 // ── Progress Messages ───────────────────────────────────────────────
 
 const PROGRESS_MESSAGES = [
-  { at: 0, text: 'Uploading your photo to AI service...' },
-  { at: 15, text: 'AI is analyzing your photo and the product...' },
+  { at: 0, text: 'Uploading your photo to the AI service...' },
+  { at: 15, text: 'AI is analysing the product photo...' },
   { at: 30, text: 'AI is draping the product onto your photo...' },
   { at: 45, text: 'Almost there — generating the final image...' },
   { at: 55, text: 'Adding finishing touches...' },
@@ -967,8 +971,9 @@ export function TryOnDialog({
                     <span className="font-semibold text-amber-300/60">How it works:</span>{' '}
                     Our AI uses YOUR selfie as the reference image — preserving your
                     face, gender, and body type — then drapes the product onto you
-                    with realistic fit and folds. Powered by Pollinations AI.
-                    This usually takes 10-25 seconds.
+                    with realistic fit and folds. We also analyse the actual product
+                    photo so the colours, pattern, and style match exactly.
+                    This usually takes 15–25 seconds.
                   </p>
                 </div>
 

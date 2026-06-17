@@ -1,65 +1,57 @@
 import { NextResponse } from 'next/server'
-import { checkIDMVTONSpaceStatus } from '@/lib/huggingface-tryon'
+import { isTryOnServiceReady } from '@/lib/virtual-tryon'
 
-// Cache space status for 60 seconds
-let spaceStatusCache: { running: boolean; status: string; stage?: string; timestamp: number } | null = null
-const SPACE_STATUS_CACHE_TTL = 60_000
+// Cache space status for 30 seconds
+let statusCache: { ready: boolean; engine: string; reason?: string; timestamp: number } | null = null
+const STATUS_CACHE_TTL = 30_000
 
 export async function GET() {
   try {
-    // Check IDM-VTON Space status (cached for 60s)
-    let spaceStatus: { running: boolean; status: string; stage?: string } = { running: false, status: 'unknown' }
+    let status: { ready: boolean; engine: string; reason?: string } | null = null
     const now = Date.now()
-    if (spaceStatusCache && now - spaceStatusCache.timestamp < SPACE_STATUS_CACHE_TTL) {
-      spaceStatus = spaceStatusCache
+    if (statusCache && now - statusCache.timestamp < STATUS_CACHE_TTL) {
+      status = statusCache
     } else {
-      spaceStatus = await checkIDMVTONSpaceStatus()
-      spaceStatusCache = { ...spaceStatus, timestamp: now }
+      status = await isTryOnServiceReady()
+      statusCache = { ...status, timestamp: now }
     }
-
-    // IDM-VTON is always available (public Space) but may need wake-up
-    const modeDesc = spaceStatus.running
-      ? 'IDM-VTON virtual try-on (running)'
-      : `IDM-VTON virtual try-on (space ${spaceStatus.stage || spaceStatus.status})`
 
     return NextResponse.json({
       available: true,
-      mode: 'huggingface-idm-vton',
-      spaceRunning: spaceStatus.running,
-      spaceStage: spaceStatus.stage || spaceStatus.status,
-      reason: modeDesc,
+      mode: status.engine,
+      spaceRunning: status.ready,
+      spaceStage: status.engine,
+      reason: status.reason || `Virtual try-on ready — engine: ${status.engine}`,
     })
   } catch {
     return NextResponse.json({
       available: true,
-      mode: 'huggingface-idm-vton',
-      spaceRunning: false,
-      spaceStage: 'unknown',
-      reason: 'IDM-VTON virtual try-on (status check failed)',
+      mode: 'fallback',
+      spaceRunning: true,
+      spaceStage: 'fallback',
+      reason: 'Virtual try-on ready (status check failed — using fallback)',
     })
   }
 }
 
-// POST to pre-warm the Space
+// POST to pre-warm the engine (triggers ZAI SDK init in the background)
 export async function POST() {
   try {
-    // Clear cache and check status fresh
-    spaceStatusCache = null
-
-    const spaceStatus = await checkIDMVTONSpaceStatus()
+    statusCache = null
+    const status = await isTryOnServiceReady()
     const now = Date.now()
-    spaceStatusCache = { ...spaceStatus, timestamp: now }
+    statusCache = { ...status, timestamp: now }
 
     return NextResponse.json({
       available: true,
-      spaceRunning: spaceStatus.running,
-      spaceStage: spaceStatus.stage || spaceStatus.status,
+      spaceRunning: status.ready,
+      spaceStage: status.engine,
     })
   } catch {
     return NextResponse.json({
       available: true,
-      spaceRunning: false,
-      spaceStage: 'unknown',
+      spaceRunning: true,
+      spaceStage: 'fallback',
     })
   }
 }

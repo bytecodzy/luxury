@@ -1,16 +1,9 @@
 /**
- * AI Virtual Try-On API v18 — Selfie-Preserving Pipeline
+ * AI Virtual Try-On API v19 — ZAI IMAGE-EDIT Pipeline (legacy alias)
  *
- * Strategy:
- * 1. Pollinations SELFIE img2img (PRIMARY): uploads the user's SELFIE to
- *    tmpfiles.org, then asks Pollinations to condition generation on it.
- *    The AI PRESERVES the user's face, gender, skin tone, and body type
- *    from the selfie, and ADDS the product described in the text prompt.
- * 2. Pollinations TEXT-TO-IMAGE (fallback): uses a detailed product
- *    description if the selfie upload fails.
- *
- * 100% free. No auth needed. No env vars needed. Works identically on
- * preview, sandbox, and Vercel. No ZAI dependency.
+ * NOTE: The active try-on endpoint is /api/try-on. This route is kept as a
+ * backwards-compatible alias and routes to the same performVirtualTryOn()
+ * engine (v19). See src/lib/virtual-tryon.ts for the full strategy chain.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
