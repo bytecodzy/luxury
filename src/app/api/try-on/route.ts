@@ -134,6 +134,9 @@ export async function POST(request: NextRequest) {
           isVercel: !!process.env.VERCEL,
           strategiesAttempted: result.debugInfo?.strategiesAttempted || [],
           strategyErrors: result.debugInfo?.strategyErrors || {},
+          extractedColors: result.debugInfo?.extractedColors,
+          promptPreview: result.debugInfo?.promptPreview,
+          selfieUploaded: result.debugInfo?.selfieUploaded,
         },
       })
     }

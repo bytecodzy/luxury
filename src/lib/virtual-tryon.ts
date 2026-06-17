@@ -79,6 +79,9 @@ export interface TryOnResult {
   debugInfo?: {
     strategiesAttempted: string[]
     strategyErrors: Record<string, string>
+    extractedColors?: string
+    promptPreview?: string
+    selfieUploaded?: boolean
   }
 }
 
@@ -684,7 +687,7 @@ async function compressSelfieForUpload(selfieData: string): Promise<Buffer> {
 async function callPollinationsWithSelfieReference(
   input: TryOnInput,
   deadline: number,
-): Promise<{ success: boolean; imageUrl?: string; error?: string; strategy?: string }> {
+): Promise<{ success: boolean; imageUrl?: string; error?: string; strategy?: string; debugInfo?: { extractedColors: string; promptPreview: string; selfieUploaded: boolean } }> {
   const config = getCategoryConfig(input.categorySlug, input.productName)
   const { width, height } = parseImageSize(config.size)
 
@@ -775,7 +778,16 @@ async function callPollinationsWithSelfieReference(
 
       const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
       console.log(`[virtual-tryon] ✅ Pollinations succeeded in ${elapsed}s (${(buf.length / 1024).toFixed(1)}KB)`)
-      return { success: true, imageUrl: dataUrl, strategy: selfieUrl ? 'pollinations-selfie-img2img' : 'pollinations-text' }
+      return {
+        success: true,
+        imageUrl: dataUrl,
+        strategy: selfieUrl ? 'pollinations-selfie-img2img' : 'pollinations-text',
+        debugInfo: {
+          extractedColors: imageColors,
+          promptPreview: prompt.substring(0, 300),
+          selfieUploaded: !!selfieUrl,
+        },
+      }
     } catch (err) {
       clearTimeout(timeoutId)
       const isTimeout = err instanceof DOMException && err.name === 'AbortError'
@@ -909,7 +921,13 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
         imageUrl: result.imageUrl,
         strategy: result.strategy || 'pollinations-selfie-img2img',
         elapsedMs: elapsed,
-        debugInfo: { strategiesAttempted, strategyErrors },
+        debugInfo: {
+          strategiesAttempted,
+          strategyErrors,
+          extractedColors: result.debugInfo?.extractedColors,
+          promptPreview: result.debugInfo?.promptPreview,
+          selfieUploaded: result.debugInfo?.selfieUploaded,
+        },
       }
     }
     strategyErrors['pollinations-selfie-img2img'] = result.error || 'No image returned'
