@@ -416,25 +416,30 @@ function rgbToColorName(r: number, g: number, b: number): string {
 
 export async function extractColorsFromProductImage(imageBase64: string): Promise<string> {
   if (!imageBase64 || !imageBase64.startsWith('data:image/')) return ''
-  const sharp = await getSharp()
-  if (!sharp) return ''
 
   try {
     const raw = stripDataUrl(imageBase64)
     const buf = Buffer.from(raw, 'base64')
 
-    // Resize to a tiny thumbnail and get raw RGB pixels
-    const { data } = await sharp(buf)
-      .resize(32, 32, { fit: 'cover' })
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true })
+    // Use Jimp (pure-JS, no native binary — works on Vercel AND local)
+    const JimpModule = await import('jimp')
+    const Jimp = (JimpModule as any).Jimp || (JimpModule as any).default || JimpModule
+    const image = await Jimp.read(buf)
+    image.resize({ w: 32, h: 32 })
+
+    // Jimp's bitmap.data is RGBA (4 bytes per pixel)
+    const data = image.bitmap.data as Buffer
+    const pixelCount = 32 * 32
 
     // Quantize pixels into colour buckets, weighting by SATURATION
     // (vibrant product colours get higher priority than grey backgrounds)
     const buckets = new Map<string, { count: number; satSum: number; r: number; g: number; b: number }>()
-    for (let i = 0; i < data.length; i += 3) {
-      const r = data[i], g = data[i + 1], b = data[i + 2]
+    for (let i = 0; i < pixelCount; i++) {
+      const offset = i * 4
+      const r = data[offset], g = data[offset + 1], b = data[offset + 2]
+      // Skip transparent pixels
+      if (data[offset + 3] < 128) continue
+
       const max = Math.max(r, g, b), min = Math.min(r, g, b)
       const delta = max - min
       const sat = max === 0 ? 0 : delta / max // 0..1
@@ -462,11 +467,13 @@ export async function extractColorsFromProductImage(imageBase64: string): Promis
     }
 
     if (buckets.size === 0) {
-      // Fallback: if no vibrant colours found (e.g. black/white product),
+      // Fallback: if no vibrant colours found (e.g. black/white/silver product),
       // re-run without the saturation filter
       const fallback = new Map<string, { count: number; r: number; g: number; b: number }>()
-      for (let i = 0; i < data.length; i += 3) {
-        const r = data[i], g = data[i + 1], b = data[i + 2]
+      for (let i = 0; i < pixelCount; i++) {
+        const offset = i * 4
+        const r = data[offset], g = data[offset + 1], b = data[offset + 2]
+        if (data[offset + 3] < 128) continue
         const max = Math.max(r, g, b), min = Math.min(r, g, b)
         if (max > 235 && max - min < 15) continue
         if (max < 25) continue
