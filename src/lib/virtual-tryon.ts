@@ -212,10 +212,14 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
   const slug = (categorySlug || '').toLowerCase()
   const name = (productName || '').toLowerCase()
 
-  // Women's sarees — v26: IDM-VTON is now PRIMARY for sarees.
-  // Sarees are full-body garments and IDM-VTON handles them reliably (~25s).
-  // This fixes the v25 "Generation Timed Out" error where sarees fell through
-  // to Pollinations (rate-limited + slow) and exceeded the client timeout.
+  // Women's sarees — v26.1: IDM-VTON CANNOT handle sarees.
+  // Testing on Vercel confirmed IDM-VTON returns "error: null" for sarees
+  // every time (sarees are full-body Indian garments, outside IDM-VTON's
+  // VITON-HD training distribution of upper-body Western garments).
+  // v26.1 FIX: Mark sarees as vtonCompatible=false so they skip IDM-VTON
+  // entirely and go straight to Pollinations with the FULL 50s budget.
+  // This gives Pollinations 3 attempts (15s each + 5s delays) instead of
+  // just 1 attempt after IDM-VTON wastes 25s.
   if (slug.includes('saree')) {
     return {
       gender: 'woman',
@@ -223,7 +227,7 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'draped in the saree in elegant Indian style with pallu over the left shoulder, matching blouse, properly pleated at the waist',
       size: '768x1344',
       materialHint: 'flowing silk fabric with natural drape and sheen',
-      vtonCompatible: true,
+      vtonCompatible: false,
       garmentDescription: `A beautiful ${productName} — a traditional Indian saree with matching blouse`,
     }
   }
@@ -1344,6 +1348,7 @@ async function compressSelfieForUpload(selfieData: string): Promise<Buffer> {
 async function callPollinationsWithSelfieReference(
   input: TryOnInput,
   deadline: number,
+  options?: { maxRetries?: number; perAttemptMs?: number; retryDelaysMs?: number[] },
 ): Promise<{ success: boolean; imageUrl?: string; error?: string; strategy?: string; debugInfo?: { extractedColors: string; promptPreview: string; selfieUploaded: boolean } }> {
   const config = getCategoryConfig(input.categorySlug, input.productName)
   const { width, height } = parseImageSize(config.size)
@@ -1374,22 +1379,24 @@ async function callPollinationsWithSelfieReference(
     url += `&image=${encodeURIComponent(selfieUrl)}`
   }
 
-  // v26: Reduced from 2 retries (3 attempts) to 1 retry (2 attempts).
-  // Pollinations is rate-limited (HTTP 429) and slow — retrying 3x regularly
-  // exceeded the client's 55s timeout, producing "Generation Timed Out".
-  // With 1 retry max: worst case = 18s + 3s + 18s = 39s (safely under 55s).
-  const MAX_RETRIES = 1
-  const RETRY_DELAYS_MS = [3_000]
+  // v26.1: Smart retry logic based on available time.
+  // - If IDM-VTON was tried (garment category): less time available → 1 retry max, 18s per attempt
+  // - If IDM-VTON was skipped (non-garment like sarees/jewelry): full 50s budget → 2 retries, 14s per attempt
+  // The longer delays (5s) between retries give Pollinations' rate limiter time to reset.
+  const MAX_RETRIES = options?.maxRetries ?? 1
+  const RETRY_DELAYS_MS = options?.retryDelaysMs ?? [5_000]
+  const PER_ATTEMPT_MS = options?.perAttemptMs ?? POLLINATIONS_TIMEOUT_MS
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
       const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]
+      console.log(`[virtual-tryon] Pollinations: retry ${attempt}/${MAX_RETRIES} after ${delay}ms delay...`)
       await new Promise(r => setTimeout(r, delay))
     }
 
     const retrySeed = seed + attempt * 11111
     const attemptUrl = url.replace(/&seed=\d+/, `&seed=${retrySeed}`)
-    const remaining = Math.min(POLLINATIONS_TIMEOUT_MS, deadline - Date.now() - 3_000)
+    const remaining = Math.min(PER_ATTEMPT_MS, deadline - Date.now() - 3_000)
     if (remaining < 8_000) {
       return { success: false, error: `insufficient time for Pollinations (${remaining}ms)` }
     }
@@ -1604,13 +1611,21 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ── FALLBACK: Pollinations (ALL categories) ─────────────────────
-  // v26: Reduced retries (1 max) and timeout (18s) to prevent client timeout.
+  // v26.1: Smart retry logic based on whether IDM-VTON was tried.
+  // - If IDM-VTON was tried (and failed): less time remains → 1 retry, 18s per attempt
+  // - If IDM-VTON was skipped (non-garment category like sarees/jewelry): full 50s budget
+  //   → 2 retries (3 attempts), 14s per attempt, 5s delays (gives rate limiter time to reset)
+  //   Total: 14 + 5 + 14 + 5 + 14 = 52s — but capped by deadline, so safe
   // Pollinations uses the sana model (only one available) — degraded quality
   // but works for ALL categories including jewelry, watches, accessories.
   if (Date.now() < totalDeadline - 12_000) {
     strategiesAttempted.push('pollinations')
-    console.log('[virtual-tryon] Fallback: Pollinations text-to-image (reduced retries)')
-    const result = await callPollinationsWithSelfieReference(input, totalDeadline)
+    const idmVtonTried = strategiesAttempted.includes('idm-vton')
+    const pollinationsOptions = idmVtonTried
+      ? { maxRetries: 1, perAttemptMs: 18_000, retryDelaysMs: [5_000] }  // less time: 18+5+18 = 41s
+      : { maxRetries: 2, perAttemptMs: 14_000, retryDelaysMs: [5_000, 5_000] }  // full budget: 14+5+14+5+14 = 52s (capped)
+    console.log(`[virtual-tryon] Fallback: Pollinations (idmVtonTried=${idmVtonTried}, maxRetries=${pollinationsOptions.maxRetries}, perAttempt=${pollinationsOptions.perAttemptMs}ms)`)
+    const result = await callPollinationsWithSelfieReference(input, totalDeadline, pollinationsOptions)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
       console.log(`[virtual-tryon] ✅ Pollinations succeeded in ${(elapsed / 1000).toFixed(1)}s`)
