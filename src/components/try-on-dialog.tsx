@@ -1,26 +1,27 @@
 'use client';
 
 /**
- * TryOnDialog v4.5 — ZAI Image-Edit Virtual Try-On (works on local AND Vercel)
+ * TryOnDialog v4.6 — IDM-VTON Virtual Try-On (works on local AND Vercel)
  *
  * KEY PRINCIPLES:
- * 1. Powered by Z.AI image-edit API (REAL image-to-image edit — passes BOTH
- *    the user's selfie AND the product photo to ZAI, which preserves the
- *    user's face/gender AND renders the exact product).
- * 2. PRESERVES THE USER — the user's SELFIE is the edit input image,
- *    so the AI keeps the user's face, gender, skin tone, and body type.
- * 3. RENDERS THE EXACT PRODUCT — the PRODUCT PHOTO is also passed to the
- *    edit API, so the AI reproduces the exact colours, pattern, fabric,
- *    and design (no more "saree → glasses").
- * 4. GENDER-NEUTRAL prompts — never hardcodes a gender; uses "the person
- *    in the reference image" so the result matches the user's actual gender.
+ * 1. Powered by HuggingFace IDM-VTON Space (a REAL VTON model — takes the
+ *    user's selfie AND the product photo, returns the person wearing the
+ *    exact garment with face/body preserved).
+ * 2. PRESERVES THE USER — IDM-VTON is a proper VTON model that keeps the
+ *    user's face, gender, skin tone, and body type from the selfie.
+ * 3. RENDERS THE EXACT PRODUCT — the PRODUCT PHOTO is passed as the garment
+ *    image, so the AI reproduces the exact colours, pattern, fabric, and
+ *    design (no more "saree → glasses").
+ * 4. STANDARD FREE strategy — IDM-VTON is a free public HuggingFace Space,
+ *    no auth required, no env vars needed. Works identically on local AND
+ *    Vercel.
  * 5. Instant selfie preview (show raw image IMMEDIATELY on upload)
  * 6. Disclaimer → auto-opens file picker (one-click flow)
  * 7. Hard 55-second client timeout with friendly retry message
  * 8. 3BOXES watermark on ALL generated/saved/downloaded images
- * 9. Works on BOTH preview AND Vercel — v23 uses ZAI image-edit on both
- *    (internal-api.z.ai is a public endpoint; hardcoded config fallback
- *    ensures it works on Vercel without env var setup).
+ * 9. Works on BOTH preview AND Vercel — v24 uses IDM-VTON as primary,
+ *    with ZAI image-edit (local bonus) and Pollinations (last resort) as
+ *    fallbacks.
  * 10. NO canvas overlay fallback — real AI generation every time
  */
 
@@ -1221,10 +1222,11 @@ export function TryOnDialog({
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
                     <span className="font-semibold text-amber-300/60">How it works:</span>{' '}
-                    Our AI uses YOUR selfie AND the actual product photo together —
-                    preserving your face, gender, and body type while rendering the
-                    exact product with realistic fit, folds, and colours.
-                    This usually takes 20–25 seconds.
+                    Our AI (IDM-VTON) uses YOUR selfie AND the actual product photo
+                    together — preserving your face, gender, and body type while
+                    rendering the exact garment with realistic fit, folds, and colours.
+                    This usually takes 25–45 seconds (longer on first use while the AI
+                    model warms up).
                   </p>
                 </div>
 

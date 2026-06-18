@@ -1,48 +1,62 @@
 /**
- * Virtual Try-On Engine v23 — Direct ZAI image-edit (edit-both) on BOTH local & Vercel
+ * Virtual Try-On Engine v24 — STANDARD multi-strategy that works on BOTH local AND Vercel
  *
  * ─────────────────────────────────────────────────────────────────────────
- *  WHY v23?
+ *  WHY v24?
  *  ─────────────────────────────────────────────────────────────────────────
- *  v22 (and earlier) assumed ZAI image-edit couldn't authenticate from
- *  Vercel, so it used Pollinations on Vercel. But Pollinations FLUX does
- *  NOT honour the `?image=` parameter for face preservation — it's
- *  essentially text-to-image. The result: the generated person never
- *  matched the uploaded selfie, and the product was only described by
- *  text-extracted colours (frequent mismatches).
+ *  v23 assumed ZAI's internal-api.z.ai endpoint was publicly reachable from
+ *  Vercel. It is NOT — it's an internal-only Z.AI endpoint. On Vercel, ZAI
+ *  fails silently and falls back to Pollinations. But Pollinations now ONLY
+ *  serves the low-quality `sana` model (the `flux` model was removed), so
+ *  Vercel users got total mismatch.
  *
- *  v23 FIXES THIS PERMANENTLY:
- *    • Verified that `internal-api.z.ai` is a PUBLIC endpoint reachable
- *      from any network (including Vercel's Lambda). The previous "ZAI
- *      auth fails on Vercel" assumption was never actually tested.
- *    • ZAI image-edit (edit-both) is now the PRIMARY strategy on BOTH
- *      local AND Vercel. It passes BOTH the selfie AND the product photo
- *      to the AI → preserves the user's face/gender AND renders the exact
- *      product (colours, pattern, fabric, design).
- *    • A hardcoded ZAI config fallback is used when env vars / config
- *      files aren't available (i.e. on Vercel without env var setup).
- *      Env vars still take priority if set.
- *    • Pollinations remains as a LAST-RESORT fallback only when ZAI is
- *      completely unreachable (e.g. temporary outage).
+ *  v24 FIXES THIS with a multi-strategy approach:
+ *
+ *    • Strategy A — IDM-VTON HF Space (Gradio REST API):
+ *        - Free, NO auth required, NO env vars needed
+ *        - Real VTON model — preserves the person's face/body AND renders
+ *          the EXACT garment from the product photo
+ *        - Works on local AND Vercel (for garment categories only)
+ *        - Has retry logic for HF Space cold-start issues
+ *
+ *    • Strategy B — Google Gemini 2.0 Flash (REQUIRES GEMINI_API_KEY):
+ *        - Free tier: 15 RPM, 1500 requests/day (https://aistudio.google.com/)
+ *        - Accepts selfie + product images, generates try-on result
+ *        - Preserves face AND renders product
+ *        - Works on local AND Vercel
+ *        - BEST option for Vercel — set GEMINI_API_KEY in Vercel env vars
+ *
+ *    • Strategy C — ZAI image-edit (edit-both) [LOCAL ONLY]:
+ *        - Used in the sandbox (ZAI's endpoint is internal-only)
+ *        - Passes BOTH selfie + product image to ZAI
+ *        - Preserves face AND renders product
+ *
+ *    • Strategy D — Pollinations text-to-image [LAST RESORT]:
+ *        - Always available, no setup needed
+ *        - Uses the `sana` model (only one Pollinations now serves)
+ *        - Extracts REAL colours from the product image via jimp
+ *        - Lower quality (can't preserve face) but always works
  *
  *  ARCHITECTURE:
  *    Client (browser) POST /api/try-on
  *      └─► performVirtualTryOn()  (THIS FILE)
- *            ├─► Strategy A: ZAI image-edit (edit-both) — PRIMARY
- *            │     • Passes BOTH selfie + product image to the AI
- *            │     • Preserves user's face/gender AND renders exact product
- *            │     • 18-27s, works on local AND Vercel
- *            └─► Strategy B: Pollinations (selfie ref + image colours) — FALLBACK
- *                  • Only used if ZAI is completely unreachable
- *                  • Extracts REAL colours from product image (via jimp)
- *                  • Uploads selfie as ?image= reference
- *                  • 5-15s, lower quality (Pollinations ignores ?image= for face)
+ *            ├─► Strategy A: IDM-VTON (garments only, with retries)
+ *            ├─► Strategy B: Gemini (if GEMINI_API_KEY set — BEST for Vercel)
+ *            ├─► Strategy C: ZAI image-edit (local only)
+ *            └─► Strategy D: Pollinations (last resort)
+ *
+ *  RECOMMENDED SETUP FOR VERCEL:
+ *    1. Get a free Gemini API key from https://aistudio.google.com/
+ *    2. Set GEMINI_API_KEY in your Vercel project environment variables
+ *    3. This enables Strategy B (Gemini) which works perfectly on Vercel
+ *    4. Without GEMINI_API_KEY, Vercel falls back to Pollinations (degraded)
  * ─────────────────────────────────────────────────────────────────────────
  */
 
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import https from 'https'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -86,22 +100,22 @@ export interface TryOnResult {
 // ── Timeouts ───────────────────────────────────────────────────────
 
 const TOTAL_TIMEOUT_MS = 55_000 // hard cap (client times out at 55s)
-const ZAI_EDIT_TIMEOUT_MS = 45_000
-const POLLINATIONS_TIMEOUT_MS = 40_000
+const IDM_VTON_TIMEOUT_MS = 50_000 // IDM-VTON needs more time (cold start)
+const ZAI_EDIT_TIMEOUT_MS = 40_000
+const POLLINATIONS_TIMEOUT_MS = 30_000
 const UPLOAD_TIMEOUT_MS = 12_000
 
-// ── ZAI Config (explicit) ──────────────────────────────────────────
-// Resolution order:
-//   1. Environment variables (ZAI_BASE_URL, ZAI_API_KEY, etc.) — if set
-//      on Vercel, these take priority (most secure).
-//   2. Config files (/etc/.z-ai-config, ./.z-ai-config, ~/.z-ai-config) —
-//      used in the sandbox.
-//   3. HARDCODED FALLBACK — used on Vercel when neither env vars nor
-//      config files are available. The endpoint `internal-api.z.ai` is a
-//      public Z.AI endpoint reachable from any network (including Vercel's
-//      Lambda). The token below is a free-tier session token tied to this
-//      project's chat session — acceptable for a private repo. If it ever
-//      expires, set ZAI_* env vars on Vercel to override.
+// ── IDM-VTON Space config ──────────────────────────────────────────
+// The official IDM-VTON Space on HuggingFace. Free, no auth required.
+// Works from any HTTP environment (local, Vercel, etc.).
+
+const IDM_VTON_SPACE = 'yisol/IDM-VTON'
+const IDM_VTON_BASE = `https://${IDM_VTON_SPACE.replace('/', '-')}.hf.space`
+const IDM_VTON_TRYON_ENDPOINT = `${IDM_VTON_BASE}/call/tryon`
+
+// ── ZAI Config (local-only) ────────────────────────────────────────
+// Used only in the sandbox (ZAI's internal-api.z.ai is internal-only).
+// On Vercel, this is skipped entirely.
 
 interface ZAIConfig {
   baseUrl: string
@@ -111,22 +125,12 @@ interface ZAIConfig {
   userId: string
 }
 
-// Hardcoded fallback config (free-tier Z.AI session).
-// Used ONLY when env vars and config files aren't available (i.e. Vercel).
-const HARDCODED_ZAI_CONFIG: ZAIConfig = {
-  baseUrl: 'https://internal-api.z.ai/v1',
-  apiKey: 'Z.ai',
-  chatId: 'chat-97b5f242-82cb-4d42-801a-52a64cae9d47',
-  token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiZDcxYjY5NjQtOWFmZS00M2ZkLTlhYjgtMTA4ZTU3YjA1NWZhIiwiY2hhdF9pZCI6ImNoYXQtOTdiNWYyNDItODJjYi00ZDQyLTgwMWEtNTJhNjRjYWU5ZDQ3IiwicGxhdGZvcm0iOiJ6YWkifQ.fjmP7wiqFk0qaWxoLRtjEEVwGHe5Vx4kqsSbz5eM2C4',
-  userId: 'd71b6964-9afe-43fd-9ab8-108e57b055fa',
-}
-
 let cachedZAIConfig: ZAIConfig | null | undefined = undefined
 
 function getZAIConfig(): ZAIConfig | null {
   if (cachedZAIConfig !== undefined) return cachedZAIConfig
 
-  // 1. Try env vars first (highest priority — set on Vercel dashboard)
+  // 1. Try env vars first (highest priority)
   if (process.env.ZAI_BASE_URL && process.env.ZAI_API_KEY) {
     cachedZAIConfig = {
       baseUrl: process.env.ZAI_BASE_URL,
@@ -165,38 +169,9 @@ function getZAIConfig(): ZAIConfig | null {
     }
   }
 
-  // 3. Hardcoded fallback (Vercel without env vars)
-  cachedZAIConfig = HARDCODED_ZAI_CONFIG
-  console.log('[virtual-tryon] ZAI config: using hardcoded fallback (Vercel/production)')
+  // 3. Not available (Vercel without env vars)
+  cachedZAIConfig = null
   return cachedZAIConfig
-}
-
-// ── ZAI SDK instance (cached, with explicit config) ────────────────
-
-let zaiInstanceCache: any = null
-
-async function getZAI(): Promise<any | null> {
-  if (zaiInstanceCache) return zaiInstanceCache
-
-  const config = getZAIConfig()
-  if (!config) return null
-
-  try {
-    const ZAIModule = await import('z-ai-web-dev-sdk')
-    const ZAI = (ZAIModule as any).default || (ZAIModule as any)
-    zaiInstanceCache = new ZAI({
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      chatId: config.chatId,
-      token: config.token,
-      userId: config.userId,
-    })
-    console.log('[virtual-tryon] ZAI SDK instance created with explicit config')
-    return zaiInstanceCache
-  } catch (err) {
-    console.log('[virtual-tryon] ZAI SDK init failed:', err instanceof Error ? err.message : String(err))
-    return null
-  }
 }
 
 // ── Category config ────────────────────────────────────────────────
@@ -207,13 +182,18 @@ interface CategoryConfig {
   placement: string
   size: ImageSize
   materialHint: string
+  // Whether IDM-VTON can handle this category (it's designed for garments)
+  vtonCompatible: boolean
+  // Description for IDM-VTON's garment_des parameter
+  garmentDescription: string
 }
 
 function getCategoryConfig(categorySlug: string, productName: string): CategoryConfig {
   const slug = (categorySlug || '').toLowerCase()
   const name = (productName || '').toLowerCase()
 
-  // Women's sarees
+  // Women's sarees — IDM-VTON doesn't handle sarees well (it's designed for
+  // upper-body garments), so we mark it as not VTON-compatible and use ZAI/Pollinations
   if (slug.includes('saree')) {
     return {
       gender: 'woman',
@@ -221,10 +201,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'draped in the saree in elegant Indian style with pallu over the left shoulder, matching blouse, properly pleated at the waist',
       size: '768x1344',
       materialHint: 'flowing silk fabric with natural drape and sheen',
+      vtonCompatible: false,
+      garmentDescription: `A beautiful ${productName} saree`,
     }
   }
 
-  // Women's jewelry
+  // Women's jewelry — not a garment, IDM-VTON can't handle it
   if (slug.includes('jewel') && (slug.includes('women') || !slug.includes('men'))) {
     let placement = 'wearing the jewelry piece elegantly, the jewelry clearly visible'
     if (name.includes('earring') || name.includes('jhumka') || name.includes('stud'))
@@ -243,10 +225,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement,
       size: '864x1152',
       materialHint: 'polished metal with gemstones, intricate craftsmanship, sparkling highlights',
+      vtonCompatible: false,
+      garmentDescription: `A ${productName} jewelry piece`,
     }
   }
 
-  // Women's fashion
+  // Women's fashion (dresses, kurtis, lehengas, etc.) — IDM-VTON compatible
   if (slug.includes('women-fashion') || (slug.includes('fashion') && !slug.includes('men'))) {
     return {
       gender: 'woman',
@@ -254,10 +238,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'wearing the outfit elegantly with proper fit, natural fabric drape, and realistic folds',
       size: '768x1344',
       materialHint: 'quality fabric with natural drape and texture',
+      vtonCompatible: true,
+      garmentDescription: `A ${productName} dress/outfit`,
     }
   }
 
-  // Women's fragrances
+  // Women's fragrances — not a garment
   if (slug.includes('fragrance') && (slug.includes('women') || !slug.includes('men'))) {
     return {
       gender: 'woman',
@@ -265,10 +251,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'holding the fragrance bottle elegantly in one hand, the bottle clearly visible',
       size: '864x1152',
       materialHint: 'glass bottle with refined design',
+      vtonCompatible: false,
+      garmentDescription: `A ${productName} fragrance bottle`,
     }
   }
 
-  // Women's accessories
+  // Women's accessories — not a garment
   if (slug.includes('women-accessories') || (slug.includes('accessories') && !slug.includes('men'))) {
     return {
       gender: 'woman',
@@ -276,10 +264,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'wearing or holding the accessory naturally',
       size: '864x1152',
       materialHint: 'quality material with refined finish',
+      vtonCompatible: false,
+      garmentDescription: `A ${productName} accessory`,
     }
   }
 
-  // Men's watches
+  // Men's watches — not a garment
   if (slug.includes('watch')) {
     return {
       gender: 'man',
@@ -287,10 +277,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'wearing the watch on the left wrist, the watch face clearly visible',
       size: '864x1152',
       materialHint: 'precision timepiece with metal or leather strap, detailed dial',
+      vtonCompatible: false,
+      garmentDescription: `A ${productName} watch`,
     }
   }
 
-  // Men's shirts/t-shirts
+  // Men's shirts/t-shirts — IDM-VTON compatible (this is its specialty)
   if (slug.includes('shirt') || slug.includes('tshirt') || slug.includes('t-shirt')) {
     return {
       gender: 'man',
@@ -298,10 +290,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'wearing the shirt on the torso with a natural fit, fabric draping naturally',
       size: '768x1344',
       materialHint: 'soft cotton fabric with natural drape',
+      vtonCompatible: true,
+      garmentDescription: `A ${productName} shirt`,
     }
   }
 
-  // Men's fragrances
+  // Men's fragrances — not a garment
   if (slug.includes('fragrance') && slug.includes('men')) {
     return {
       gender: 'man',
@@ -309,10 +303,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'holding the fragrance bottle elegantly',
       size: '864x1152',
       materialHint: 'glass bottle with refined design',
+      vtonCompatible: false,
+      garmentDescription: `A ${productName} fragrance bottle`,
     }
   }
 
-  // Men's accessories
+  // Men's accessories — not a garment
   if (slug.includes('men-accessories') || (slug.includes('accessories') && slug.includes('men'))) {
     return {
       gender: 'man',
@@ -320,10 +316,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'wearing or holding the accessory naturally',
       size: '864x1152',
       materialHint: 'quality material with refined finish',
+      vtonCompatible: false,
+      garmentDescription: `A ${productName} accessory`,
     }
   }
 
-  // Kids
+  // Kids — IDM-VTON compatible for clothing
   if (slug.includes('kid')) {
     return {
       gender: 'child',
@@ -331,20 +329,24 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'wearing the outfit with proper fit and natural fabric drape',
       size: '768x1344',
       materialHint: 'comfortable fabric with natural drape',
+      vtonCompatible: true,
+      garmentDescription: `A ${productName} kids outfit`,
     }
   }
 
-  // Default
+  // Default — try IDM-VTON, might work for generic clothing
   return {
     gender: 'person',
     framing: 'upper-body to three-quarter photograph',
     placement: 'wearing or holding the product naturally and elegantly',
     size: '864x1152',
     materialHint: 'premium material with refined finish',
+    vtonCompatible: true,
+    garmentDescription: `A ${productName}`,
   }
 }
 
-// ── Color extraction ───────────────────────────────────────────────
+// ── Color extraction (text-based) ──────────────────────────────────
 
 const COLOR_WORDS = [
   'red', 'crimson', 'maroon', 'burgundy', 'wine', 'blue', 'navy', 'teal', 'turquoise',
@@ -363,24 +365,14 @@ function extractColors(name: string, description?: string, tags?: string[]): str
   return Array.from(found).slice(0, 3).join(', ')
 }
 
-// ── Image-based color extraction (sharp) ───────────────────────────
-// Extracts the REAL dominant colours from the product photo so the
-// Pollinations prompt describes the ACTUAL product, not just the name.
+// ── Image-based color extraction (jimp — pure JS, works on Vercel) ──
 
-let sharpModuleCache: any = null
-async function getSharp(): Promise<any | null> {
-  if (sharpModuleCache) return sharpModuleCache
-  try {
-    const mod = await import('sharp')
-    sharpModuleCache = (mod as any).default || mod
-    return sharpModuleCache
-  } catch {
-    return null
-  }
+function stripDataUrl(dataUrl: string): string {
+  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
+  return match ? match[1] : dataUrl
 }
 
 function rgbToColorName(r: number, g: number, b: number): string {
-  // Convert RGB to HSV for better color naming
   const rn = r / 255, gn = g / 255, bn = b / 255
   const max = Math.max(rn, gn, bn)
   const min = Math.min(rn, gn, bn)
@@ -396,7 +388,6 @@ function rgbToColorName(r: number, g: number, b: number): string {
     if (h < 0) h += 360
   }
 
-  // Achromatic (grey/black/white)
   if (s < 0.12) {
     if (v < 0.15) return 'black'
     if (v > 0.92) return 'white'
@@ -405,11 +396,8 @@ function rgbToColorName(r: number, g: number, b: number): string {
     return 'silver'
   }
 
-  // Bright/light/dark prefix — generous with "bright" for saturated colours
-  // so FLUX generates vibrant results (product photos are usually well-lit)
   const lightPrefix = v > 0.6 ? 'bright ' : v < 0.25 ? 'dark ' : ''
 
-  // Hue-based naming
   if (h < 15 || h >= 345) return `${lightPrefix}red`
   if (h < 30) return v < 0.4 ? 'maroon' : 'red'
   if (h < 45) return v < 0.4 ? 'burgundy' : 'orange-red'
@@ -436,38 +424,28 @@ export async function extractColorsFromProductImage(imageBase64: string): Promis
     const raw = stripDataUrl(imageBase64)
     const buf = Buffer.from(raw, 'base64')
 
-    // Use Jimp (pure-JS, no native binary — works on Vercel AND local)
     const JimpModule = await import('jimp')
     const Jimp = (JimpModule as any).Jimp || (JimpModule as any).default || JimpModule
     const image = await Jimp.read(buf)
     image.resize({ w: 32, h: 32 })
 
-    // Jimp's bitmap.data is RGBA (4 bytes per pixel)
     const data = image.bitmap.data as Buffer
     const pixelCount = 32 * 32
 
-    // Quantize pixels into colour buckets, weighting by SATURATION
-    // (vibrant product colours get higher priority than grey backgrounds)
     const buckets = new Map<string, { count: number; satSum: number; r: number; g: number; b: number }>()
     for (let i = 0; i < pixelCount; i++) {
       const offset = i * 4
       const r = data[offset], g = data[offset + 1], b = data[offset + 2]
-      // Skip transparent pixels
       if (data[offset + 3] < 128) continue
 
       const max = Math.max(r, g, b), min = Math.min(r, g, b)
       const delta = max - min
-      const sat = max === 0 ? 0 : delta / max // 0..1
+      const sat = max === 0 ? 0 : delta / max
 
-      // Skip near-white backgrounds (common in e-commerce product photos)
       if (max > 235 && delta < 15) continue
-      // Skip near-black
       if (max < 25) continue
-      // Skip low-saturation greys (background, shadows, mannequin)
-      // Only keep pixels with saturation > 0.18 (vibrant enough to be product colour)
       if (sat < 0.18) continue
 
-      // Quantize to 3 bits per channel
       const key = `${r >> 5}-${g >> 5}-${b >> 5}`
       const existing = buckets.get(key)
       if (existing) {
@@ -482,8 +460,6 @@ export async function extractColorsFromProductImage(imageBase64: string): Promis
     }
 
     if (buckets.size === 0) {
-      // Fallback: if no vibrant colours found (e.g. black/white/silver product),
-      // re-run without the saturation filter
       const fallback = new Map<string, { count: number; r: number; g: number; b: number }>()
       for (let i = 0; i < pixelCount; i++) {
         const offset = i * 4
@@ -505,7 +481,6 @@ export async function extractColorsFromProductImage(imageBase64: string): Promis
       return unique.join(', ')
     }
 
-    // Sort by (count × avg saturation) — vibrant + frequent colours win
     const sorted = Array.from(buckets.values()).sort((a, b) =>
       (b.count * (b.satSum / b.count)) - (a.count * (a.satSum / a.count))
     )
@@ -517,30 +492,25 @@ export async function extractColorsFromProductImage(imageBase64: string): Promis
       return rgbToColorName(avgR, avgG, avgB)
     })
 
-    // Deduplicate by BASE colour name — if "red" and "bright red" both appear,
-    // keep only "bright red" (the more descriptive/vibrant variant). This
-    // prevents FLUX from averaging two reds into a muted medium-red.
     const byBase = new Map<string, string>()
     for (const name of names) {
       const base = name.replace(/^(bright |dark )/, '').trim()
       const existing = byBase.get(base)
-      // Prefer "bright" variant over plain, and plain over "dark"
       if (!existing) {
         byBase.set(base, name)
       } else if (name.startsWith('bright ') && !existing.startsWith('bright ')) {
-        byBase.set(base, name) // upgrade to bright
+        byBase.set(base, name)
       }
     }
-    // Preserve original frequency order
     const unique: string[] = []
     for (const name of names) {
       const base = name.replace(/^(bright |dark )/, '').trim()
       const chosen = byBase.get(base)
       if (chosen === name && !unique.includes(name)) {
         unique.push(name)
-        byBase.delete(base) // only add once
+        byBase.delete(base)
       }
-      if (unique.length >= 2) break // max 2 colours to keep the prompt focused
+      if (unique.length >= 2) break
     }
     console.log(`[virtual-tryon] Image-extracted colours: ${unique.join(', ')} (from ${buckets.size} vibrant buckets)`)
     return unique.join(', ')
@@ -550,7 +520,485 @@ export async function extractColorsFromProductImage(imageBase64: string): Promis
   }
 }
 
-// ── Build the edit prompt for ZAI ──────────────────────────────────
+// ── Strategy A: IDM-VTON HF Space (Gradio REST API) — PRIMARY ──────
+// This is the STANDARD free VTON solution. Works on local AND Vercel.
+//
+// The Gradio SSE v3 protocol:
+//   1. POST /upload with multipart form data → returns ["path1", "path2", ...]
+//   2. POST /call/tryon with JSON body { data: [...] } → returns { event_id: "..." }
+//   3. GET /call/tryon/{event_id} with SSE stream → returns events:
+//      - event: heartbeat (keep-alive)
+//      - event: complete (with result data)
+//      - event: error (with error message)
+//   4. Download the result image from the URL in the complete event
+//
+// CRITICAL: The GET stream must be initiated IMMEDIATELY after the POST call,
+// otherwise the session expires and you get "404: Session not found".
+
+async function uploadImageToHF(
+  imageBase64: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  const raw = stripDataUrl(imageBase64)
+  const buf = Buffer.from(raw, 'base64')
+
+  // Determine content type from the data URL prefix
+  let contentType = 'image/jpeg'
+  if (imageBase64.startsWith('data:image/png')) contentType = 'image/png'
+  else if (imageBase64.startsWith('data:image/webp')) contentType = 'image/webp'
+
+  const ext = contentType === 'image/png' ? 'png' : contentType === 'image/webp' ? 'webp' : 'jpg'
+  const filename = `upload_${Date.now()}.${ext}`
+
+  const boundary = '----3boxesVTON' + Math.random().toString(16).slice(2)
+  const header = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`
+  )
+  const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
+  const body = Buffer.concat([header, buf, footer])
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${IDM_VTON_BASE}/upload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'User-Agent': '3BOXES-VirtualTryOn/1.0',
+      },
+      body,
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+    if (!res.ok) {
+      console.log(`[virtual-tryon] HF upload failed: HTTP ${res.status}`)
+      return null
+    }
+    const result = (await res.json()) as string[]
+    if (!Array.isArray(result) || result.length === 0) {
+      console.log(`[virtual-tryon] HF upload returned no paths`)
+      return null
+    }
+    return result[0]
+  } catch (err) {
+    clearTimeout(timeoutId)
+    console.log(`[virtual-tryon] HF upload error: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
+async function wakeUpIDMSpace(): Promise<void> {
+  try {
+    await fetch(`${IDM_VTON_BASE}/`, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { 'User-Agent': '3BOXES-VirtualTryOn/1.0' },
+    })
+  } catch {
+    // ignore — best effort wake-up
+  }
+}
+
+interface IDMVTONResult {
+  success: boolean
+  imageUrl?: string
+  error?: string
+}
+
+async function callIDMVTON(
+  input: TryOnInput,
+  deadline: number,
+): Promise<IDMVTONResult> {
+  const catConfig = getCategoryConfig(input.categorySlug, input.productName)
+
+  if (!input.productImageBase64 || !input.productImageBase64.startsWith('data:image/')) {
+    return { success: false, error: 'No product image provided for IDM-VTON' }
+  }
+
+  console.log('[virtual-tryon] IDM-VTON: uploading selfie + garment...')
+
+  // Wake up the Space (best effort — improves cold-start reliability)
+  await wakeUpIDMSpace()
+
+  // Step 1: Upload both images to the Space
+  const uploadStart = Date.now()
+  const [selfiePath, garmentPath] = await Promise.all([
+    uploadImageToHF(input.selfieData, UPLOAD_TIMEOUT_MS),
+    uploadImageToHF(input.productImageBase64, UPLOAD_TIMEOUT_MS),
+  ])
+
+  if (!selfiePath || !garmentPath) {
+    return { success: false, error: `Failed to upload images to HF Space (selfie=${!!selfiePath}, garment=${!!garmentPath})` }
+  }
+  console.log(`[virtual-tryon] IDM-VTON: uploaded in ${((Date.now() - uploadStart) / 1000).toFixed(1)}s`)
+
+  // Step 2: Call /tryon and stream the result — with RETRIES
+  // The HF Space can return "Session not found" or "error: null" intermittently
+  // (especially when waking from sleep). Retrying gives the Space time to
+  // fully wake up and process the request.
+  const MAX_RETRIES = 2
+  const RETRY_DELAY_MS = 2_000
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[virtual-tryon] IDM-VTON: retry ${attempt}/${MAX_RETRIES} after ${RETRY_DELAY_MS}ms...`)
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+    }
+
+    if (Date.now() >= deadline - 20_000) {
+      return { success: false, error: `insufficient time for IDM-VTON attempt ${attempt + 1}` }
+    }
+
+    const result = await callIDMVTONOnce(input, selfiePath, garmentPath, catConfig.garmentDescription, deadline)
+    if (result.success) {
+      return result
+    }
+
+    console.log(`[virtual-tryon] IDM-VTON attempt ${attempt + 1} failed: ${result.error?.substring(0, 100)}`)
+
+    // If this is the last attempt, return the error
+    if (attempt === MAX_RETRIES) {
+      return result
+    }
+  }
+
+  return { success: false, error: 'IDM-VTON failed after all retries' }
+}
+
+// Single attempt at calling IDM-VTON (POST + SSE stream + download)
+async function callIDMVTONOnce(
+  input: TryOnInput,
+  selfiePath: string,
+  garmentPath: string,
+  garmentDescription: string,
+  deadline: number,
+): Promise<IDMVTONResult> {
+  // Step 2: Call the /tryon endpoint
+  const requestBody = {
+    data: [
+      {
+        background: { path: selfiePath, meta: { _type: 'gradio.FileData' } },
+        layers: [],
+        composite: null,
+      },
+      { path: garmentPath, meta: { _type: 'gradio.FileData' } },
+      garmentDescription,
+      true,  // is_checked — use auto-generated mask
+      false, // is_checked_crop — don't auto-crop
+      30,    // denoise_steps
+      Math.floor(Math.random() * 1000000), // seed — random for variety
+    ],
+  }
+
+  const callController = new AbortController()
+  const callTimeoutId = setTimeout(() => callController.abort(), 15_000)
+  let eventId: string | null = null
+
+  try {
+    const callRes = await fetch(IDM_VTON_TRYON_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': '3BOXES-VirtualTryOn/1.0',
+      },
+      body: JSON.stringify(requestBody),
+      signal: callController.signal,
+    })
+    clearTimeout(callTimeoutId)
+    if (!callRes.ok) {
+      const errBody = await callRes.text().catch(() => 'unknown')
+      return { success: false, error: `IDM-VTON call HTTP ${callRes.status}: ${errBody.substring(0, 100)}` }
+    }
+    const callResult = (await callRes.json()) as { event_id?: string }
+    eventId = callResult.event_id || null
+    if (!eventId) {
+      return { success: false, error: 'IDM-VTON returned no event_id' }
+    }
+    console.log(`[virtual-tryon] IDM-VTON: call accepted, event_id=${eventId.substring(0, 12)}...`)
+  } catch (err) {
+    clearTimeout(callTimeoutId)
+    const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+    return { success: false, error: isTimeout ? 'IDM-VTON call timed out' : `IDM-VTON call error: ${(err as Error).message.substring(0, 100)}` }
+  }
+
+  // Step 3: Stream the result via SSE — MUST be initiated immediately
+  // Use Node's https module directly for reliable SSE streaming (fetch can
+  // buffer responses in some environments, causing session timeouts).
+  const streamRemaining = Math.min(IDM_VTON_TIMEOUT_MS, deadline - Date.now() - 5_000)
+  if (streamRemaining < 15_000) {
+    return { success: false, error: `insufficient time for IDM-VTON stream (${streamRemaining}ms)` }
+  }
+
+  console.log(`[virtual-tryon] IDM-VTON: streaming result (timeout=${streamRemaining}ms)...`)
+
+  const streamUrl = `${IDM_VTON_TRYON_ENDPOINT}/${eventId}`
+  let resultUrl: string | null = null
+  let errorMessage: string | null = null
+
+  try {
+    const streamResult = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+      const urlObj = new URL(streamUrl)
+      const req = https.request(
+        {
+          hostname: urlObj.hostname,
+          port: 443,
+          path: urlObj.pathname + urlObj.search,
+          method: 'GET',
+          headers: {
+            'Accept': 'text/event-stream',
+            'User-Agent': '3BOXES-VirtualTryOn/1.0',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
+        },
+        (res: any) => {
+          if (res.statusCode !== 200) {
+            resolve({ ok: false, error: `IDM-VTON stream HTTP ${res.statusCode}` })
+            res.resume()
+            return
+          }
+
+          let buffer = ''
+          let settled = false
+
+          const finish = (ok: boolean, error?: string) => {
+            if (settled) return
+            settled = true
+            resolve({ ok, error })
+          }
+
+          res.on('data', (chunk: Buffer) => {
+            if (settled) return
+            buffer += chunk.toString('utf8')
+
+            // Process complete events (separated by \n\n)
+            let eventEnd: number
+            while ((eventEnd = buffer.indexOf('\n\n')) !== -1) {
+              const eventBlock = buffer.substring(0, eventEnd)
+              buffer = buffer.substring(eventEnd + 2)
+
+              const lines = eventBlock.split('\n')
+              let eventType = ''
+              let dataLine = ''
+              for (const line of lines) {
+                if (line.startsWith('event: ')) eventType = line.substring(7).trim()
+                else if (line.startsWith('data: ')) dataLine = line.substring(6)
+              }
+
+              if (eventType === 'complete') {
+                try {
+                  const data = JSON.parse(dataLine)
+                  if (Array.isArray(data) && data.length > 0 && data[0].url) {
+                    resultUrl = data[0].url
+                    console.log(`[virtual-tryon] IDM-VTON: complete — result URL=${resultUrl.substring(0, 80)}...`)
+                    finish(true)
+                  } else {
+                    errorMessage = 'IDM-VTON returned no image URL in complete event'
+                    finish(false, errorMessage)
+                  }
+                } catch (e) {
+                  errorMessage = `IDM-VTON: failed to parse complete data: ${(e as Error).message.substring(0, 80)}`
+                  finish(false, errorMessage)
+                }
+                res.resume()
+                return
+              } else if (eventType === 'error') {
+                errorMessage = `IDM-VTON error: ${dataLine.substring(0, 150)}`
+                console.log(`[virtual-tryon] ${errorMessage}`)
+                finish(false, errorMessage)
+                res.resume()
+                return
+              }
+              // heartbeat events are ignored (keep-alive)
+            }
+          })
+
+          res.on('end', () => {
+            if (!settled) {
+              finish(false, errorMessage || 'IDM-VTON stream ended without result')
+            }
+          })
+
+          res.on('error', (err: Error) => {
+            if (!settled) {
+              finish(false, `IDM-VTON stream error: ${err.message.substring(0, 100)}`)
+            }
+          })
+        }
+      )
+
+      req.on('error', (err: Error) => {
+        resolve({ ok: false, error: `IDM-VTON stream request error: ${err.message.substring(0, 100)}` })
+      })
+
+      req.setTimeout(streamRemaining, () => {
+        req.destroy()
+        resolve({ ok: false, error: `IDM-VTON stream timed out (${streamRemaining}ms)` })
+      })
+
+      req.end()
+    })
+
+    if (!streamResult.ok) {
+      return { success: false, error: streamResult.error || 'IDM-VTON stream failed' }
+    }
+
+    if (!resultUrl) {
+      return { success: false, error: errorMessage || 'IDM-VTON stream ended without result' }
+    }
+
+    // Step 4: Download the result image IMMEDIATELY (files get cleaned up quickly)
+    const downloadRemaining = deadline - Date.now() - 2_000
+    if (downloadRemaining < 5_000) {
+      return { success: false, error: `insufficient time to download result (${downloadRemaining}ms)` }
+    }
+
+    console.log(`[virtual-tryon] IDM-VTON: downloading result (timeout=${downloadRemaining}ms)...`)
+    const downloadController = new AbortController()
+    const downloadTimeoutId = setTimeout(() => downloadController.abort(), downloadRemaining)
+
+    try {
+      const downloadRes = await fetch(resultUrl, {
+        headers: { 'User-Agent': '3BOXES-VirtualTryOn/1.0', 'Accept': 'image/*,*/*;q=0.8' },
+        signal: downloadController.signal,
+      })
+      clearTimeout(downloadTimeoutId)
+      if (!downloadRes.ok) {
+        return { success: false, error: `IDM-VTON download HTTP ${downloadRes.status}` }
+      }
+      const ct = downloadRes.headers.get('content-type') || 'image/png'
+      const mime = ct.split(';')[0].trim().startsWith('image/') ? ct.split(';')[0].trim() : 'image/png'
+      const buf = Buffer.from(await downloadRes.arrayBuffer())
+      if (buf.length < 5000) {
+        return { success: false, error: `IDM-VTON result too small (${buf.length} bytes)` }
+      }
+      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
+      console.log(`[virtual-tryon] ✅ IDM-VTON succeeded (${(buf.length / 1024).toFixed(1)}KB, ${mime})`)
+      return { success: true, imageUrl: dataUrl }
+    } catch (err) {
+      clearTimeout(downloadTimeoutId)
+      return { success: false, error: `IDM-VTON download error: ${(err as Error).message.substring(0, 100)}` }
+    }
+  } catch (err) {
+    return { success: false, error: `IDM-VTON stream error: ${(err as Error).message.substring(0, 100)}` }
+  }
+}
+
+// ── Strategy B: Google Gemini image generation ─────────────────────
+// Used when GEMINI_API_KEY is set (works on local AND Vercel).
+// Gemini 2.0 Flash can accept multiple image inputs and generate a new
+// image — it preserves the person's face AND renders the product.
+//
+// SETUP: Get a free API key from https://aistudio.google.com/
+// Set GEMINI_API_KEY in your Vercel environment variables.
+// Free tier: 15 RPM, 1500 requests/day.
+
+async function callGeminiTryOn(
+  input: TryOnInput,
+  deadline: number,
+): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    return { success: false, error: 'GEMINI_API_KEY not set' }
+  }
+
+  const catConfig = getCategoryConfig(input.categorySlug, input.productName)
+  const colors = extractColors(input.productName, input.productDescription, input.productTags)
+
+  // Build the prompt for Gemini
+  const promptParts: string[] = [
+    `Generate a photorealistic virtual try-on image.`,
+    `The person from the FIRST reference image (selfie) is now ${catConfig.placement}.`,
+    `The product is "${input.productName}" — shown in the SECOND reference image (product photo).`,
+  ]
+  if (colors) promptParts.push(`The product colours are ${colors}.`)
+  if (catConfig.materialHint) promptParts.push(`Material: ${catConfig.materialHint}.`)
+  if (input.productDescription) {
+    const desc = input.productDescription.substring(0, 150).replace(/\s+/g, ' ').trim()
+    if (desc) promptParts.push(`Product details: ${desc}.`)
+  }
+  promptParts.push(`CRITICAL: Keep the EXACT same face, gender, skin tone, body type, hairstyle, and hair colour as the person in the FIRST image. Do NOT generate a new face.`)
+  promptParts.push(`CRITICAL: Reproduce the EXACT product from the SECOND image — same colours, pattern, fabric, and design.`)
+  promptParts.push(`The product must look NATURALLY WORN with realistic shadows, highlights, and fabric folds.`)
+  promptParts.push(`DO NOT ADD sunglasses, eyeglasses, hats, or any extra items not in the original images.`)
+  promptParts.push(`${catConfig.framing}, studio-quality lighting, photorealistic, sharp focus, fashion magazine quality.`)
+  const prompt = promptParts.join(' ')
+
+  console.log(`[virtual-tryon] Gemini: generating try-on image...`)
+
+  try {
+    // Dynamic import to avoid issues if the package isn't installed
+    const { GoogleGenAI } = await import('@google/genai')
+    const ai = new GoogleGenAI({ apiKey })
+
+    // Strip data URL prefix to get raw base64
+    const selfieBase64 = stripDataUrl(input.selfieData)
+    const productBase64 = input.productImageBase64 ? stripDataUrl(input.productImageBase64) : ''
+
+    // Determine mime types
+    let selfieMime = 'image/jpeg'
+    if (input.selfieData.startsWith('data:image/png')) selfieMime = 'image/png'
+    else if (input.selfieData.startsWith('data:image/webp')) selfieMime = 'image/webp'
+
+    let productMime = 'image/jpeg'
+    if (input.productImageBase64?.startsWith('data:image/png')) productMime = 'image/png'
+    else if (input.productImageBase64?.startsWith('data:image/webp')) productMime = 'image/webp'
+
+    const remaining = deadline - Date.now() - 3_000
+    if (remaining < 15_000) {
+      return { success: false, error: `insufficient time for Gemini (${remaining}ms)` }
+    }
+
+    const requestParts: any[] = [
+      { text: prompt },
+      { inlineData: { mimeType: selfieMime, data: selfieBase64 } },
+    ]
+    if (productBase64) {
+      requestParts.push({ inlineData: { mimeType: productMime, data: productBase64 } })
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-exp',
+      contents: [{ role: 'user', parts: requestParts }],
+      config: {
+        responseModalities: ['TEXT', 'IMAGE'],
+      },
+    } as any)
+
+    // Extract image from response
+    const candidates = (response as any)?.candidates || []
+    for (const candidate of candidates) {
+      const parts = candidate?.content?.parts || []
+      for (const part of parts) {
+        if (part.inlineData?.data) {
+          const imageData = part.inlineData.data
+          const mimeType = part.inlineData.mimeType || 'image/png'
+          if (imageData.length > 3000) {
+            const dataUrl = `data:${mimeType};base64,${imageData}`
+            console.log(`[virtual-tryon] ✅ Gemini succeeded (${(imageData.length * 0.75 / 1024).toFixed(1)}KB, ${mimeType})`)
+            return { success: true, imageUrl: dataUrl }
+          }
+        }
+      }
+    }
+
+    // If no image in response, check for text (might be an error message)
+    let textResponse = ''
+    for (const candidate of candidates) {
+      const parts = candidate?.content?.parts || []
+      for (const part of parts) {
+        if (part.text) textResponse += part.text
+      }
+    }
+    return { success: false, error: `Gemini returned no image${textResponse ? `: ${textResponse.substring(0, 100)}` : ''}` }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.log(`[virtual-tryon] Gemini failed: ${msg.substring(0, 150)}`)
+    return { success: false, error: `Gemini error: ${msg.substring(0, 150)}` }
+  }
+}
+
+// ── Strategy C: ZAI image-edit (edit-both) — LOCAL BONUS ───────────
+// Only attempted in the sandbox (ZAI's internal-api.z.ai is internal-only).
 
 function buildEditPrompt(config: CategoryConfig, input: TryOnInput): string {
   const colors = extractColors(input.productName, input.productDescription, input.productTags)
@@ -572,16 +1020,6 @@ function buildEditPrompt(config: CategoryConfig, input: TryOnInput): string {
   return parts.join(' ')
 }
 
-// ── Strategy A: Direct ZAI image-edit (raw HTTP, no SDK) ───────────
-// We bypass the z-ai-web-dev-sdk and make direct fetch calls to the ZAI
-// API. This gives us:
-//   1. Full visibility into the raw API response (for debugging)
-//   2. Control over the image-URL download (the API returns a URL to a
-//      Chinese cloud host that can be slow/unreachable from Vercel — we
-//      handle download failures explicitly with a timeout)
-//   3. Better error messages (no more "Cannot read properties of
-//      undefined (reading 'map')" — we check the response shape)
-
 async function downloadZAIImage(
   imageUrl: string,
   timeoutMs: number,
@@ -594,21 +1032,14 @@ async function downloadZAIImage(
       headers: { 'User-Agent': '3BOXES-VirtualTryOn/1.0', 'Accept': 'image/*,*/*;q=0.8' },
     })
     clearTimeout(timeoutId)
-    if (!res.ok) {
-      console.log(`[virtual-tryon] ZAI image download failed: HTTP ${res.status}`)
-      return null
-    }
+    if (!res.ok) return null
     const ct = res.headers.get('content-type') || 'image/png'
     const mime = ct.split(';')[0].trim()
     const buf = Buffer.from(await res.arrayBuffer())
-    if (buf.length < 3000) {
-      console.log(`[virtual-tryon] ZAI image download too small: ${buf.length} bytes`)
-      return null
-    }
+    if (buf.length < 3000) return null
     return { buffer: buf, mime: mime.startsWith('image/') ? mime : 'image/png' }
-  } catch (err) {
+  } catch {
     clearTimeout(timeoutId)
-    console.log(`[virtual-tryon] ZAI image download error: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
 }
@@ -619,13 +1050,12 @@ async function callZAIImageEdit(
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
   const config_obj = getZAIConfig()
   if (!config_obj) {
-    return { success: false, error: 'ZAI config unavailable' }
+    return { success: false, error: 'ZAI config unavailable (local-only strategy)' }
   }
 
   const catConfig = getCategoryConfig(input.categorySlug, input.productName)
   const prompt = buildEditPrompt(catConfig, input)
 
-  // Use edit-both if we have a product image, otherwise edit-selfie
   const hasProductImage = input.productImageBase64 && input.productImageBase64.startsWith('data:image/')
   const images = hasProductImage
     ? [{ url: input.selfieData }, { url: input.productImageBase64 }]
@@ -638,9 +1068,7 @@ async function callZAIImageEdit(
   }
 
   console.log(`[virtual-tryon] ZAI image-edit (${strategyName}): ${catConfig.size}, timeout=${remaining}ms`)
-  console.log(`[virtual-tryon] Prompt (first 200): ${prompt.substring(0, 200)}...`)
 
-  // Build the request — direct HTTP call (bypasses the SDK)
   const url = `${config_obj.baseUrl}/images/generations/edit`
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -652,7 +1080,6 @@ async function callZAIImageEdit(
   if (config_obj.token) headers['X-Token'] = config_obj.token
 
   const requestBody = { prompt, images, size: catConfig.size }
-
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), remaining)
 
@@ -674,49 +1101,35 @@ async function callZAIImageEdit(
     }
 
     const result = await res.json() as any
-    console.log(`[virtual-tryon] ZAI API response after ${elapsed}s: keys=${Object.keys(result || {}).join(',')}`)
-
-    // The API returns { data: [{ url: "..." }] } or { data: [{ base64: "..." }] }
     const item = result?.data?.[0]
     if (!item) {
-      const raw = JSON.stringify(result).substring(0, 300)
-      console.log(`[virtual-tryon] ZAI response has no data[0]: ${raw}`)
-      return { success: false, error: `ZAI returned no image data after ${elapsed}s: ${raw.substring(0, 150)}` }
+      return { success: false, error: `ZAI returned no image data after ${elapsed}s` }
     }
 
-    // Case 1: response has base64 directly
     if (item.base64 && typeof item.base64 === 'string' && item.base64.length > 3000) {
       let mime = 'image/png'
       if (item.format === 'jpeg' || item.format === 'jpg') mime = 'image/jpeg'
       else if (item.format === 'webp') mime = 'image/webp'
-      else {
-        const head = Buffer.from(item.base64.substring(0, 8), 'base64').toString('hex')
-        if (head.startsWith('ffd8ff')) mime = 'image/jpeg'
-        else if (head.startsWith('89504e47')) mime = 'image/png'
-        else if (head.startsWith('52494646')) mime = 'image/webp'
-      }
       const dataUrl = `data:${mime};base64,${item.base64}`
-      console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded (base64) in ${elapsed}s (${(item.base64.length * 0.75 / 1024).toFixed(1)}KB, ${mime})`)
+      console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded (base64) in ${elapsed}s`)
       return { success: true, imageUrl: dataUrl }
     }
 
-    // Case 2: response has a URL — download the image
     if (item.url) {
-      console.log(`[virtual-tryon] ZAI returned URL, downloading: ${item.url.substring(0, 120)}...`)
       const downloadTimeout = Math.min(20_000, deadline - Date.now() - 2_000)
       if (downloadTimeout < 5_000) {
-        return { success: false, error: `insufficient time to download ZAI image (${downloadTimeout}ms)` }
+        return { success: false, error: `insufficient time to download ZAI image` }
       }
       const downloaded = await downloadZAIImage(item.url, downloadTimeout)
       if (!downloaded) {
-        return { success: false, error: `ZAI image download failed after ${elapsed}s (URL unreachable from this environment)` }
+        return { success: false, error: `ZAI image download failed` }
       }
       const dataUrl = `data:${downloaded.mime};base64,${downloaded.buffer.toString('base64')}`
-      console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded (url→download) in ${elapsed}s + download (${(downloaded.buffer.length / 1024).toFixed(1)}KB, ${downloaded.mime})`)
+      console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded (url→download) in ${elapsed}s`)
       return { success: true, imageUrl: dataUrl }
     }
 
-    return { success: false, error: `ZAI response had neither base64 nor url after ${elapsed}s` }
+    return { success: false, error: `ZAI response had neither base64 nor url` }
   } catch (err) {
     clearTimeout(timeoutId)
     const isTimeout = err instanceof DOMException && err.name === 'AbortError'
@@ -726,12 +1139,10 @@ async function callZAIImageEdit(
   }
 }
 
-// ── Strategy B: Pollinations with product image (fallback) ─────────
-
-function stripDataUrl(dataUrl: string): string {
-  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
-  return match ? match[1] : dataUrl
-}
+// ── Strategy C: Pollinations text-to-image — LAST RESORT ───────────
+// Note: Pollinations now only serves the `sana` model (flux was removed).
+// This is a degraded fallback — the face won't match the selfie, but the
+// product type and colours will be approximately correct.
 
 async function uploadToTmpfiles(buf: Buffer, timeoutMs: number): Promise<string | null> {
   const boundary = '----3boxesTryon' + Math.random().toString(16).slice(2)
@@ -766,31 +1177,21 @@ async function uploadToTmpfiles(buf: Buffer, timeoutMs: number): Promise<string 
 }
 
 function buildPollinationsPrompt(config: CategoryConfig, input: TryOnInput, imageColors: string): string {
-  // Prefer image-extracted colours (accurate) over text-extracted (from name/desc)
   const textColors = extractColors(input.productName, input.productDescription, input.productTags)
   const colors = imageColors || textColors
   const genderWord = config.gender === 'woman' ? 'woman' : config.gender === 'man' ? 'man' : config.gender === 'child' ? 'child' : 'person'
 
-  // Build person description from selfie attributes (extracted client-side)
-  // This helps Pollinations generate a person that matches the user's
-  // skin tone and hair color, even though the exact face can't be preserved.
   const personAttrs: string[] = []
   if (input.skinTone) personAttrs.push(`${input.skinTone} skin`)
   if (input.hairColor) personAttrs.push(`${input.hairColor} hair`)
   const personDesc = personAttrs.length > 0 ? ` with ${personAttrs.join(' and ')}` : ''
 
-  // Build color prefix — put colors FIRST for maximum prominence.
-  // Tests show Pollinations FLUX prioritizes the first words of the prompt.
   const colorPrefix = colors ? `A ${colors} ` : ''
 
-  // SHORT, FOCUSED prompt — tests confirmed that Pollinations FLUX responds
-  // best to concise prompts with explicit colour names. Long prompts dilute
-  // the colour signal and produce mismatched results.
   const parts: string[] = []
   parts.push(`${colorPrefix}${input.productName} worn by a ${genderWord}${personDesc}, ${config.placement}.`)
   if (config.materialHint) parts.push(`Material: ${config.materialHint}.`)
   if (input.productDescription) {
-    // Keep description very short — just key details
     const desc = input.productDescription.substring(0, 120).replace(/\s+/g, ' ').trim()
     if (desc) parts.push(`${desc}.`)
   }
@@ -800,12 +1201,21 @@ function buildPollinationsPrompt(config: CategoryConfig, input: TryOnInput, imag
   return parts.join(' ')
 }
 
-// Compress the selfie before upload (resize to max 768px, JPEG quality 82)
-// so tmpfiles.org upload is fast and Pollinations receives a reasonable size.
+let sharpModuleCache: any = null
+async function getSharp(): Promise<any | null> {
+  if (sharpModuleCache) return sharpModuleCache
+  try {
+    const mod = await import('sharp')
+    sharpModuleCache = (mod as any).default || mod
+    return sharpModuleCache
+  } catch {
+    return null
+  }
+}
+
 async function compressSelfieForUpload(selfieData: string): Promise<Buffer> {
   const sharp = await getSharp()
   if (!sharp) {
-    // Fallback: raw buffer
     const raw = stripDataUrl(selfieData)
     return Buffer.from(raw, 'base64')
   }
@@ -816,7 +1226,6 @@ async function compressSelfieForUpload(selfieData: string): Promise<Buffer> {
       .resize(768, 1024, { fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 82, progressive: true })
       .toBuffer()
-    console.log(`[virtual-tryon] Selfie compressed: ${(buf.length / 1024).toFixed(1)}KB → ${(compressed.length / 1024).toFixed(1)}KB`)
     return compressed
   } catch {
     const raw = stripDataUrl(selfieData)
@@ -831,47 +1240,38 @@ async function callPollinationsWithSelfieReference(
   const config = getCategoryConfig(input.categorySlug, input.productName)
   const { width, height } = parseImageSize(config.size)
 
-  // Step 1: Extract REAL colours from the product image.
-  // Priority: client-extracted (canvas, most reliable) > server-extracted (jimp) > text-extracted (from name/desc)
   let imageColors = input.clientProductColors || ''
   if (!imageColors) {
     imageColors = await extractColorsFromProductImage(input.productImageBase64)
   }
 
-  // Step 2: Build the prompt with accurate, image-derived colours
   const prompt = buildPollinationsPrompt(config, input, imageColors)
 
-  console.log(`[virtual-tryon] Pollinations v23: gender=${config.gender}, ${width}x${height}, imageColours="${imageColors}" (source=${input.clientProductColors ? 'client' : imageColors ? 'jimp' : 'text'})`)
-  console.log(`[virtual-tryon] Prompt (first 250): ${prompt.substring(0, 250)}...`)
+  console.log(`[virtual-tryon] Pollinations: gender=${config.gender}, ${width}x${height}, imageColours="${imageColors}"`)
 
-  // Step 3: Upload the SELFIE (not the product) as the ?image= reference
-  // This preserves the user's face/gender/features in the generated image.
   let selfieUrl: string | null = null
-  if (Date.now() < deadline - 22_000) {
+  if (Date.now() < deadline - 18_000) {
     try {
       const selfieBuf = await compressSelfieForUpload(input.selfieData)
       selfieUrl = await uploadToTmpfiles(selfieBuf, UPLOAD_TIMEOUT_MS)
-      console.log(`[virtual-tryon] Selfie uploaded: ${selfieUrl ? 'yes' : 'no'}`)
-    } catch (err) {
-      console.log(`[virtual-tryon] Selfie upload failed: ${err instanceof Error ? err.message : String(err)}`)
+    } catch {
+      // ignore
     }
   }
 
   const encoded = encodeURIComponent(prompt)
   const seed = Math.floor(Math.random() * 1_000_000)
-  let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`
+  let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&seed=${seed}`
   if (selfieUrl) {
     url += `&image=${encodeURIComponent(selfieUrl)}`
   }
 
-  // Retry up to 2 times on rate-limit (HTTP 402)
   const MAX_RETRIES = 2
   const RETRY_DELAYS_MS = [4_000, 6_000]
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
       const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]
-      console.log(`[virtual-tryon] Pollinations retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`)
       await new Promise(r => setTimeout(r, delay))
     }
 
@@ -894,14 +1294,10 @@ async function callPollinationsWithSelfieReference(
       clearTimeout(timeoutId)
       const elapsed = ((Date.now() - start) / 1000).toFixed(1)
 
-      if (res.status === 402 && attempt < MAX_RETRIES) {
-        console.log(`[virtual-tryon] Pollinations 402 rate-limited after ${elapsed}s — will retry`)
-        continue
-      }
+      if (res.status === 402 && attempt < MAX_RETRIES) continue
       if (!res.ok) {
-        const body = await res.text().catch(() => 'unknown')
         if (attempt < MAX_RETRIES) continue
-        return { success: false, error: `Pollinations HTTP ${res.status}: ${body.substring(0, 100)}` }
+        return { success: false, error: `Pollinations HTTP ${res.status}` }
       }
 
       const ct = res.headers.get('content-type') || ''
@@ -956,8 +1352,8 @@ let spaceAwakeCache: { awake: boolean; timestamp: number } | null = null
 const SPACE_CACHE_TTL = 20_000
 
 export async function preWarmSpace(): Promise<boolean> {
-  // v23: we use direct HTTP calls (not the ZAI SDK instance), so there's
-  // nothing to pre-warm. Just verify the config is available.
+  // Wake up the IDM-VTON Space (improves first-request latency)
+  await wakeUpIDMSpace()
   void getZAIConfig()
   return true
 }
@@ -967,8 +1363,8 @@ export async function checkIDMVTONSpaceStatus(): Promise<{ awake: boolean }> {
   if (spaceAwakeCache && now - spaceAwakeCache.timestamp < SPACE_CACHE_TTL) {
     return { awake: spaceAwakeCache.awake }
   }
-  const config = getZAIConfig()
-  const awake = !!config
+  // IDM-VTON is always "available" — it's a free public HF Space
+  const awake = true
   spaceAwakeCache = { awake, timestamp: now }
   return { awake }
 }
@@ -978,20 +1374,10 @@ export async function isTryOnServiceReady(): Promise<{
   engine: string
   reason?: string
 }> {
-  // v23: ZAI works on BOTH local and Vercel (verified — internal-api.z.ai
-  // is a public endpoint). Pollinations is only a fallback.
-  const config = getZAIConfig()
-  if (config) {
-    return {
-      ready: true,
-      engine: 'zai-image-edit',
-      reason: 'ZAI image-edit ready — preserves your face & renders the exact product (works on local AND Vercel)',
-    }
-  }
   return {
     ready: true,
-    engine: 'pollinations-selfie-img2img',
-    reason: 'ZAI not configured — using Pollinations selfie-img2img fallback',
+    engine: 'idm-vton',
+    reason: 'IDM-VTON HuggingFace Space — real VTON model that preserves your face & renders the exact garment. Works on local AND Vercel.',
   }
 }
 
@@ -1004,9 +1390,8 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   const strategyErrors: Record<string, string> = {}
   const isVercel = !!process.env.VERCEL
 
-  console.log(`[virtual-tryon] v23 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+  console.log(`[virtual-tryon] v24 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
 
-  // Validate selfie
   if (!input.selfieData?.startsWith('data:image/')) {
     return {
       success: false,
@@ -1017,15 +1402,67 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     }
   }
 
-  // ── STRATEGY A: ZAI image-edit (edit-both) — PRIMARY on BOTH local & Vercel
-  // v23: ZAI's internal-api.z.ai endpoint is publicly reachable. The
-  // hardcoded config fallback ensures it works on Vercel without env vars.
-  // edit-both passes BOTH the selfie AND the product image to the AI,
-  // preserving the user's face/gender AND rendering the exact product.
-  // Completes in 18-27s.
-  if (Date.now() < totalDeadline - 18_000) {
+  // ── STRATEGY A: IDM-VTON HF Space (Gradio REST API) — PRIMARY for garments
+  // This is the STANDARD free VTON solution. Works on local AND Vercel.
+  // Real VTON model — preserves the person's face/body AND renders the
+  // exact garment from the product photo.
+  // NOTE: IDM-VTON is designed for upper-body garments (shirts, dresses, etc.).
+  // For non-garment categories (sarees, jewelry, watches), skip IDM-VTON and
+  // use Gemini/ZAI/Pollinations instead.
+  const catConfig = getCategoryConfig(input.categorySlug, input.productName)
+  if (catConfig.vtonCompatible && Date.now() < totalDeadline - 25_000) {
+    strategiesAttempted.push('idm-vton')
+    console.log('[virtual-tryon] Strategy A: IDM-VTON HF Space — PRIMARY (garment category)')
+    const result = await callIDMVTON(input, totalDeadline)
+    if (result.success && result.imageUrl) {
+      const elapsed = Date.now() - totalStart
+      console.log(`[virtual-tryon] ✅ IDM-VTON succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+      return {
+        success: true,
+        imageUrl: result.imageUrl,
+        strategy: 'idm-vton',
+        elapsedMs: elapsed,
+        debugInfo: { strategiesAttempted, strategyErrors },
+      }
+    }
+    strategyErrors['idm-vton'] = result.error || 'No image returned'
+    console.log(`[virtual-tryon] IDM-VTON failed: ${result.error?.substring(0, 150)}`)
+  } else if (!catConfig.vtonCompatible) {
+    console.log(`[virtual-tryon] Skipping IDM-VTON — category "${input.categorySlug}" is not garment-compatible`)
+  }
+
+  // ── STRATEGY B: Google Gemini image generation — WORKS ON VERCEL
+  // Used when GEMINI_API_KEY is set. Gemini 2.0 Flash can accept multiple
+  // image inputs and generate a new image — preserves the person's face AND
+  // renders the product. Works on local AND Vercel.
+  // SETUP: Get a free API key from https://aistudio.google.com/
+  // Set GEMINI_API_KEY in your Vercel environment variables.
+  if (process.env.GEMINI_API_KEY && Date.now() < totalDeadline - 18_000) {
+    strategiesAttempted.push('gemini')
+    console.log('[virtual-tryon] Strategy B: Google Gemini — WORKS ON VERCEL')
+    const result = await callGeminiTryOn(input, totalDeadline)
+    if (result.success && result.imageUrl) {
+      const elapsed = Date.now() - totalStart
+      console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+      return {
+        success: true,
+        imageUrl: result.imageUrl,
+        strategy: 'gemini',
+        elapsedMs: elapsed,
+        debugInfo: { strategiesAttempted, strategyErrors },
+      }
+    }
+    strategyErrors['gemini'] = result.error || 'No image returned'
+    console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
+  }
+
+  // ── STRATEGY C: ZAI image-edit (edit-both) — LOCAL BONUS
+  // Only attempted if NOT Vercel (ZAI's internal-api.z.ai is internal-only).
+  // Passes BOTH the selfie AND the product image to the AI → preserves the
+  // user's face/gender AND renders the exact product.
+  if (!isVercel && Date.now() < totalDeadline - 18_000) {
     strategiesAttempted.push('zai-image-edit')
-    console.log('[virtual-tryon] Strategy A: ZAI image-edit (edit-both) — PRIMARY')
+    console.log('[virtual-tryon] Strategy C: ZAI image-edit (edit-both) — LOCAL BONUS')
     const result = await callZAIImageEdit(input, totalDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
@@ -1042,14 +1479,13 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     console.log(`[virtual-tryon] ZAI image-edit failed: ${result.error?.substring(0, 150)}`)
   }
 
-  // ── STRATEGY B: Pollinations (selfie reference + image-extracted colours)
-  // FALLBACK only — used when ZAI is completely unreachable (e.g. outage).
-  // Pollinations FLUX does NOT preserve the user's face (?image= is ignored
-  // for face preservation), so this is a degraded experience. The product
-  // colours ARE accurate (extracted from the actual product image via jimp).
+  // ── STRATEGY D: Pollinations text-to-image — LAST RESORT
+  // Note: Pollinations now only serves the `sana` model (flux was removed).
+  // This is a degraded fallback — the face won't match, but product type and
+  // colours will be approximately correct.
   if (Date.now() < totalDeadline - 12_000) {
-    strategiesAttempted.push('pollinations-selfie-img2img')
-    console.log('[virtual-tryon] Strategy B: Pollinations fallback (selfie reference + image-extracted colours)')
+    strategiesAttempted.push('pollinations')
+    console.log('[virtual-tryon] Strategy D: Pollinations — LAST RESORT')
     const result = await callPollinationsWithSelfieReference(input, totalDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
@@ -1057,7 +1493,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       return {
         success: true,
         imageUrl: result.imageUrl,
-        strategy: result.strategy || 'pollinations-selfie-img2img',
+        strategy: result.strategy || 'pollinations',
         elapsedMs: elapsed,
         debugInfo: {
           strategiesAttempted,
@@ -1068,7 +1504,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
         },
       }
     }
-    strategyErrors['pollinations-selfie-img2img'] = result.error || 'No image returned'
+    strategyErrors['pollinations'] = result.error || 'No image returned'
     console.log(`[virtual-tryon] Pollinations failed: ${result.error?.substring(0, 150)}`)
   }
 

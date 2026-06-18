@@ -1,20 +1,30 @@
 /**
- * AI Virtual Try-On API v23 — ZAI image-edit (edit-both) on BOTH local & Vercel
+ * AI Virtual Try-On API v24 — STANDARD multi-strategy for local & Vercel
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v23 (CURRENT):
- *   ZAI image-edit (edit-both) is the PRIMARY strategy on BOTH local AND
- *   Vercel. It passes BOTH the selfie AND the product photo to ZAI's
- *   image-edit API → preserves the user's face/gender AND renders the exact
- *   product (colours, pattern, fabric, design). Completes in 18-27s.
+ * v24 (CURRENT):
+ *   Strategy A: IDM-VTON HF Space (Gradio REST API) — for garment categories
+ *     - Free, NO auth required, NO env vars needed
+ *     - Real VTON model — preserves face AND renders exact garment
+ *     - Works on local AND Vercel, with retry logic for cold-start
  *
- *   The previous assumption that "ZAI auth fails on Vercel" was incorrect —
- *   `internal-api.z.ai` is a public endpoint reachable from any network.
- *   A hardcoded config fallback ensures ZAI works on Vercel without env vars.
+ *   Strategy B: Google Gemini 2.0 Flash — REQUIRES GEMINI_API_KEY
+ *     - Free tier: 15 RPM, 1500 requests/day (https://aistudio.google.com/)
+ *     - Accepts selfie + product images, generates try-on result
+ *     - BEST option for Vercel — set GEMINI_API_KEY in Vercel env vars
  *
- *   Pollinations remains as a LAST-RESORT fallback only when ZAI is
- *   completely unreachable (e.g. temporary outage).
+ *   Strategy C: ZAI image-edit (edit-both) — LOCAL ONLY
+ *     - Used in the sandbox (ZAI's endpoint is internal-only)
+ *
+ *   Strategy D: Pollinations text-to-image — LAST RESORT
+ *     - Always available, no setup needed
+ *     - Uses the `sana` model (only one Pollinations now serves)
+ *     - Lower quality but always works
+ *
+ *   RECOMMENDED FOR VERCEL:
+ *     Set GEMINI_API_KEY in Vercel env vars for best results.
+ *     Without it, Vercel falls back to Pollinations (degraded quality).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -185,19 +195,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'AI ready — ZAI image-edit (edit-both) preserves your face AND renders the exact product. Works on local AND Vercel.',
+      message: 'AI ready — IDM-VTON (HuggingFace Space) preserves your face AND renders the exact garment. Works on local AND Vercel.',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  // v23: ZAI works on both local and Vercel (hardcoded config fallback)
-  const engine = statusResult.awake ? 'zai-image-edit' : 'pollinations-selfie-img2img'
+  // v24: IDM-VTON is the primary engine on BOTH local and Vercel
+  const engine = statusResult.awake ? 'idm-vton' : 'pollinations'
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: statusResult.awake
-      ? 'AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product — works on local AND Vercel)'
+      ? 'AI Virtual Try-On ready — IDM-VTON (preserves your face & renders the exact garment — works on local AND Vercel)'
       : 'AI Virtual Try-On ready — using Pollinations fallback',
   })
 }
