@@ -221,6 +221,116 @@ function extractSelfieAttributes(dataUrl: string): Promise<{ skinTone: string; h
   });
 }
 
+// ── Helper: Extract dominant colors from product image ────────────
+// Client-side canvas-based color extraction. More reliable than server-side
+// jimp on Vercel (where the fetched image may be compressed). Returns a
+// comma-separated list of color names.
+
+function rgbToProductColorName(r: number, g: number, b: number): string {
+  const rn = r / 255, gn = g / 255, bn = b / 255
+  const max = Math.max(rn, gn, bn)
+  const min = Math.min(rn, gn, bn)
+  const delta = max - min
+  const v = max
+  const s = max === 0 ? 0 : delta / max
+  let h = 0
+  if (delta !== 0) {
+    if (max === rn) h = ((gn - bn) / delta) % 6
+    else if (max === gn) h = (bn - rn) / delta + 2
+    else h = (rn - gn) / delta + 4
+    h *= 60
+    if (h < 0) h += 360
+  }
+  if (s < 0.12) {
+    if (v < 0.15) return 'black'
+    if (v > 0.92) return 'white'
+    if (v < 0.4) return 'charcoal'
+    if (v < 0.65) return 'grey'
+    return 'silver'
+  }
+  const lightPrefix = v > 0.6 ? 'bright ' : v < 0.25 ? 'dark ' : ''
+  if (h < 15 || h >= 345) return `${lightPrefix}red`
+  if (h < 30) return v < 0.4 ? 'maroon' : 'red'
+  if (h < 45) return v < 0.4 ? 'burgundy' : 'orange-red'
+  if (h < 60) return `${lightPrefix}orange`
+  if (h < 70) return 'mustard yellow'
+  if (h < 85) return `${lightPrefix}yellow`
+  if (h < 100) return v > 0.6 ? 'lime' : 'olive'
+  if (h < 150) return `${lightPrefix}green`
+  if (h < 175) return 'emerald green'
+  if (h < 195) return 'teal'
+  if (h < 215) return 'turquoise'
+  if (h < 240) return `${lightPrefix}blue`
+  if (h < 260) return 'navy blue'
+  if (h < 285) return 'violet'
+  if (h < 310) return v > 0.6 ? 'pink' : 'purple'
+  if (h < 335) return v > 0.7 ? 'rose pink' : 'magenta'
+  return `${lightPrefix}red`
+}
+
+function extractProductColors(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    try {
+      const img = document.createElement('img');
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const w = Math.min(img.naturalWidth, 64);
+          const h = Math.min(img.naturalHeight, 64);
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { resolve(''); return; }
+          ctx.drawImage(img, 0, 0, w, h);
+          const data = ctx.getImageData(0, 0, w, h).data;
+
+          const buckets = new Map<string, { count: number; satSum: number; r: number; g: number; b: number }>();
+          for (let i = 0; i < w * h; i++) {
+            const offset = i * 4;
+            const r = data[offset], g = data[offset + 1], b = data[offset + 2];
+            if (data[offset + 3] < 128) continue;
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
+            const delta = max - min;
+            const sat = max === 0 ? 0 : delta / max;
+            if (max > 235 && delta < 15) continue;
+            if (max < 25) continue;
+            if (sat < 0.18) continue;
+            const key = `${r >> 5}-${g >> 5}-${b >> 5}`;
+            const existing = buckets.get(key);
+            if (existing) {
+              existing.count++;
+              existing.satSum += sat;
+              existing.r += r; existing.g += g; existing.b += b;
+            } else {
+              buckets.set(key, { count: 1, satSum: sat, r, g, b });
+            }
+          }
+          if (buckets.size === 0) { resolve(''); return; }
+          const sorted = Array.from(buckets.values()).sort((a, b) =>
+            (b.count * (b.satSum / b.count)) - (a.count * (a.satSum / a.count))
+          );
+          const names = sorted.slice(0, 3).map(bk =>
+            rgbToProductColorName(Math.round(bk.r / bk.count), Math.round(bk.g / bk.count), Math.round(bk.b / bk.count))
+          );
+          // Deduplicate by base name
+          const byBase = new Map<string, string>();
+          for (const name of names) {
+            const base = name.replace(/^(bright |dark )/, '').trim();
+            const existing = byBase.get(base);
+            if (!existing) byBase.set(base, name);
+            else if (name.startsWith('bright ') && !existing.startsWith('bright ')) byBase.set(base, name);
+          }
+          const unique = Array.from(byBase.values()).slice(0, 2);
+          resolve(unique.join(', '));
+        } catch { resolve(''); }
+      };
+      img.onerror = () => resolve('');
+      img.src = dataUrl;
+    } catch { resolve(''); }
+  });
+}
+
 // ── Helper: Fetch image as base64 ──────────────────────────────────
 
 async function fetchImageAsBase64(url: string): Promise<string | null> {
@@ -631,6 +741,21 @@ export function TryOnDialog({
       }
     } catch {}
 
+    // Extract dominant colors from product image (client-side canvas — more
+    // reliable than server-side jimp on Vercel where images may be compressed)
+    let clientProductColors = '';
+    if (productImageBase64) {
+      try {
+        clientProductColors = await Promise.race([
+          extractProductColors(productImageBase64),
+          new Promise<string>(r => setTimeout(() => r(''), 3000)),
+        ]);
+        if (clientProductColors) {
+          console.log(`[try-on] Client-extracted product colors: ${clientProductColors}`);
+        }
+      } catch {}
+    }
+
     // Start progress simulation
     progressIntervalRef.current = setInterval(() => {
       setProgressPercent(prev => {
@@ -679,6 +804,7 @@ export function TryOnDialog({
           productTags: productTags || [],
           skinTone: selfieAttributes.skinTone || '',
           hairColor: selfieAttributes.hairColor || '',
+          clientProductColors: clientProductColors || '',
         }),
         signal: controller.signal,
       });

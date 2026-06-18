@@ -64,6 +64,7 @@ export interface TryOnInput {
   productTags?: string[]
   skinTone?: string
   hairColor?: string
+  clientProductColors?: string
 }
 
 export interface TryOnResult {
@@ -778,13 +779,15 @@ function buildPollinationsPrompt(config: CategoryConfig, input: TryOnInput, imag
   if (input.hairColor) personAttrs.push(`${input.hairColor} hair`)
   const personDesc = personAttrs.length > 0 ? ` with ${personAttrs.join(' and ')}` : ''
 
+  // Build color prefix — put colors FIRST for maximum prominence.
+  // Tests show Pollinations FLUX prioritizes the first words of the prompt.
+  const colorPrefix = colors ? `A ${colors} ` : ''
+
   // SHORT, FOCUSED prompt — tests confirmed that Pollinations FLUX responds
   // best to concise prompts with explicit colour names. Long prompts dilute
   // the colour signal and produce mismatched results.
   const parts: string[] = []
-  parts.push(`Virtual try-on photo of a ${genderWord}${personDesc} ${config.placement}.`)
-  parts.push(`Wearing "${input.productName}".`)
-  if (colors) parts.push(`The product colour is ${colors}.`)
+  parts.push(`${colorPrefix}${input.productName} worn by a ${genderWord}${personDesc}, ${config.placement}.`)
   if (config.materialHint) parts.push(`Material: ${config.materialHint}.`)
   if (input.productDescription) {
     // Keep description very short — just key details
@@ -828,13 +831,17 @@ async function callPollinationsWithSelfieReference(
   const config = getCategoryConfig(input.categorySlug, input.productName)
   const { width, height } = parseImageSize(config.size)
 
-  // Step 1: Extract REAL colours from the product image (not just text)
-  const imageColors = await extractColorsFromProductImage(input.productImageBase64)
+  // Step 1: Extract REAL colours from the product image.
+  // Priority: client-extracted (canvas, most reliable) > server-extracted (jimp) > text-extracted (from name/desc)
+  let imageColors = input.clientProductColors || ''
+  if (!imageColors) {
+    imageColors = await extractColorsFromProductImage(input.productImageBase64)
+  }
 
   // Step 2: Build the prompt with accurate, image-derived colours
   const prompt = buildPollinationsPrompt(config, input, imageColors)
 
-  console.log(`[virtual-tryon] Pollinations v22: gender=${config.gender}, ${width}x${height}, imageColours="${imageColors}"`)
+  console.log(`[virtual-tryon] Pollinations v23: gender=${config.gender}, ${width}x${height}, imageColours="${imageColors}" (source=${input.clientProductColors ? 'client' : imageColors ? 'jimp' : 'text'})`)
   console.log(`[virtual-tryon] Prompt (first 250): ${prompt.substring(0, 250)}...`)
 
   // Step 3: Upload the SELFIE (not the product) as the ?image= reference
