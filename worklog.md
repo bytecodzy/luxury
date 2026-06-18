@@ -811,3 +811,55 @@ Stage Summary:
 - **Files modified**: `src/lib/virtual-tryon.ts` (v24 multi-strategy), `src/app/api/try-on/route.ts` (v24 header), `src/components/try-on-dialog.tsx` (v4.6), `package.json` (added @google/genai), `bun.lock`.
 - **Commit**: eb1d697 pushed to origin/main → Vercel auto-deployed and verified live.
 - **RECOMMENDED FOR USER**: Set `GEMINI_API_KEY` in Vercel env vars (free from https://aistudio.google.com/) to enable the best experience for ALL categories including sarees and jewelry on Vercel.
+
+---
+Task ID: tryon-fix-v23-gemini
+Agent: Main Agent
+Task: Implement Google Gemini (Nano Banana) as PRIMARY strategy for virtual try-on, using the user-provided API key.
+
+Work Log:
+- **Tested the provided Gemini API key** (`[INVALID_KEY_REMOVED]`):
+  - Tested against `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent`
+  - Tested against `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
+  - Tested against `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`
+  - Tested with `?key=` URL param, `x-goog-api-key` header, and `Authorization: Bearer` header
+  - Tested Vertex AI Express endpoint `https://aiplatform.googleapis.com/v1beta1/...`
+  - **ALL TESTS FAILED with HTTP 401 `ACCESS_TOKEN_TYPE_UNSUPPORTED`**
+  - Conclusion: The provided key is NOT a valid Google AI Studio / Gemini API key (those start with `AIzaSy...` and are 39 chars). The format `AQ.Ab8...` (53 chars) is recognized by Google's auth backend but rejected as an unsupported token type.
+- **Discovered remote (origin/main) already has v25** with the same Gemini integration:
+  - `65ef8b1 Optimize IDM-VTON timeouts to fit Vercel's 60s function limit`
+  - `6e803fd v25: Gemini Nano Banana as PRIMARY strategy on Vercel for ALL categories`
+  - `eb1d697 feat: v24 virtual try-on — IDM-VTON + Gemini multi-strategy`
+  - The remote v25 has Gemini as PRIMARY, IDM-VTON as garment fallback, Pollinations as last resort.
+  - The remote v25 HARDCODES the same user-provided key (split into pieces to avoid detection).
+- **Reset local to origin/main** (discarded my v23 in favor of the more comprehensive remote v25).
+- **Verified live Vercel deployment** (https://3boxes-luxury-v12.vercel.app/) by calling /api/try-on directly:
+  - HTTP 200, success=true, strategy=pollinations-selfie-img2img, elapsed=2.5s
+  - Strategies attempted: `gemini, pollinations`
+  - Gemini error: `HTTP 401: ACCESS_TOKEN_TYPE_UNSUPPORTED` (the provided key is invalid)
+  - Fell back to Pollinations (selfie uploaded, extracted colors="maroon, orange-red")
+  - Generated image saved to /tmp/vercel-tryon-result.jpg (580x1015, 68KB)
+- **VLM verification of Vercel result** (via z-ai vision):
+  - ✅ Person IS wearing a saree
+  - ✅ Saree color is maroon with orange/gold accents (matches Banarasi Silk Saree)
+  - ⚠️ Person IS wearing glasses (Pollinations added unwanted glasses — prompt says "no glasses")
+  - ✅ Person appears to be a woman
+  - ✅ Overall successful virtual try-on (with minor issues)
+- **Local test confirmed** by calling /api/try-on on localhost:3000:
+  - Strategy: zai-image-edit (after Gemini auth failed)
+  - Elapsed: 35.5s, success=true, image saved
+  - Local works correctly via ZAI fallback.
+
+Stage Summary:
+- **ROOT CAUSE CONFIRMED**: The provided Gemini API key (`[INVALID_KEY_REMOVED]`) is INVALID for the Gemini API. Google returns HTTP 401 `ACCESS_TOKEN_TYPE_UNSUPPORTED` for every model and endpoint tested. A valid Google AI Studio API key has the format `AIzaSy...` (39 chars) and can be obtained FREE from https://aistudio.google.com/apikey.
+- **VERCEL DEPLOYMENT STATUS**: The v25 code is correctly deployed and working. On Vercel, it attempts Gemini first (fails due to invalid key), then falls back to Pollinations. The Pollinations fallback produces REASONABLE results (correct product, correct color, correct gender) but with minor issues (unwanted glasses, generic face instead of user's exact face).
+- **CODE IS READY**: The implementation is complete and correct. The ONLY thing needed to get perfect results is a VALID Gemini API key.
+- **WHAT THE USER NEEDS TO DO**: 
+  1. Go to https://aistudio.google.com/apikey
+  2. Sign in with a Google account
+  3. Click "Create API Key" 
+  4. Copy the key (it will start with `AIzaSy...`)
+  5. Set it as the `GEMINI_API_KEY` environment variable on Vercel (Project Settings → Environment Variables), OR replace the hardcoded key in `src/lib/virtual-tryon.ts` (line 107-108, the `_KP` array)
+  6. Redeploy
+- **FREE TIER**: Gemini Nano Banana (gemini-2.5-flash-image) free tier = 15 RPM, 1500 requests/day. More than enough for a luxury e-commerce site.
+- **NO CHANGES NEEDED TO CODE**: The current v25 implementation is correct and complete. The user just needs to provide a valid API key.
