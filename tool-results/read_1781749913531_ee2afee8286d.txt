@@ -1,0 +1,981 @@
+     1→     1→/**
+     2→     2→ * Virtual Try-On Engine v22 — Direct ZAI + Pollinations (Selfie Reference + Image Colours)
+     3→     3→ *
+     4→     4→ * ─────────────────────────────────────────────────────────────────────────
+     5→     5→ *  WHY v22?
+     6→     6→ *  ─────────────────────────────────────────────────────────────────────────
+     7→     7→ *  v21 used the PRODUCT image as the Pollinations `?image=` reference on
+     8→     8→ *  Vercel. This caused TWO problems:
+     9→     9→ *    1. The user's SELFIE was never sent to Pollinations → the generated
+    10→    10→ *       person didn't match the uploaded selfie (wrong face, wrong gender
+    11→    11→ *       features, wrong hair).
+    12→    12→ *    2. The product colours came from the product NAME/DESCRIPTION text,
+    13→    13→ *       not the actual product IMAGE → the generated product had the wrong
+    14→    14→ *       colours (e.g. "maroon" from the name when the actual photo was
+    15→    15→ *       bright red).
+    16→    16→ *
+    17→    17→ *  v22 fixes BOTH issues:
+    18→    18→ *    1. Uploads the user's SELFIE as the Pollinations `?image=` reference
+    19→    19→ *       so the generated person preserves the user's face, gender, skin
+    20→    20→ *       tone, hairstyle, and features.
+    21→    21→ *    2. Extracts the REAL dominant colours from the actual product IMAGE
+    22→    22→ *       using sharp (lazy-loaded) and includes them in the prompt → the
+    23→    23→ *       generated product matches the actual product's colours.
+    24→    24→ *
+    25→    25→ *  ARCHITECTURE:
+    26→    26→ *    Client (browser) POST /api/try-on
+    27→    27→ *      └─► performVirtualTryOn()  (THIS FILE)
+    28→    28→ *            ├─► Strategy A: Direct ZAI image-edit (LOCAL / SANDBOX only)
+    29→    29→ *            │     • Explicit config from /etc/.z-ai-config
+    30→    30→ *            │     • edit-both: selfie + product image → preserves face + product
+    31→    31→ *            │     • 20-27s, high quality
+    32→    32→ *            └─► Strategy B: Pollinations selfie-img2img (VERCEL + fallback)
+    33→    33→ *                  • Extract REAL colours from product image via sharp
+    34→    34→ *                  • Upload SELFIE → use as ?image= reference
+    35→    35→ *                  • Hyper-detailed prompt with image-extracted colours
+    36→    36→ *                  • Preserves user's face/gender/features
+    37→    37→ *                  • 5-15s, always works
+    38→    38→ *
+    39→    39→ *  ENVIRONMENT BEHAVIOUR:
+    40→    40→ *    • LOCAL / SANDBOX: Direct ZAI edit-both (best quality, preserves face
+    41→    41→ *      AND product). Falls back to Pollinations selfie-img2img if ZAI down.
+    42→    42→ *    • VERCEL: Pollinations selfie-img2img (ZAI auth fails on public API).
+    43→    43→ *      The user's selfie is the reference → person matches. The product
+    44→    44→ *      colours are extracted from the actual product image → product matches.
+    45→    45→ * ─────────────────────────────────────────────────────────────────────────
+    46→    46→ */
+    47→    47→
+    48→    48→import fs from 'fs'
+    49→    49→import path from 'path'
+    50→    50→import os from 'os'
+    51→    51→
+    52→    52→// ── Types ──────────────────────────────────────────────────────────
+    53→    53→
+    54→    54→export type ImageSize =
+    55→    55→  | '1024x1024'
+    56→    56→  | '768x1344'
+    57→    57→  | '864x1152'
+    58→    58→  | '1344x768'
+    59→    59→  | '1152x864'
+    60→    60→  | '1440x720'
+    61→    61→  | '720x1440'
+    62→    62→
+    63→    63→export interface TryOnInput {
+    64→    64→  selfieData: string
+    65→    65→  productImageBase64: string
+    66→    66→  productName: string
+    67→    67→  categorySlug: string
+    68→    68→  productDescription?: string
+    69→    69→  productTags?: string[]
+    70→    70→}
+    71→    71→
+    72→    72→export interface TryOnResult {
+    73→    73→  success: boolean
+    74→    74→  imageUrl?: string
+    75→    75→  error?: string
+    76→    76→  errorCode?: string
+    77→    77→  strategy?: string
+    78→    78→  elapsedMs: number
+    79→    79→  debugInfo?: {
+    80→    80→    strategiesAttempted: string[]
+    81→    81→    strategyErrors: Record<string, string>
+    82→    82→    extractedColors?: string
+    83→    83→    promptPreview?: string
+    84→    84→    selfieUploaded?: boolean
+    85→    85→  }
+    86→    86→}
+    87→    87→
+    88→    88→// ── Timeouts ───────────────────────────────────────────────────────
+    89→    89→
+    90→    90→const TOTAL_TIMEOUT_MS = 55_000 // hard cap (client times out at 55s)
+    91→    91→const ZAI_EDIT_TIMEOUT_MS = 45_000
+    92→    92→const POLLINATIONS_TIMEOUT_MS = 40_000
+    93→    93→const UPLOAD_TIMEOUT_MS = 12_000
+    94→    94→
+    95→    95→// ── ZAI Config (explicit, from /etc/.z-ai-config) ──────────────────
+    96→    96→
+    97→    97→interface ZAIConfig {
+    98→    98→  baseUrl: string
+    99→    99→  apiKey: string
+   100→   100→  chatId: string
+   101→   101→  token: string
+   102→   102→  userId: string
+   103→   103→}
+   104→   104→
+   105→   105→let cachedZAIConfig: ZAIConfig | null | undefined = undefined
+   106→   106→
+   107→   107→function getZAIConfig(): ZAIConfig | null {
+   108→   108→  if (cachedZAIConfig !== undefined) return cachedZAIConfig
+   109→   109→
+   110→   110→  // On Vercel, ZAI auth fails on the public API — skip entirely
+   111→   111→  if (process.env.VERCEL) {
+   112→   112→    cachedZAIConfig = null
+   113→   113→    return null
+   114→   114→  }
+   115→   115→
+   116→   116→  // Try env vars first
+   117→   117→  if (process.env.ZAI_BASE_URL && process.env.ZAI_API_KEY) {
+   118→   118→    cachedZAIConfig = {
+   119→   119→      baseUrl: process.env.ZAI_BASE_URL,
+   120→   120→      apiKey: process.env.ZAI_API_KEY,
+   121→   121→      chatId: process.env.ZAI_CHAT_ID || '',
+   122→   122→      token: process.env.ZAI_TOKEN || '',
+   123→   123→      userId: process.env.ZAI_USER_ID || '',
+   124→   124→    }
+   125→   125→    return cachedZAIConfig
+   126→   126→  }
+   127→   127→
+   128→   128→  // Read from config files (sandbox)
+   129→   129→  const configPaths = [
+   130→   130→    '/etc/.z-ai-config',
+   131→   131→    path.join(process.cwd(), '.z-ai-config'),
+   132→   132→    path.join(os.homedir(), '.z-ai-config'),
+   133→   133→  ]
+   134→   134→  for (const filePath of configPaths) {
+   135→   135→    try {
+   136→   136→      const configStr = fs.readFileSync(filePath, 'utf-8')
+   137→   137→      const config = JSON.parse(configStr)
+   138→   138→      if (config.baseUrl && config.apiKey) {
+   139→   139→        cachedZAIConfig = {
+   140→   140→          baseUrl: config.baseUrl,
+   141→   141→          apiKey: config.apiKey,
+   142→   142→          chatId: config.chatId || '',
+   143→   143→          token: config.token || '',
+   144→   144→          userId: config.userId || '',
+   145→   145→        }
+   146→   146→        console.log(`[virtual-tryon] ZAI config loaded from ${filePath}`)
+   147→   147→        return cachedZAIConfig
+   148→   148→      }
+   149→   149→    } catch {
+   150→   150→      // continue
+   151→   151→    }
+   152→   152→  }
+   153→   153→
+   154→   154→  cachedZAIConfig = null
+   155→   155→  return null
+   156→   156→}
+   157→   157→
+   158→   158→// ── ZAI SDK instance (cached, with explicit config) ────────────────
+   159→   159→
+   160→   160→let zaiInstanceCache: any = null
+   161→   161→
+   162→   162→async function getZAI(): Promise<any | null> {
+   163→   163→  if (process.env.VERCEL) return null
+   164→   164→  if (zaiInstanceCache) return zaiInstanceCache
+   165→   165→
+   166→   166→  const config = getZAIConfig()
+   167→   167→  if (!config) return null
+   168→   168→
+   169→   169→  try {
+   170→   170→    const ZAIModule = await import('z-ai-web-dev-sdk')
+   171→   171→    const ZAI = (ZAIModule as any).default || (ZAIModule as any)
+   172→   172→    zaiInstanceCache = new ZAI({
+   173→   173→      baseUrl: config.baseUrl,
+   174→   174→      apiKey: config.apiKey,
+   175→   175→      chatId: config.chatId,
+   176→   176→      token: config.token,
+   177→   177→      userId: config.userId,
+   178→   178→    })
+   179→   179→    console.log('[virtual-tryon] ZAI SDK instance created with explicit config')
+   180→   180→    return zaiInstanceCache
+   181→   181→  } catch (err) {
+   182→   182→    console.log('[virtual-tryon] ZAI SDK init failed:', err instanceof Error ? err.message : String(err))
+   183→   183→    return null
+   184→   184→  }
+   185→   185→}
+   186→   186→
+   187→   187→// ── Category config ────────────────────────────────────────────────
+   188→   188→
+   189→   189→interface CategoryConfig {
+   190→   190→  gender: 'woman' | 'man' | 'child' | 'person'
+   191→   191→  framing: string
+   192→   192→  placement: string
+   193→   193→  size: ImageSize
+   194→   194→  materialHint: string
+   195→   195→}
+   196→   196→
+   197→   197→function getCategoryConfig(categorySlug: string, productName: string): CategoryConfig {
+   198→   198→  const slug = (categorySlug || '').toLowerCase()
+   199→   199→  const name = (productName || '').toLowerCase()
+   200→   200→
+   201→   201→  // Women's sarees
+   202→   202→  if (slug.includes('saree')) {
+   203→   203→    return {
+   204→   204→      gender: 'woman',
+   205→   205→      framing: 'full-body fashion photograph from head to toe',
+   206→   206→      placement: 'draped in the saree in elegant Indian style with pallu over the left shoulder, matching blouse, properly pleated at the waist',
+   207→   207→      size: '768x1344',
+   208→   208→      materialHint: 'flowing silk fabric with natural drape and sheen',
+   209→   209→    }
+   210→   210→  }
+   211→   211→
+   212→   212→  // Women's jewelry
+   213→   213→  if (slug.includes('jewel') && (slug.includes('women') || !slug.includes('men'))) {
+   214→   214→    let placement = 'wearing the jewelry piece elegantly, the jewelry clearly visible'
+   215→   215→    if (name.includes('earring') || name.includes('jhumka') || name.includes('stud'))
+   216→   216→      placement = 'wearing the earrings on both earlobes, clearly visible and properly positioned'
+   217→   217→    else if (name.includes('necklace') || name.includes('choker') || name.includes('pendant') || name.includes('temple') || name.includes('haar'))
+   218→   218→      placement = 'wearing the necklace around the neck, sitting naturally at the collarbone'
+   219→   219→    else if (name.includes('bracelet') || name.includes('bangle') || name.includes('cuff') || name.includes('kada'))
+   220→   220→      placement = 'wearing the bracelet on the wrist, properly fitted'
+   221→   221→    else if (name.includes('ring'))
+   222→   222→      placement = 'wearing the ring on the finger, clearly visible'
+   223→   223→    else if (name.includes('set') || name.includes('bridal'))
+   224→   224→      placement = 'wearing a matching jewelry set — necklace around the neck and earrings on both earlobes'
+   225→   225→    return {
+   226→   226→      gender: 'woman',
+   227→   227→      framing: 'upper-body beauty photograph, chest up',
+   228→   228→      placement,
+   229→   229→      size: '864x1152',
+   230→   230→      materialHint: 'polished metal with gemstones, intricate craftsmanship, sparkling highlights',
+   231→   231→    }
+   232→   232→  }
+   233→   233→
+   234→   234→  // Women's fashion
+   235→   235→  if (slug.includes('women-fashion') || (slug.includes('fashion') && !slug.includes('men'))) {
+   236→   236→    return {
+   237→   237→      gender: 'woman',
+   238→   238→      framing: 'full-body fashion photograph from head to toe',
+   239→   239→      placement: 'wearing the outfit elegantly with proper fit, natural fabric drape, and realistic folds',
+   240→   240→      size: '768x1344',
+   241→   241→      materialHint: 'quality fabric with natural drape and texture',
+   242→   242→    }
+   243→   243→  }
+   244→   244→
+   245→   245→  // Women's fragrances
+   246→   246→  if (slug.includes('fragrance') && (slug.includes('women') || !slug.includes('men'))) {
+   247→   247→    return {
+   248→   248→      gender: 'woman',
+   249→   249→      framing: 'upper-body photograph',
+   250→   250→      placement: 'holding the fragrance bottle elegantly in one hand, the bottle clearly visible',
+   251→   251→      size: '864x1152',
+   252→   252→      materialHint: 'glass bottle with refined design',
+   253→   253→    }
+   254→   254→  }
+   255→   255→
+   256→   256→  // Women's accessories
+   257→   257→  if (slug.includes('women-accessories') || (slug.includes('accessories') && !slug.includes('men'))) {
+   258→   258→    return {
+   259→   259→      gender: 'woman',
+   260→   260→      framing: 'upper-body to three-quarter photograph',
+   261→   261→      placement: 'wearing or holding the accessory naturally',
+   262→   262→      size: '864x1152',
+   263→   263→      materialHint: 'quality material with refined finish',
+   264→   264→    }
+   265→   265→  }
+   266→   266→
+   267→   267→  // Men's watches
+   268→   268→  if (slug.includes('watch')) {
+   269→   269→    return {
+   270→   270→      gender: 'man',
+   271→   271→      framing: 'waist-up photograph with the wrist visible',
+   272→   272→      placement: 'wearing the watch on the left wrist, the watch face clearly visible',
+   273→   273→      size: '864x1152',
+   274→   274→      materialHint: 'precision timepiece with metal or leather strap, detailed dial',
+   275→   275→    }
+   276→   276→  }
+   277→   277→
+   278→   278→  // Men's shirts/t-shirts
+   279→   279→  if (slug.includes('shirt') || slug.includes('tshirt') || slug.includes('t-shirt')) {
+   280→   280→    return {
+   281→   281→      gender: 'man',
+   282→   282→      framing: 'full-body fashion photograph',
+   283→   283→      placement: 'wearing the shirt on the torso with a natural fit, fabric draping naturally',
+   284→   284→      size: '768x1344',
+   285→   285→      materialHint: 'soft cotton fabric with natural drape',
+   286→   286→    }
+   287→   287→  }
+   288→   288→
+   289→   289→  // Men's fragrances
+   290→   290→  if (slug.includes('fragrance') && slug.includes('men')) {
+   291→   291→    return {
+   292→   292→      gender: 'man',
+   293→   293→      framing: 'upper-body photograph',
+   294→   294→      placement: 'holding the fragrance bottle elegantly',
+   295→   295→      size: '864x1152',
+   296→   296→      materialHint: 'glass bottle with refined design',
+   297→   297→    }
+   298→   298→  }
+   299→   299→
+   300→   300→  // Men's accessories
+   301→   301→  if (slug.includes('men-accessories') || (slug.includes('accessories') && slug.includes('men'))) {
+   302→   302→    return {
+   303→   303→      gender: 'man',
+   304→   304→      framing: 'upper-body to three-quarter photograph',
+   305→   305→      placement: 'wearing or holding the accessory naturally',
+   306→   306→      size: '864x1152',
+   307→   307→      materialHint: 'quality material with refined finish',
+   308→   308→    }
+   309→   309→  }
+   310→   310→
+   311→   311→  // Kids
+   312→   312→  if (slug.includes('kid')) {
+   313→   313→    return {
+   314→   314→      gender: 'child',
+   315→   315→      framing: 'full-body photograph of a child or teenager',
+   316→   316→      placement: 'wearing the outfit with proper fit and natural fabric drape',
+   317→   317→      size: '768x1344',
+   318→   318→      materialHint: 'comfortable fabric with natural drape',
+   319→   319→    }
+   320→   320→  }
+   321→   321→
+   322→   322→  // Default
+   323→   323→  return {
+   324→   324→    gender: 'person',
+   325→   325→    framing: 'upper-body to three-quarter photograph',
+   326→   326→    placement: 'wearing or holding the product naturally and elegantly',
+   327→   327→    size: '864x1152',
+   328→   328→    materialHint: 'premium material with refined finish',
+   329→   329→  }
+   330→   330→}
+   331→   331→
+   332→   332→// ── Color extraction ───────────────────────────────────────────────
+   333→   333→
+   334→   334→const COLOR_WORDS = [
+   335→   335→  'red', 'crimson', 'maroon', 'burgundy', 'wine', 'blue', 'navy', 'teal', 'turquoise',
+   336→   336→  'green', 'emerald', 'olive', 'mint', 'yellow', 'mustard', 'golden', 'gold', 'amber',
+   337→   337→  'orange', 'coral', 'peach', 'pink', 'rose', 'magenta', 'fuchsia', 'purple', 'violet',
+   338→   338→  'lavender', 'plum', 'brown', 'tan', 'beige', 'camel', 'black', 'white', 'ivory',
+   339→   339→  'cream', 'pearl', 'grey', 'gray', 'silver', 'charcoal', 'champagne', 'ruby', 'sapphire',
+   340→   340→]
+   341→   341→
+   342→   342→function extractColors(name: string, description?: string, tags?: string[]): string {
+   343→   343→  const text = `${name} ${description || ''} ${(tags || []).join(' ')}`.toLowerCase()
+   344→   344→  const found = new Set<string>()
+   345→   345→  for (const color of COLOR_WORDS) {
+   346→   346→    if (text.includes(color)) found.add(color)
+   347→   347→  }
+   348→   348→  return Array.from(found).slice(0, 3).join(', ')
+   349→   349→}
+   350→   350→
+   351→   351→// ── Image-based color extraction (sharp) ───────────────────────────
+   352→   352→// Extracts the REAL dominant colours from the product photo so the
+   353→   353→// Pollinations prompt describes the ACTUAL product, not just the name.
+   354→   354→
+   355→   355→let sharpModuleCache: any = null
+   356→   356→async function getSharp(): Promise<any | null> {
+   357→   357→  if (sharpModuleCache) return sharpModuleCache
+   358→   358→  try {
+   359→   359→    const mod = await import('sharp')
+   360→   360→    sharpModuleCache = (mod as any).default || mod
+   361→   361→    return sharpModuleCache
+   362→   362→  } catch {
+   363→   363→    return null
+   364→   364→  }
+   365→   365→}
+   366→   366→
+   367→   367→function rgbToColorName(r: number, g: number, b: number): string {
+   368→   368→  // Convert RGB to HSV for better color naming
+   369→   369→  const rn = r / 255, gn = g / 255, bn = b / 255
+   370→   370→  const max = Math.max(rn, gn, bn)
+   371→   371→  const min = Math.min(rn, gn, bn)
+   372→   372→  const delta = max - min
+   373→   373→  const v = max
+   374→   374→  const s = max === 0 ? 0 : delta / max
+   375→   375→  let h = 0
+   376→   376→  if (delta !== 0) {
+   377→   377→    if (max === rn) h = ((gn - bn) / delta) % 6
+   378→   378→    else if (max === gn) h = (bn - rn) / delta + 2
+   379→   379→    else h = (rn - gn) / delta + 4
+   380→   380→    h *= 60
+   381→   381→    if (h < 0) h += 360
+   382→   382→  }
+   383→   383→
+   384→   384→  // Achromatic (grey/black/white)
+   385→   385→  if (s < 0.12) {
+   386→   386→    if (v < 0.15) return 'black'
+   387→   387→    if (v > 0.92) return 'white'
+   388→   388→    if (v < 0.4) return 'charcoal grey'
+   389→   389→    if (v < 0.65) return 'grey'
+   390→   390→    return 'silver'
+   391→   391→  }
+   392→   392→
+   393→   393→  // Bright/light/dark prefix — generous with "bright" for saturated colours
+   394→   394→  // so FLUX generates vibrant results (product photos are usually well-lit)
+   395→   395→  const lightPrefix = v > 0.6 ? 'bright ' : v < 0.25 ? 'dark ' : ''
+   396→   396→
+   397→   397→  // Hue-based naming
+   398→   398→  if (h < 15 || h >= 345) return `${lightPrefix}red`
+   399→   399→  if (h < 30) return v < 0.4 ? 'maroon' : 'red'
+   400→   400→  if (h < 45) return v < 0.4 ? 'burgundy' : 'orange-red'
+   401→   401→  if (h < 60) return `${lightPrefix}orange`
+   402→   402→  if (h < 70) return 'mustard yellow'
+   403→   403→  if (h < 85) return `${lightPrefix}yellow`
+   404→   404→  if (h < 100) return v > 0.6 ? 'lime' : 'olive'
+   405→   405→  if (h < 150) return `${lightPrefix}green`
+   406→   406→  if (h < 175) return 'emerald green'
+   407→   407→  if (h < 195) return 'teal'
+   408→   408→  if (h < 215) return 'turquoise'
+   409→   409→  if (h < 240) return `${lightPrefix}blue`
+   410→   410→  if (h < 260) return 'navy blue'
+   411→   411→  if (h < 285) return 'violet'
+   412→   412→  if (h < 310) return v > 0.6 ? 'pink' : 'purple'
+   413→   413→  if (h < 335) return v > 0.7 ? 'rose pink' : 'magenta'
+   414→   414→  return `${lightPrefix}red`
+   415→   415→}
+   416→   416→
+   417→   417→export async function extractColorsFromProductImage(imageBase64: string): Promise<string> {
+   418→   418→  if (!imageBase64 || !imageBase64.startsWith('data:image/')) return ''
+   419→   419→
+   420→   420→  try {
+   421→   421→    const raw = stripDataUrl(imageBase64)
+   422→   422→    const buf = Buffer.from(raw, 'base64')
+   423→   423→
+   424→   424→    // Use Jimp (pure-JS, no native binary — works on Vercel AND local)
+   425→   425→    const JimpModule = await import('jimp')
+   426→   426→    const Jimp = (JimpModule as any).Jimp || (JimpModule as any).default || JimpModule
+   427→   427→    const image = await Jimp.read(buf)
+   428→   428→    image.resize({ w: 32, h: 32 })
+   429→   429→
+   430→   430→    // Jimp's bitmap.data is RGBA (4 bytes per pixel)
+   431→   431→    const data = image.bitmap.data as Buffer
+   432→   432→    const pixelCount = 32 * 32
+   433→   433→
+   434→   434→    // Quantize pixels into colour buckets, weighting by SATURATION
+   435→   435→    // (vibrant product colours get higher priority than grey backgrounds)
+   436→   436→    const buckets = new Map<string, { count: number; satSum: number; r: number; g: number; b: number }>()
+   437→   437→    for (let i = 0; i < pixelCount; i++) {
+   438→   438→      const offset = i * 4
+   439→   439→      const r = data[offset], g = data[offset + 1], b = data[offset + 2]
+   440→   440→      // Skip transparent pixels
+   441→   441→      if (data[offset + 3] < 128) continue
+   442→   442→
+   443→   443→      const max = Math.max(r, g, b), min = Math.min(r, g, b)
+   444→   444→      const delta = max - min
+   445→   445→      const sat = max === 0 ? 0 : delta / max // 0..1
+   446→   446→
+   447→   447→      // Skip near-white backgrounds (common in e-commerce product photos)
+   448→   448→      if (max > 235 && delta < 15) continue
+   449→   449→      // Skip near-black
+   450→   450→      if (max < 25) continue
+   451→   451→      // Skip low-saturation greys (background, shadows, mannequin)
+   452→   452→      // Only keep pixels with saturation > 0.18 (vibrant enough to be product colour)
+   453→   453→      if (sat < 0.18) continue
+   454→   454→
+   455→   455→      // Quantize to 3 bits per channel
+   456→   456→      const key = `${r >> 5}-${g >> 5}-${b >> 5}`
+   457→   457→      const existing = buckets.get(key)
+   458→   458→      if (existing) {
+   459→   459→        existing.count++
+   460→   460→        existing.satSum += sat
+   461→   461→        existing.r += r
+   462→   462→        existing.g += g
+   463→   463→        existing.b += b
+   464→   464→      } else {
+   465→   465→        buckets.set(key, { count: 1, satSum: sat, r, g, b })
+   466→   466→      }
+   467→   467→    }
+   468→   468→
+   469→   469→    if (buckets.size === 0) {
+   470→   470→      // Fallback: if no vibrant colours found (e.g. black/white/silver product),
+   471→   471→      // re-run without the saturation filter
+   472→   472→      const fallback = new Map<string, { count: number; r: number; g: number; b: number }>()
+   473→   473→      for (let i = 0; i < pixelCount; i++) {
+   474→   474→        const offset = i * 4
+   475→   475→        const r = data[offset], g = data[offset + 1], b = data[offset + 2]
+   476→   476→        if (data[offset + 3] < 128) continue
+   477→   477→        const max = Math.max(r, g, b), min = Math.min(r, g, b)
+   478→   478→        if (max > 235 && max - min < 15) continue
+   479→   479→        if (max < 25) continue
+   480→   480→        const key = `${r >> 5}-${g >> 5}-${b >> 5}`
+   481→   481→        const existing = fallback.get(key)
+   482→   482→        if (existing) { existing.count++; existing.r += r; existing.g += g; existing.b += b }
+   483→   483→        else fallback.set(key, { count: 1, r, g, b })
+   484→   484→      }
+   485→   485→      if (fallback.size === 0) return ''
+   486→   486→      const sorted = Array.from(fallback.values()).sort((a, b) => b.count - a.count)
+   487→   487→      const names = sorted.slice(0, 2).map(bk => rgbToColorName(Math.round(bk.r / bk.count), Math.round(bk.g / bk.count), Math.round(bk.b / bk.count)))
+   488→   488→      const unique = Array.from(new Set(names))
+   489→   489→      console.log(`[virtual-tryon] Image-extracted colours (fallback): ${unique.join(', ')}`)
+   490→   490→      return unique.join(', ')
+   491→   491→    }
+   492→   492→
+   493→   493→    // Sort by (count × avg saturation) — vibrant + frequent colours win
+   494→   494→    const sorted = Array.from(buckets.values()).sort((a, b) =>
+   495→   495→      (b.count * (b.satSum / b.count)) - (a.count * (a.satSum / a.count))
+   496→   496→    )
+   497→   497→    const top = sorted.slice(0, 4)
+   498→   498→    const names = top.map(bucket => {
+   499→   499→      const avgR = Math.round(bucket.r / bucket.count)
+   500→   500→      const avgG = Math.round(bucket.g / bucket.count)
+   501→   501→      const avgB = Math.round(bucket.b / bucket.count)
+   502→   502→      return rgbToColorName(avgR, avgG, avgB)
+   503→   503→    })
+   504→   504→
+   505→   505→    // Deduplicate by BASE colour name — if "red" and "bright red" both appear,
+   506→   506→    // keep only "bright red" (the more descriptive/vibrant variant). This
+   507→   507→    // prevents FLUX from averaging two reds into a muted medium-red.
+   508→   508→    const byBase = new Map<string, string>()
+   509→   509→    for (const name of names) {
+   510→   510→      const base = name.replace(/^(bright |dark )/, '').trim()
+   511→   511→      const existing = byBase.get(base)
+   512→   512→      // Prefer "bright" variant over plain, and plain over "dark"
+   513→   513→      if (!existing) {
+   514→   514→        byBase.set(base, name)
+   515→   515→      } else if (name.startsWith('bright ') && !existing.startsWith('bright ')) {
+   516→   516→        byBase.set(base, name) // upgrade to bright
+   517→   517→      }
+   518→   518→    }
+   519→   519→    // Preserve original frequency order
+   520→   520→    const unique: string[] = []
+   521→   521→    for (const name of names) {
+   522→   522→      const base = name.replace(/^(bright |dark )/, '').trim()
+   523→   523→      const chosen = byBase.get(base)
+   524→   524→      if (chosen === name && !unique.includes(name)) {
+   525→   525→        unique.push(name)
+   526→   526→        byBase.delete(base) // only add once
+   527→   527→      }
+   528→   528→      if (unique.length >= 2) break // max 2 colours to keep the prompt focused
+   529→   529→    }
+   530→   530→    console.log(`[virtual-tryon] Image-extracted colours: ${unique.join(', ')} (from ${buckets.size} vibrant buckets)`)
+   531→   531→    return unique.join(', ')
+   532→   532→  } catch (err) {
+   533→   533→    console.log(`[virtual-tryon] Colour extraction failed: ${err instanceof Error ? err.message : String(err)}`)
+   534→   534→    return ''
+   535→   535→  }
+   536→   536→}
+   537→   537→
+   538→   538→// ── Build the edit prompt for ZAI ──────────────────────────────────
+   539→   539→
+   540→   540→function buildEditPrompt(config: CategoryConfig, input: TryOnInput): string {
+   541→   541→  const colors = extractColors(input.productName, input.productDescription, input.productTags)
+   542→   542→
+   543→   543→  const parts: string[] = []
+   544→   544→  parts.push(`Virtual try-on photograph. The person in the reference image is now ${config.placement}.`)
+   545→   545→  parts.push(`The product is "${input.productName}".`)
+   546→   546→  if (colors) parts.push(`The product colours are ${colors}.`)
+   547→   547→  if (config.materialHint) parts.push(`The product is made of ${config.materialHint}.`)
+   548→   548→  if (input.productDescription) {
+   549→   549→    const desc = input.productDescription.substring(0, 180).replace(/\s+/g, ' ').trim()
+   550→   550→    if (desc) parts.push(`Product details: ${desc}.`)
+   551→   551→  }
+   552→   552→  parts.push(`ABSOLUTE REQUIREMENT — IDENTITY PRESERVATION: Keep the EXACT same face, gender, skin tone, body type, hairstyle, hair colour, and age as the person in the reference image. Do NOT generate a new face. Do NOT change the person's gender.`)
+   553→   553→  parts.push(`PRODUCT FIDELITY: Reproduce the EXACT colours, pattern, fabric, embellishments, and design. The product must look NATURALLY WORN with realistic shadows, highlights, and fabric folds — NOT pasted or overlaid.`)
+   554→   554→  parts.push(`DO NOT ADD unrelated items: no sunglasses, no eyeglasses, no hats, no scarves, no extra jewellery, no extra clothing — ONLY the product described.`)
+   555→   555→  parts.push(`${config.framing}, studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality.`)
+   556→   556→  parts.push(`Natural pose and expression. Full image, no cropping, no border, no text, no watermark.`)
+   557→   557→  return parts.join(' ')
+   558→   558→}
+   559→   559→
+   560→   560→// ── Strategy A: Direct ZAI image-edit ──────────────────────────────
+   561→   561→
+   562→   562→async function callZAIImageEdit(
+   563→   563→  input: TryOnInput,
+   564→   564→  deadline: number,
+   565→   565→): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+   566→   566→  const zai = await getZAI()
+   567→   567→  if (!zai) {
+   568→   568→    return { success: false, error: 'ZAI SDK unavailable (not configured or Vercel environment)' }
+   569→   569→  }
+   570→   570→
+   571→   571→  const config = getCategoryConfig(input.categorySlug, input.productName)
+   572→   572→  const prompt = buildEditPrompt(config, input)
+   573→   573→
+   574→   574→  // Use edit-both if we have a product image, otherwise edit-selfie
+   575→   575→  const hasProductImage = input.productImageBase64 && input.productImageBase64.startsWith('data:image/')
+   576→   576→  const images = hasProductImage
+   577→   577→    ? [{ url: input.selfieData }, { url: input.productImageBase64 }]
+   578→   578→    : [{ url: input.selfieData }]
+   579→   579→
+   580→   580→  const strategyName = hasProductImage ? 'edit-both' : 'edit-selfie'
+   581→   581→  const remaining = Math.min(ZAI_EDIT_TIMEOUT_MS, deadline - Date.now() - 3_000)
+   582→   582→  if (remaining < 15_000) {
+   583→   583→    return { success: false, error: `insufficient time budget (${remaining}ms) for ZAI edit` }
+   584→   584→  }
+   585→   585→
+   586→   586→  console.log(`[virtual-tryon] ZAI image-edit (${strategyName}): ${config.size}, timeout=${remaining}ms`)
+   587→   587→  console.log(`[virtual-tryon] Prompt (first 200): ${prompt.substring(0, 200)}...`)
+   588→   588→
+   589→   589→  try {
+   590→   590→    const start = Date.now()
+   591→   591→    const response = await Promise.race([
+   592→   592→      zai.images.generations.edit({
+   593→   593→        prompt,
+   594→   594→        images,
+   595→   595→        size: config.size,
+   596→   596→      }),
+   597→   597→      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('ZAI edit timeout')), remaining)),
+   598→   598→    ])
+   599→   599→    const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   600→   600→
+   601→   601→    const item = response?.data?.[0]
+   602→   602→    const b64 = item?.base64
+   603→   603→    if (!b64 || typeof b64 !== 'string' || b64.length < 3000) {
+   604→   604→      return { success: false, error: `ZAI edit returned no usable image after ${elapsed}s (base64 length=${b64?.length || 0})` }
+   605→   605→    }
+   606→   606→
+   607→   607→    // Detect format
+   608→   608→    let mime = 'image/png'
+   609→   609→    if (item.format === 'jpeg' || item.format === 'jpg') mime = 'image/jpeg'
+   610→   610→    else if (item.format === 'webp') mime = 'image/webp'
+   611→   611→    else {
+   612→   612→      const head = Buffer.from(b64.substring(0, 8), 'base64').toString('hex')
+   613→   613→      if (head.startsWith('ffd8ff')) mime = 'image/jpeg'
+   614→   614→      else if (head.startsWith('89504e47')) mime = 'image/png'
+   615→   615→      else if (head.startsWith('52494646')) mime = 'image/webp'
+   616→   616→    }
+   617→   617→
+   618→   618→    const dataUrl = `data:${mime};base64,${b64}`
+   619→   619→    const byteLen = Math.floor(b64.length * 0.75)
+   620→   620→    console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded in ${elapsed}s (${(byteLen / 1024).toFixed(1)}KB, ${mime})`)
+   621→   621→    return { success: true, imageUrl: dataUrl }
+   622→   622→  } catch (err) {
+   623→   623→    const msg = err instanceof Error ? err.message : String(err)
+   624→   624→    console.log(`[virtual-tryon] ZAI ${strategyName} failed: ${msg.substring(0, 200)}`)
+   625→   625→    return { success: false, error: msg.substring(0, 200) }
+   626→   626→  }
+   627→   627→}
+   628→   628→
+   629→   629→// ── Strategy B: Pollinations with product image (fallback) ─────────
+   630→   630→
+   631→   631→function stripDataUrl(dataUrl: string): string {
+   632→   632→  const match = dataUrl.match(/^data:image\/[^;]+;base64,(.+)$/)
+   633→   633→  return match ? match[1] : dataUrl
+   634→   634→}
+   635→   635→
+   636→   636→async function uploadToTmpfiles(buf: Buffer, timeoutMs: number): Promise<string | null> {
+   637→   637→  const boundary = '----3boxesTryon' + Math.random().toString(16).slice(2)
+   638→   638→  const header = Buffer.from(
+   639→   639→    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="image.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`
+   640→   640→  )
+   641→   641→  const footer = Buffer.from(`\r\n--${boundary}--\r\n`)
+   642→   642→  const body = Buffer.concat([header, buf, footer])
+   643→   643→
+   644→   644→  const controller = new AbortController()
+   645→   645→  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+   646→   646→  try {
+   647→   647→    const res = await fetch('https://tmpfiles.org/api/v1/upload', {
+   648→   648→      method: 'POST',
+   649→   649→      headers: {
+   650→   650→        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+   651→   651→        'User-Agent': '3BOXES-TryOn/1.0',
+   652→   652→      },
+   653→   653→      body,
+   654→   654→      signal: controller.signal,
+   655→   655→    })
+   656→   656→    clearTimeout(timeoutId)
+   657→   657→    if (!res.ok) return null
+   658→   658→    const json = (await res.json()) as { data?: { url?: string } }
+   659→   659→    const viewerUrl = json?.data?.url
+   660→   660→    if (!viewerUrl) return null
+   661→   661→    return viewerUrl.replace('tmpfiles.org/', 'tmpfiles.org/dl/')
+   662→   662→  } catch {
+   663→   663→    clearTimeout(timeoutId)
+   664→   664→    return null
+   665→   665→  }
+   666→   666→}
+   667→   667→
+   668→   668→function buildPollinationsPrompt(config: CategoryConfig, input: TryOnInput, imageColors: string): string {
+   669→   669→  // Prefer image-extracted colours (accurate) over text-extracted (from name/desc)
+   670→   670→  const textColors = extractColors(input.productName, input.productDescription, input.productTags)
+   671→   671→  const colors = imageColors || textColors
+   672→   672→  const genderWord = config.gender === 'woman' ? 'woman' : config.gender === 'man' ? 'man' : config.gender === 'child' ? 'child' : 'person'
+   673→   673→
+   674→   674→  // SHORT, FOCUSED prompt — tests confirmed that Pollinations FLUX responds
+   675→   675→  // best to concise prompts with explicit colour names. Long prompts dilute
+   676→   676→  // the colour signal and produce mismatched results.
+   677→   677→  const parts: string[] = []
+   678→   678→  parts.push(`Virtual try-on photo of a ${genderWord} ${config.placement}.`)
+   679→   679→  parts.push(`Wearing "${input.productName}".`)
+   680→   680→  if (colors) parts.push(`The product colour is ${colors}.`)
+   681→   681→  if (config.materialHint) parts.push(`Material: ${config.materialHint}.`)
+   682→   682→  if (input.productDescription) {
+   683→   683→    // Keep description very short — just key details
+   684→   684→    const desc = input.productDescription.substring(0, 120).replace(/\s+/g, ' ').trim()
+   685→   685→    if (desc) parts.push(`${desc}.`)
+   686→   686→  }
+   687→   687→  parts.push(`${config.framing}, studio lighting, photorealistic, sharp focus, fashion magazine quality.`)
+   688→   688→  parts.push(`Naturally worn with realistic folds and fit.`)
+   689→   689→  parts.push(`No sunglasses, no glasses, no hats, no extra props.`)
+   690→   690→  return parts.join(' ')
+   691→   691→}
+   692→   692→
+   693→   693→// Compress the selfie before upload (resize to max 768px, JPEG quality 82)
+   694→   694→// so tmpfiles.org upload is fast and Pollinations receives a reasonable size.
+   695→   695→async function compressSelfieForUpload(selfieData: string): Promise<Buffer> {
+   696→   696→  const sharp = await getSharp()
+   697→   697→  if (!sharp) {
+   698→   698→    // Fallback: raw buffer
+   699→   699→    const raw = stripDataUrl(selfieData)
+   700→   700→    return Buffer.from(raw, 'base64')
+   701→   701→  }
+   702→   702→  try {
+   703→   703→    const raw = stripDataUrl(selfieData)
+   704→   704→    const buf = Buffer.from(raw, 'base64')
+   705→   705→    const compressed = await sharp(buf)
+   706→   706→      .resize(768, 1024, { fit: 'inside', withoutEnlargement: true })
+   707→   707→      .jpeg({ quality: 82, progressive: true })
+   708→   708→      .toBuffer()
+   709→   709→    console.log(`[virtual-tryon] Selfie compressed: ${(buf.length / 1024).toFixed(1)}KB → ${(compressed.length / 1024).toFixed(1)}KB`)
+   710→   710→    return compressed
+   711→   711→  } catch {
+   712→   712→    const raw = stripDataUrl(selfieData)
+   713→   713→    return Buffer.from(raw, 'base64')
+   714→   714→  }
+   715→   715→}
+   716→   716→
+   717→   717→async function callPollinationsWithSelfieReference(
+   718→   718→  input: TryOnInput,
+   719→   719→  deadline: number,
+   720→   720→): Promise<{ success: boolean; imageUrl?: string; error?: string; strategy?: string; debugInfo?: { extractedColors: string; promptPreview: string; selfieUploaded: boolean } }> {
+   721→   721→  const config = getCategoryConfig(input.categorySlug, input.productName)
+   722→   722→  const { width, height } = parseImageSize(config.size)
+   723→   723→
+   724→   724→  // Step 1: Extract REAL colours from the product image (not just text)
+   725→   725→  const imageColors = await extractColorsFromProductImage(input.productImageBase64)
+   726→   726→
+   727→   727→  // Step 2: Build the prompt with accurate, image-derived colours
+   728→   728→  const prompt = buildPollinationsPrompt(config, input, imageColors)
+   729→   729→
+   730→   730→  console.log(`[virtual-tryon] Pollinations v22: gender=${config.gender}, ${width}x${height}, imageColours="${imageColors}"`)
+   731→   731→  console.log(`[virtual-tryon] Prompt (first 250): ${prompt.substring(0, 250)}...`)
+   732→   732→
+   733→   733→  // Step 3: Upload the SELFIE (not the product) as the ?image= reference
+   734→   734→  // This preserves the user's face/gender/features in the generated image.
+   735→   735→  let selfieUrl: string | null = null
+   736→   736→  if (Date.now() < deadline - 22_000) {
+   737→   737→    try {
+   738→   738→      const selfieBuf = await compressSelfieForUpload(input.selfieData)
+   739→   739→      selfieUrl = await uploadToTmpfiles(selfieBuf, UPLOAD_TIMEOUT_MS)
+   740→   740→      console.log(`[virtual-tryon] Selfie uploaded: ${selfieUrl ? 'yes' : 'no'}`)
+   741→   741→    } catch (err) {
+   742→   742→      console.log(`[virtual-tryon] Selfie upload failed: ${err instanceof Error ? err.message : String(err)}`)
+   743→   743→    }
+   744→   744→  }
+   745→   745→
+   746→   746→  const encoded = encodeURIComponent(prompt)
+   747→   747→  const seed = Math.floor(Math.random() * 1_000_000)
+   748→   748→  let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&model=flux&nologo=true&seed=${seed}`
+   749→   749→  if (selfieUrl) {
+   750→   750→    url += `&image=${encodeURIComponent(selfieUrl)}`
+   751→   751→  }
+   752→   752→
+   753→   753→  // Retry up to 2 times on rate-limit (HTTP 402)
+   754→   754→  const MAX_RETRIES = 2
+   755→   755→  const RETRY_DELAYS_MS = [4_000, 6_000]
+   756→   756→
+   757→   757→  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+   758→   758→    if (attempt > 0) {
+   759→   759→      const delay = RETRY_DELAYS_MS[Math.min(attempt - 1, RETRY_DELAYS_MS.length - 1)]
+   760→   760→      console.log(`[virtual-tryon] Pollinations retry ${attempt}/${MAX_RETRIES} after ${delay}ms...`)
+   761→   761→      await new Promise(r => setTimeout(r, delay))
+   762→   762→    }
+   763→   763→
+   764→   764→    const retrySeed = seed + attempt * 11111
+   765→   765→    const attemptUrl = url.replace(/&seed=\d+/, `&seed=${retrySeed}`)
+   766→   766→    const remaining = Math.min(POLLINATIONS_TIMEOUT_MS, deadline - Date.now() - 3_000)
+   767→   767→    if (remaining < 8_000) {
+   768→   768→      return { success: false, error: `insufficient time for Pollinations (${remaining}ms)` }
+   769→   769→    }
+   770→   770→
+   771→   771→    const controller = new AbortController()
+   772→   772→    const timeoutId = setTimeout(() => controller.abort(), remaining)
+   773→   773→
+   774→   774→    try {
+   775→   775→      const start = Date.now()
+   776→   776→      const res = await fetch(attemptUrl, {
+   777→   777→        signal: controller.signal,
+   778→   778→        headers: { 'Accept': 'image/jpeg, image/png, image/webp, */*', 'User-Agent': '3BOXES-VirtualTryOn/1.0' },
+   779→   779→      })
+   780→   780→      clearTimeout(timeoutId)
+   781→   781→      const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+   782→   782→
+   783→   783→      if (res.status === 402 && attempt < MAX_RETRIES) {
+   784→   784→        console.log(`[virtual-tryon] Pollinations 402 rate-limited after ${elapsed}s — will retry`)
+   785→   785→        continue
+   786→   786→      }
+   787→   787→      if (!res.ok) {
+   788→   788→        const body = await res.text().catch(() => 'unknown')
+   789→   789→        if (attempt < MAX_RETRIES) continue
+   790→   790→        return { success: false, error: `Pollinations HTTP ${res.status}: ${body.substring(0, 100)}` }
+   791→   791→      }
+   792→   792→
+   793→   793→      const ct = res.headers.get('content-type') || ''
+   794→   794→      if (!ct.startsWith('image/')) {
+   795→   795→        if (attempt < MAX_RETRIES) continue
+   796→   796→        return { success: false, error: `Pollinations non-image response: ${ct}` }
+   797→   797→      }
+   798→   798→
+   799→   799→      const buf = Buffer.from(await res.arrayBuffer())
+   800→   800→      if (buf.length < 3000) {
+   801→   801→        if (attempt < MAX_RETRIES) continue
+   802→   802→        return { success: false, error: `Pollinations returned tiny image (${buf.length} bytes)` }
+   803→   803→      }
+   804→   804→
+   805→   805→      let mime = 'image/jpeg'
+   806→   806→      if (ct.includes('image/png')) mime = 'image/png'
+   807→   807→      else if (ct.includes('image/webp')) mime = 'image/webp'
+   808→   808→
+   809→   809→      const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
+   810→   810→      console.log(`[virtual-tryon] ✅ Pollinations succeeded in ${elapsed}s (${(buf.length / 1024).toFixed(1)}KB)`)
+   811→   811→      return {
+   812→   812→        success: true,
+   813→   813→        imageUrl: dataUrl,
+   814→   814→        strategy: selfieUrl ? 'pollinations-selfie-img2img' : 'pollinations-text',
+   815→   815→        debugInfo: {
+   816→   816→          extractedColors: imageColors,
+   817→   817→          promptPreview: prompt.substring(0, 300),
+   818→   818→          selfieUploaded: !!selfieUrl,
+   819→   819→        },
+   820→   820→      }
+   821→   821→    } catch (err) {
+   822→   822→      clearTimeout(timeoutId)
+   823→   823→      const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+   824→   824→      const msg = isTimeout ? `Pollinations timed out` : `Pollinations error: ${(err as Error).message.substring(0, 100)}`
+   825→   825→      console.log(`[virtual-tryon] ${msg} (attempt ${attempt + 1})`)
+   826→   826→      if (attempt < MAX_RETRIES) continue
+   827→   827→      return { success: false, error: msg }
+   828→   828→    }
+   829→   829→  }
+   830→   830→
+   831→   831→  return { success: false, error: 'Pollinations failed after all retries' }
+   832→   832→}
+   833→   833→
+   834→   834→function parseImageSize(size: ImageSize): { width: number; height: number } {
+   835→   835→  const [w, h] = size.split('x').map(Number)
+   836→   836→  return { width: w, height: h }
+   837→   837→}
+   838→   838→
+   839→   839→// ── Status helpers ─────────────────────────────────────────────────
+   840→   840→
+   841→   841→let spaceAwakeCache: { awake: boolean; timestamp: number } | null = null
+   842→   842→const SPACE_CACHE_TTL = 20_000
+   843→   843→
+   844→   844→export async function preWarmSpace(): Promise<boolean> {
+   845→   845→  void getZAI() // warm the ZAI SDK cache
+   846→   846→  return true
+   847→   847→}
+   848→   848→
+   849→   849→export async function checkIDMVTONSpaceStatus(): Promise<{ awake: boolean }> {
+   850→   850→  const now = Date.now()
+   851→   851→  if (spaceAwakeCache && now - spaceAwakeCache.timestamp < SPACE_CACHE_TTL) {
+   852→   852→    return { awake: spaceAwakeCache.awake }
+   853→   853→  }
+   854→   854→  const config = getZAIConfig()
+   855→   855→  const awake = !!config
+   856→   856→  spaceAwakeCache = { awake, timestamp: now }
+   857→   857→  return { awake }
+   858→   858→}
+   859→   859→
+   860→   860→export async function isTryOnServiceReady(): Promise<{
+   861→   861→  ready: boolean
+   862→   862→  engine: string
+   863→   863→  reason?: string
+   864→   864→}> {
+   865→   865→  if (process.env.VERCEL) {
+   866→   866→    return {
+   867→   867→      ready: true,
+   868→   868→      engine: 'pollinations-selfie-img2img',
+   869→   869→      reason: 'Using Pollinations with your selfie as reference + real product colours extracted from the product image (free, no auth needed on Vercel)',
+   870→   870→    }
+   871→   871→  }
+   872→   872→  const config = getZAIConfig()
+   873→   873→  if (config) {
+   874→   874→    return {
+   875→   875→      ready: true,
+   876→   876→      engine: 'zai-image-edit',
+   877→   877→      reason: 'ZAI image-edit ready — preserves your face & renders the exact product',
+   878→   878→    }
+   879→   879→  }
+   880→   880→  return {
+   881→   881→    ready: true,
+   882→   882→    engine: 'pollinations-selfie-img2img',
+   883→   883→    reason: 'ZAI not configured — using Pollinations selfie-img2img fallback',
+   884→   884→  }
+   885→   885→}
+   886→   886→
+   887→   887→// ── Main Try-On Function ───────────────────────────────────────────
+   888→   888→
+   889→   889→export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResult> {
+   890→   890→  const totalStart = Date.now()
+   891→   891→  const totalDeadline = totalStart + TOTAL_TIMEOUT_MS
+   892→   892→  const strategiesAttempted: string[] = []
+   893→   893→  const strategyErrors: Record<string, string> = {}
+   894→   894→  const isVercel = !!process.env.VERCEL
+   895→   895→
+   896→   896→  console.log(`[virtual-tryon] v22 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+   897→   897→
+   898→   898→  // Validate selfie
+   899→   899→  if (!input.selfieData?.startsWith('data:image/')) {
+   900→   900→    return {
+   901→   901→      success: false,
+   902→   902→      error: 'A valid selfie image is required.',
+   903→   903→      errorCode: 'NO_SELFIE',
+   904→   904→      elapsedMs: Date.now() - totalStart,
+   905→   905→      debugInfo: { strategiesAttempted, strategyErrors },
+   906→   906→    }
+   907→   907→  }
+   908→   908→
+   909→   909→  // ── STRATEGY A: Direct ZAI image-edit (LOCAL / SANDBOX only) ────
+   910→   910→  // Calls ZAI's images.generations.edit with BOTH the selfie and the
+   911→   911→  // product image (edit-both). This preserves the user's face/gender
+   912→   912→  // AND renders the exact product. Completes in 20-27s.
+   913→   913→  if (!isVercel && Date.now() < totalDeadline - 20_000) {
+   914→   914→    strategiesAttempted.push('zai-image-edit')
+   915→   915→    console.log('[virtual-tryon] Strategy A: Direct ZAI image-edit (edit-both)')
+   916→   916→    const result = await callZAIImageEdit(input, totalDeadline)
+   917→   917→    if (result.success && result.imageUrl) {
+   918→   918→      const elapsed = Date.now() - totalStart
+   919→   919→      console.log(`[virtual-tryon] ✅ ZAI image-edit succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+   920→   920→      return {
+   921→   921→        success: true,
+   922→   922→        imageUrl: result.imageUrl,
+   923→   923→        strategy: 'zai-image-edit',
+   924→   924→        elapsedMs: elapsed,
+   925→   925→        debugInfo: { strategiesAttempted, strategyErrors },
+   926→   926→      }
+   927→   927→    }
+   928→   928→    strategyErrors['zai-image-edit'] = result.error || 'No image returned'
+   929→   929→    console.log(`[virtual-tryon] ZAI image-edit failed: ${result.error?.substring(0, 150)}`)
+   930→   930→  } else if (isVercel) {
+   931→   931→    strategiesAttempted.push('zai-image-edit-skipped')
+   932→   932→    strategyErrors['zai-image-edit-skipped'] = 'Vercel environment — ZAI auth fails on public API'
+   933→   933→    console.log('[virtual-tryon] Skipping ZAI (Vercel environment)')
+   934→   934→  }
+   935→   935→
+   936→   936→  // ── STRATEGY B: Pollinations with SELFIE reference (VERCEL + FALLBACK)
+   937→   937→  // Used on Vercel (always) and on local when ZAI fails. Uploads the
+   938→   938→  // user's SELFIE as the Pollinations `?image=` reference so the
+   939→   939→  // generated person preserves the user's face/gender/features. The
+   940→   940→  // product is described in the prompt using colours EXTRACTED FROM
+   941→   941→  // THE ACTUAL PRODUCT IMAGE (via sharp) — not just the product name.
+   942→   942→  if (Date.now() < totalDeadline - 12_000) {
+   943→   943→    strategiesAttempted.push('pollinations-selfie-img2img')
+   944→   944→    console.log('[virtual-tryon] Strategy B: Pollinations (selfie reference + image-extracted colours)')
+   945→   945→    const result = await callPollinationsWithSelfieReference(input, totalDeadline)
+   946→   946→    if (result.success && result.imageUrl) {
+   947→   947→      const elapsed = Date.now() - totalStart
+   948→   948→      console.log(`[virtual-tryon] ✅ Pollinations succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+   949→   949→      return {
+   950→   950→        success: true,
+   951→   951→        imageUrl: result.imageUrl,
+   952→   952→        strategy: result.strategy || 'pollinations-selfie-img2img',
+   953→   953→        elapsedMs: elapsed,
+   954→   954→        debugInfo: {
+   955→   955→          strategiesAttempted,
+   956→   956→          strategyErrors,
+   957→   957→          extractedColors: result.debugInfo?.extractedColors,
+   958→   958→          promptPreview: result.debugInfo?.promptPreview,
+   959→   959→          selfieUploaded: result.debugInfo?.selfieUploaded,
+   960→   960→        },
+   961→   961→      }
+   962→   962→    }
+   963→   963→    strategyErrors['pollinations-selfie-img2img'] = result.error || 'No image returned'
+   964→   964→    console.log(`[virtual-tryon] Pollinations failed: ${result.error?.substring(0, 150)}`)
+   965→   965→  }
+   966→   966→
+   967→   967→  // ── All strategies failed ───────────────────────────────────────
+   968→   968→  const elapsed = Date.now() - totalStart
+   969→   969→  console.log(`[virtual-tryon] ❌ All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
+   970→   970→  console.log(`[virtual-tryon] Strategies: ${strategiesAttempted.join(', ')}`)
+   971→   971→  console.log(`[virtual-tryon] Errors: ${JSON.stringify(strategyErrors)}`)
+   972→   972→
+   973→   973→  return {
+   974→   974→    success: false,
+   975→   975→    error: 'We could not generate your style preview right now. Please try again in a moment.',
+   976→   976→    errorCode: 'ALL_STRATEGIES_FAILED',
+   977→   977→    elapsedMs: elapsed,
+   978→   978→    debugInfo: { strategiesAttempted, strategyErrors },
+   979→   979→  }
+   980→   980→}
+   981→   981→
