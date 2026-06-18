@@ -1,30 +1,35 @@
 /**
- * AI Virtual Try-On API v24 — STANDARD multi-strategy for local & Vercel
+ * AI Virtual Try-On API v25 — Gemini-first strategy for local & Vercel
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v24 (CURRENT):
- *   Strategy A: IDM-VTON HF Space (Gradio REST API) — for garment categories
- *     - Free, NO auth required, NO env vars needed
- *     - Real VTON model — preserves face AND renders exact garment
- *     - Works on local AND Vercel, with retry logic for cold-start
+ * v25 (CURRENT):
+ *   On VERCEL (production):
+ *     Strategy 1: Google Gemini 2.5 Flash Image (Nano Banana) — PRIMARY
+ *       - User-provided GEMINI_API_KEY (hardcoded fallback in lib)
+ *       - Handles ALL categories: sarees, jewelry, watches, garments, accessories
+ *       - Preserves face AND renders exact product
+ *       - Best free image generation model
  *
- *   Strategy B: Google Gemini 2.0 Flash — REQUIRES GEMINI_API_KEY
- *     - Free tier: 15 RPM, 1500 requests/day (https://aistudio.google.com/)
- *     - Accepts selfie + product images, generates try-on result
- *     - BEST option for Vercel — set GEMINI_API_KEY in Vercel env vars
+ *     Strategy 2: IDM-VTON HF Space — FALLBACK (garment categories only)
+ *       - Free, no auth required
+ *       - Real VTON model for shirts, dresses, etc.
  *
- *   Strategy C: ZAI image-edit (edit-both) — LOCAL ONLY
- *     - Used in the sandbox (ZAI's endpoint is internal-only)
+ *     Strategy 3: Pollinations — LAST RESORT
+ *       - Degraded quality but always available
  *
- *   Strategy D: Pollinations text-to-image — LAST RESORT
- *     - Always available, no setup needed
- *     - Uses the `sana` model (only one Pollinations now serves)
- *     - Lower quality but always works
+ *   On LOCAL (sandbox):
+ *     Strategy 1: ZAI image-edit (edit-both) — PRIMARY
+ *       - Best quality, preserves face + product
  *
- *   RECOMMENDED FOR VERCEL:
- *     Set GEMINI_API_KEY in Vercel env vars for best results.
- *     Without it, Vercel falls back to Pollinations (degraded quality).
+ *     Strategy 2: Google Gemini — FALLBACK
+ *     Strategy 3: IDM-VTON — garment categories only
+ *     Strategy 4: Pollinations — last resort
+ *
+ *   GEMINI API KEY:
+ *     - Hardcoded fallback in src/lib/virtual-tryon.ts (user-provided)
+ *     - GEMINI_API_KEY env var takes priority if set
+ *     - Get your own key: https://aistudio.google.com/apikey
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -195,19 +200,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'AI ready — IDM-VTON (HuggingFace Space) preserves your face AND renders the exact garment. Works on local AND Vercel.',
+      message: 'AI ready — Google Gemini (Nano Banana) preserves your face AND renders the exact product for ALL categories. Works on local AND Vercel.',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  // v24: IDM-VTON is the primary engine on BOTH local and Vercel
-  const engine = statusResult.awake ? 'idm-vton' : 'pollinations'
+  // v25: Gemini is the primary engine on Vercel (with hardcoded API key fallback);
+  // ZAI image-edit is the primary engine on local.
+  const isVercel = !!process.env.VERCEL
+  const engine = isVercel ? 'gemini-nano-banana' : 'zai-image-edit'
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
-    message: statusResult.awake
-      ? 'AI Virtual Try-On ready — IDM-VTON (preserves your face & renders the exact garment — works on local AND Vercel)'
-      : 'AI Virtual Try-On ready — using Pollinations fallback',
+    message: isVercel
+      ? 'AI Virtual Try-On ready — Google Gemini 2.5 Flash Image (Nano Banana) preserves your face & renders the EXACT product for ALL categories (sarees, jewelry, watches, garments).'
+      : 'AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product).',
   })
 }
