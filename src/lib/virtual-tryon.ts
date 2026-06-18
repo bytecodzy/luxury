@@ -85,11 +85,11 @@ export interface TryOnResult {
 
 // ── Timeouts ───────────────────────────────────────────────────────
 
-const TOTAL_TIMEOUT_MS = 55_000 // hard cap (client times out at 55s)
-const IDM_VTON_TIMEOUT_MS = 50_000 // IDM-VTON needs more time (cold start)
+const TOTAL_TIMEOUT_MS = 50_000 // hard cap (Vercel functions max at 60s)
+const IDM_VTON_TIMEOUT_MS = 35_000 // IDM-VTON (reduced to fit Vercel's 60s limit)
 const ZAI_EDIT_TIMEOUT_MS = 40_000
-const POLLINATIONS_TIMEOUT_MS = 30_000
-const UPLOAD_TIMEOUT_MS = 12_000
+const POLLINATIONS_TIMEOUT_MS = 25_000
+const UPLOAD_TIMEOUT_MS = 10_000
 
 // ── IDM-VTON Space config ──────────────────────────────────────────
 // The official IDM-VTON Space on HuggingFace. Free, no auth required.
@@ -618,8 +618,9 @@ async function callIDMVTON(
 
   console.log('[virtual-tryon] IDM-VTON: uploading selfie + garment...')
 
-  // Wake up the Space (best effort — improves cold-start reliability)
-  await wakeUpIDMSpace()
+  // Note: We skip the wakeUpIDMSpace() call here — the POST to /upload and
+  // /call/tryon will wake the space automatically. Skipping the wake-up call
+  // saves 10-12s on Vercel (critical for fitting within the 60s function limit).
 
   // Step 1: Upload both images to the Space
   const uploadStart = Date.now()
@@ -633,12 +634,12 @@ async function callIDMVTON(
   }
   console.log(`[virtual-tryon] IDM-VTON: uploaded in ${((Date.now() - uploadStart) / 1000).toFixed(1)}s`)
 
-  // Step 2: Call /tryon and stream the result — with RETRIES
+  // Step 2: Call /tryon and stream the result — with RETRY (only 1 retry to fit Vercel's timeout)
   // The HF Space can return "Session not found" or "error: null" intermittently
-  // (especially when waking from sleep). Retrying gives the Space time to
-  // fully wake up and process the request.
-  const MAX_RETRIES = 2
-  const RETRY_DELAY_MS = 2_000
+  // (especially when waking from sleep). A single retry gives the Space time to
+  // fully wake up without exceeding Vercel's 60s function limit.
+  const MAX_RETRIES = 1
+  const RETRY_DELAY_MS = 1_500
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {

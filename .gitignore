@@ -57,3 +57,4 @@ server.log
 # Confidential patent documentation - NOT for public repositories
 docs/05-patent-documentation.md
 docs/patent/
+tool-results/
