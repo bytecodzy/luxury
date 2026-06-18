@@ -62,6 +62,8 @@ export interface TryOnInput {
   categorySlug: string
   productDescription?: string
   productTags?: string[]
+  skinTone?: string
+  hairColor?: string
 }
 
 export interface TryOnResult {
@@ -768,11 +770,19 @@ function buildPollinationsPrompt(config: CategoryConfig, input: TryOnInput, imag
   const colors = imageColors || textColors
   const genderWord = config.gender === 'woman' ? 'woman' : config.gender === 'man' ? 'man' : config.gender === 'child' ? 'child' : 'person'
 
+  // Build person description from selfie attributes (extracted client-side)
+  // This helps Pollinations generate a person that matches the user's
+  // skin tone and hair color, even though the exact face can't be preserved.
+  const personAttrs: string[] = []
+  if (input.skinTone) personAttrs.push(`${input.skinTone} skin`)
+  if (input.hairColor) personAttrs.push(`${input.hairColor} hair`)
+  const personDesc = personAttrs.length > 0 ? ` with ${personAttrs.join(' and ')}` : ''
+
   // SHORT, FOCUSED prompt — tests confirmed that Pollinations FLUX responds
   // best to concise prompts with explicit colour names. Long prompts dilute
   // the colour signal and produce mismatched results.
   const parts: string[] = []
-  parts.push(`Virtual try-on photo of a ${genderWord} ${config.placement}.`)
+  parts.push(`Virtual try-on photo of a ${genderWord}${personDesc} ${config.placement}.`)
   parts.push(`Wearing "${input.productName}".`)
   if (colors) parts.push(`The product colour is ${colors}.`)
   if (config.materialHint) parts.push(`Material: ${config.materialHint}.`)

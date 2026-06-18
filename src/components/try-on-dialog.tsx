@@ -110,6 +110,117 @@ function compressImage(dataUrl: string, maxSize = 1024, quality = 0.85): Promise
   });
 }
 
+// ── Helper: Extract skin tone and hair color from selfie ──────────
+// Uses canvas pixel analysis to determine the user's skin tone and hair
+// color. These are sent to the API and included in the Pollinations
+// prompt so the generated person matches the user's attributes (even
+// though the exact face can't be preserved on Vercel's free tier).
+
+function rgbToSkinToneDesc(r: number, g: number, b: number): string {
+  // Classify skin tone using RGB heuristics
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const v = max / 255;
+  // Skin tones have R > G > B typically
+  if (r < 60 || g < 40 || b < 30) return 'deep dark';
+  if (r > 220 && g > 180 && b > 150) return v > 0.92 ? 'very fair' : 'fair';
+  if (r > 180 && g > 140 && b > 110) return 'light tan';
+  if (r > 150 && g > 110 && b > 80) return 'warm tan';
+  if (r > 120 && g > 85 && b > 60) return 'medium brown';
+  if (r > 90 && g > 60 && b > 40) return 'dark brown';
+  return 'deep dark';
+}
+
+function rgbToHairColorDesc(r: number, g: number, b: number): string {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  const v = max / 255;
+  const s = max === 0 ? 0 : delta / max;
+  if (s < 0.15) {
+    if (v < 0.15) return 'black';
+    if (v < 0.35) return 'dark brown';
+    if (v < 0.55) return 'brown';
+    if (v > 0.85) return 'white/silver';
+    return 'grey';
+  }
+  if (r > g && r > b) {
+    if (g > 120 && b > 80) return 'brown';
+    if (r > 150 && g < 100) return 'auburn/reddish-brown';
+    return 'dark brown';
+  }
+  if (r > 180 && g > 140 && b < 100) return 'blonde';
+  return 'brown';
+}
+
+function extractSelfieAttributes(dataUrl: string): Promise<{ skinTone: string; hairColor: string }> {
+  return new Promise((resolve) => {
+    try {
+      const img = document.createElement('img');
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const w = Math.min(img.naturalWidth, 256);
+          const h = Math.min(img.naturalHeight, 256);
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve({ skinTone: '', hairColor: '' });
+            return;
+          }
+          ctx.drawImage(img, 0, 0, w, h);
+          const data = ctx.getImageData(0, 0, w, h).data;
+
+          // Sample skin tone from the center region (face area)
+          let skinR = 0, skinG = 0, skinB = 0, skinCount = 0;
+          const cxStart = Math.floor(w * 0.3), cxEnd = Math.floor(w * 0.7);
+          const cyStart = Math.floor(h * 0.35), cyEnd = Math.floor(h * 0.65);
+          for (let y = cyStart; y < cyEnd; y++) {
+            for (let x = cxStart; x < cxEnd; x++) {
+              const i = (y * w + x) * 4;
+              const r = data[i], g = data[i + 1], b = data[i + 2];
+              // Skin detection: R > G > B, and not too dark/bright
+              if (r > g && g > b && r > 70 && r < 250 && (r - b) > 10) {
+                skinR += r; skinG += g; skinB += b; skinCount++;
+              }
+            }
+          }
+          const skinTone = skinCount > 20
+            ? rgbToSkinToneDesc(Math.round(skinR / skinCount), Math.round(skinG / skinCount), Math.round(skinB / skinCount))
+            : '';
+
+          // Sample hair color from the top region (hair area)
+          let hairR = 0, hairG = 0, hairB = 0, hairCount = 0;
+          const hxStart = Math.floor(w * 0.2), hxEnd = Math.floor(w * 0.8);
+          const hyStart = Math.floor(h * 0.02), hyEnd = Math.floor(h * 0.2);
+          for (let y = hyStart; y < hyEnd; y++) {
+            for (let x = hxStart; x < hxEnd; x++) {
+              const i = (y * w + x) * 4;
+              const r = data[i], g = data[i + 1], b = data[i + 2];
+              // Exclude skin pixels (we want hair, not forehead)
+              if (!(r > g && g > b && r > 70 && (r - b) > 10)) {
+                hairR += r; hairG += g; hairB += b; hairCount++;
+              }
+            }
+          }
+          const hairColor = hairCount > 20
+            ? rgbToHairColorDesc(Math.round(hairR / hairCount), Math.round(hairG / hairCount), Math.round(hairB / hairCount))
+            : '';
+
+          resolve({ skinTone, hairColor });
+        } catch {
+          resolve({ skinTone: '', hairColor: '' });
+        }
+      };
+      img.onerror = () => resolve({ skinTone: '', hairColor: '' });
+      img.src = dataUrl;
+    } catch {
+      resolve({ skinTone: '', hairColor: '' });
+    }
+  });
+}
+
 // ── Helper: Fetch image as base64 ──────────────────────────────────
 
 async function fetchImageAsBase64(url: string): Promise<string | null> {
@@ -508,6 +619,18 @@ export function TryOnDialog({
       }
     } catch {}
 
+    // Extract skin tone + hair color from selfie (for Vercel Pollinations)
+    let selfieAttributes: { skinTone: string; hairColor: string } = { skinTone: '', hairColor: '' };
+    try {
+      selfieAttributes = await Promise.race([
+        extractSelfieAttributes(selfieData),
+        new Promise<{ skinTone: string; hairColor: string }>(r => setTimeout(() => r({ skinTone: '', hairColor: '' }), 3000)),
+      ]);
+      if (selfieAttributes.skinTone || selfieAttributes.hairColor) {
+        console.log(`[try-on] Selfie attributes: skin=${selfieAttributes.skinTone}, hair=${selfieAttributes.hairColor}`);
+      }
+    } catch {}
+
     // Start progress simulation
     progressIntervalRef.current = setInterval(() => {
       setProgressPercent(prev => {
@@ -554,6 +677,8 @@ export function TryOnDialog({
           categorySlug: categorySlug || '',
           productDescription: productDescription || '',
           productTags: productTags || [],
+          skinTone: selfieAttributes.skinTone || '',
+          hairColor: selfieAttributes.hairColor || '',
         }),
         signal: controller.signal,
       });

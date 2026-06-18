@@ -87,6 +87,8 @@ export async function POST(request: NextRequest) {
       categorySlug,
       productDescription,
       productTags,
+      skinTone,
+      hairColor,
     } = body
 
     if (!productId || !selfieData) {
@@ -108,7 +110,7 @@ export async function POST(request: NextRequest) {
       productImageBase64 = await getProductImageBase64(productImageUrl)
     }
 
-    console.log(`[try-on] POST: product="${productName}", category="${categorySlug}", hasSelfie=${!!selfieData}, hasProductImg=${!!productImageBase64}, hasDesc=${!!productDescription}`)
+    console.log(`[try-on] POST: product="${productName}", category="${categorySlug}", hasSelfie=${!!selfieData}, hasProductImg=${!!productImageBase64}, hasDesc=${!!productDescription}, skinTone="${skinTone || ''}", hairColor="${hairColor || ''}"`)
 
     const result = await performVirtualTryOn({
       selfieData,
@@ -117,6 +119,8 @@ export async function POST(request: NextRequest) {
       categorySlug: categorySlug || '',
       productDescription: productDescription || '',
       productTags: Array.isArray(productTags) ? productTags : [],
+      skinTone: skinTone || '',
+      hairColor: hairColor || '',
     })
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
