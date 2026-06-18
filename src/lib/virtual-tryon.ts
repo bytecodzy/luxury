@@ -97,7 +97,7 @@ export interface TryOnResult {
 // ── Timeouts ───────────────────────────────────────────────────────
 
 const TOTAL_TIMEOUT_MS = 50_000 // hard cap (Vercel functions max at 60s)
-const IDM_VTON_TIMEOUT_MS = 35_000 // IDM-VTON (reduced to fit Vercel's 60s limit)
+const IDM_VTON_TIMEOUT_MS = 22_000 // v26: reduced from 35s — ensures Pollinations has ≥18s after IDM-VTON
 const ZAI_EDIT_TIMEOUT_MS = 40_000
 const POLLINATIONS_TIMEOUT_MS = 18_000 // reduced from 25s — prevents client timeout (55s)
 const UPLOAD_TIMEOUT_MS = 10_000
@@ -654,11 +654,15 @@ async function callIDMVTON(
   }
   console.log(`[virtual-tryon] IDM-VTON: uploaded in ${((Date.now() - uploadStart) / 1000).toFixed(1)}s`)
 
-  // Step 2: Call /tryon and stream the result — with RETRY (only 1 retry to fit Vercel's timeout)
+  // Step 2: Call /tryon and stream the result — NO RETRY (v26)
   // The HF Space can return "Session not found" or "error: null" intermittently
-  // (especially when waking from sleep). A single retry gives the Space time to
-  // fully wake up without exceeding Vercel's 60s function limit.
-  const MAX_RETRIES = 1
+  // (especially when waking from sleep, or when the garment is outside its
+  // training distribution like sarees). v26: We removed the retry because:
+  //   1. A retry adds 1.5s + another 25s attempt = 26.5s — too much time
+  //   2. If the first attempt fails, the retry usually fails too (same issue)
+  //   3. The time saved is given to Pollinations, which has a higher success rate
+  // With 0 retries: IDM-VTON takes ~25s max, leaving ~25s for Pollinations.
+  const MAX_RETRIES = 0
   const RETRY_DELAY_MS = 1_500
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -667,7 +671,9 @@ async function callIDMVTON(
       await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
     }
 
-    if (Date.now() >= deadline - 20_000) {
+    // v26: Need at least 22s for IDM-VTON attempt (upload + call + 22s stream + download)
+    // If less time remains, skip IDM-VTON and let Pollinations handle it
+    if (Date.now() >= deadline - 25_000) {
       return { success: false, error: `insufficient time for IDM-VTON attempt ${attempt + 1}` }
     }
 
