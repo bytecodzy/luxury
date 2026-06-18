@@ -75,7 +75,7 @@ type Step = 'upload' | 'preview' | 'generating' | 'result' | 'timeout';
 // ── Constants ──────────────────────────────────────────────────────
 
 const CLIENT_TIMEOUT_MS = 55_000; // 55 seconds — hard client timeout (golden rule: max 60s total)
-const GENERATE_TIMEOUT_MSG = 'The AI image service took longer than expected. Please try again — it usually works on the second attempt!';
+const GENERATE_TIMEOUT_MSG = 'Our AI styling service is experiencing high traffic right now. Please try again in a moment — it usually works on the second attempt!';
 
 // ── Helper: Compress image ─────────────────────────────────────────
 
@@ -923,7 +923,7 @@ export function TryOnDialog({
               {step === 'result'
                 ? 'Here\'s how it looks on you!'
                 : step === 'timeout'
-                ? 'Generation timed out'
+                ? 'Please try again'
                 : <>
                     Upload your selfie and{' '}
                     <span className="text-amber-300">{getCategoryLabel()}</span>
@@ -1424,7 +1424,7 @@ export function TryOnDialog({
                   </div>
                   <div>
                     <p className="text-lg font-semibold text-amber-100">
-                      Generation Timed Out
+                      Style Preview Unavailable
                     </p>
                     <p className="mt-1 text-sm text-amber-200/60 max-w-sm">
                       {errorMessage || GENERATE_TIMEOUT_MSG}
@@ -1435,8 +1435,8 @@ export function TryOnDialog({
                 <div className="rounded-lg bg-amber-900/10 p-3">
                   <p className="text-xs text-amber-200/50">
                     <span className="font-semibold text-amber-300/60">Tip:</span>{' '}
-                    Network conditions can affect AI generation time.
-                    Trying again usually works on the second attempt.
+                    Our AI services can experience high traffic. Please try again in a moment —
+                    it usually works on the second attempt.
                   </p>
                 </div>
 
