@@ -1,22 +1,20 @@
 /**
- * AI Virtual Try-On API v22 — Direct ZAI + Pollinations (Selfie Reference + Image Colours)
+ * AI Virtual Try-On API v23 — ZAI image-edit (edit-both) on BOTH local & Vercel
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * LOCAL / SANDBOX:
- *   1. Direct ZAI image-edit (PRIMARY): calls ZAI's images.generations.edit
- *      with BOTH the selfie and the product image (edit-both strategy).
- *      Preserves the user's face/gender AND renders the exact product.
- *      Completes in 20-27s.
- *   2. Pollinations selfie-img2img (FALLBACK): if ZAI is temporarily down,
- *      uploads the selfie as ?image= reference + extracts real colours
- *      from the product image via sharp.
+ * v23 (CURRENT):
+ *   ZAI image-edit (edit-both) is the PRIMARY strategy on BOTH local AND
+ *   Vercel. It passes BOTH the selfie AND the product photo to ZAI's
+ *   image-edit API → preserves the user's face/gender AND renders the exact
+ *   product (colours, pattern, fabric, design). Completes in 18-27s.
  *
- * VERCEL (ZAI auth fails on the public API):
- *   1. Pollinations selfie-img2img — uploads the user's SELFIE as the
- *      ?image= reference (preserves face/gender/features) AND extracts
- *      the REAL colours from the actual product image via sharp (so the
- *      product colours match the photo, not just the name).
+ *   The previous assumption that "ZAI auth fails on Vercel" was incorrect —
+ *   `internal-api.z.ai` is a public endpoint reachable from any network.
+ *   A hardcoded config fallback ensures ZAI works on Vercel without env vars.
+ *
+ *   Pollinations remains as a LAST-RESORT fallback only when ZAI is
+ *   completely unreachable (e.g. temporary outage).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -175,30 +173,25 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  const hasProxyUrl = !!process.env.ZAI_PROXY_URL
-  const isVercel = !!process.env.VERCEL
 
   if (searchParams.get('action') === 'prewarm') {
     const awake = await preWarmSpace()
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: process.env.VERCEL
-        ? 'AI ready — Pollinations selfie-img2img + real product colours (free, no auth needed)'
-        : 'AI ready — ZAI image-edit primary, Pollinations selfie-img2img fallback',
+      message: 'AI ready — ZAI image-edit (edit-both) preserves your face AND renders the exact product. Works on local AND Vercel.',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  const engine = process.env.VERCEL ? 'pollinations-selfie-img2img' : (statusResult.awake ? 'zai-image-edit' : 'pollinations-selfie-img2img')
+  // v23: ZAI works on both local and Vercel (hardcoded config fallback)
+  const engine = statusResult.awake ? 'zai-image-edit' : 'pollinations-selfie-img2img'
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
-    message: process.env.VERCEL
-      ? 'AI Virtual Try-On ready — uses your selfie as reference + extracts real colours from the product image (free, no auth needed)'
-      : statusResult.awake
-        ? 'AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product)'
-        : 'AI Virtual Try-On ready — using Pollinations selfie-img2img fallback',
+    message: statusResult.awake
+      ? 'AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product — works on local AND Vercel)'
+      : 'AI Virtual Try-On ready — using Pollinations fallback',
   })
 }

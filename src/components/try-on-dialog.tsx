@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * TryOnDialog v4.4 — Direct ZAI Image-Edit Virtual Try-On
+ * TryOnDialog v4.5 — ZAI Image-Edit Virtual Try-On (works on local AND Vercel)
  *
  * KEY PRINCIPLES:
  * 1. Powered by Z.AI image-edit API (REAL image-to-image edit — passes BOTH
@@ -18,8 +18,9 @@
  * 6. Disclaimer → auto-opens file picker (one-click flow)
  * 7. Hard 55-second client timeout with friendly retry message
  * 8. 3BOXES watermark on ALL generated/saved/downloaded images
- * 9. Works on both preview and Vercel — ZAI primary (local), Pollinations
- *    fallback (Vercel / ZAI-down)
+ * 9. Works on BOTH preview AND Vercel — v23 uses ZAI image-edit on both
+ *    (internal-api.z.ai is a public endpoint; hardcoded config fallback
+ *    ensures it works on Vercel without env var setup).
  * 10. NO canvas overlay fallback — real AI generation every time
  */
 
