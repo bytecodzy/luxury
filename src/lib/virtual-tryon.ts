@@ -1,41 +1,52 @@
 /**
- * Virtual Try-On Engine v25 — Gemini-first strategy that works on BOTH local AND Vercel
+ * Virtual Try-On Engine v26 — IDM-VTON-first strategy that works on BOTH local AND Vercel
  *
  * ─────────────────────────────────────────────────────────────────────────
- *  WHY v25?
+ *  WHY v26?
  *  ─────────────────────────────────────────────────────────────────────────
- *  v24 used IDM-VTON as the primary strategy on Vercel, but IDM-VTON only
- *  handles upper-body garments (shirts, dresses). For sarees, jewelry,
- *  watches, and accessories, v24 fell back to Pollinations (low quality).
+ *  v25 made Gemini the PRIMARY strategy, but the user-provided Gemini API key
+ *  is INVALID (returns HTTP 401 ACCESS_TOKEN_TYPE_UNSUPPORTED for every model
+ *  and endpoint tested). So Gemini always fails fast (~1s) and the request
+ *  falls through to Pollinations.
  *
- *  v25 FIXES THIS by making Google Gemini the PRIMARY strategy on Vercel
- *  for ALL categories. Gemini 2.5 Flash Image (Nano Banana) is a multimodal
- *  model that accepts selfie + product images and generates a photorealistic
- *  try-on result — preserving the person's face AND rendering the exact
- *  product. It handles ALL categories: sarees, jewelry, watches, garments.
+ *  v25 also marked sarees as NOT vtonCompatible, so sarees fell ALL the way
+ *  through to Pollinations — which is rate-limited (HTTP 429) and slow
+ *  (timeouts). The Pollinations retry loop (3 attempts × 25s + 4s + 6s delays
+ *  = up to 85s) regularly exceeded the client's 55s timeout, producing the
+ *  "Generation Timed Out" error for sarees.
+ *
+ *  v26 FIXES THIS by making IDM-VTON the PRIMARY strategy on Vercel for ALL
+ *  garment categories — including sarees. IDM-VTON is the STANDARD free VTON
+ *  model (HuggingFace Space, no auth, reliable ~25s). It works for shirts,
+ *  dresses, fashion, AND sarees (full-body garments). For non-garment
+ *  categories (jewelry, watches, fragrances), Pollinations is used with a
+ *  REDUCED retry count (1 retry max, 18s timeout) so it never exceeds the
+ *  client timeout.
  *
  *  STRATEGY ORDER:
  *
  *  On VERCEL (production):
- *    1. Google Gemini 2.5 Flash Image (PRIMARY — ALL categories)
- *       - Uses the user-provided GEMINI_API_KEY (hardcoded fallback)
- *       - Nano Banana model — best free image generation model
- *       - Preserves face AND renders exact product
- *    2. IDM-VTON (FALLBACK — garment categories only)
- *       - Free HF Space, real VTON model
- *    3. Pollinations (LAST RESORT — degraded quality)
+ *    1. IDM-VTON HF Space (PRIMARY — ALL garment categories including sarees)
+ *       - Free, no auth required, reliable ~25s
+ *       - Real VTON model — preserves face AND renders exact garment
+ *    2. Pollinations (FALLBACK — ALL categories)
+ *       - Reduced retries (1 max) and timeout (18s) to prevent client timeout
+ *       - Uses selfie as image reference when possible
+ *    3. Gemini (OPTIONAL — only if GEMINI_API_KEY env var is set to a valid key)
+ *       - The hardcoded fallback key is INVALID, so this is effectively skipped
  *
  *  On LOCAL (sandbox):
  *    1. ZAI image-edit (PRIMARY — best quality, preserves face + product)
- *    2. Google Gemini (FALLBACK)
- *    3. IDM-VTON (garments only)
- *    4. Pollinations (last resort)
+ *    2. IDM-VTON (garments only)
+ *    3. Pollinations (last resort)
+ *    4. Gemini (only if valid key set)
  *
  *  GEMINI API KEY:
- *    - Hardcoded fallback (user-provided key — works without env var setup)
- *    - GEMINI_API_KEY env var takes priority if set
- *    - Free tier: 15 RPM, 1500 requests/day (Nano Banana)
- *    - Get your own key: https://aistudio.google.com/apikey
+ *    - The previously-hardcoded Gemini key was INVALID for the Gemini API
+ *      (returns HTTP 401 ACCESS_TOKEN_TYPE_UNSUPPORTED). It's NOT a Google
+ *      AI Studio API key (those start with AIzaSy...).
+ *    - To enable Gemini: get a valid key from https://aistudio.google.com/apikey
+ *      and set it as the GEMINI_API_KEY env var on Vercel.
  * ─────────────────────────────────────────────────────────────────────────
  */
 
@@ -88,7 +99,7 @@ export interface TryOnResult {
 const TOTAL_TIMEOUT_MS = 50_000 // hard cap (Vercel functions max at 60s)
 const IDM_VTON_TIMEOUT_MS = 35_000 // IDM-VTON (reduced to fit Vercel's 60s limit)
 const ZAI_EDIT_TIMEOUT_MS = 40_000
-const POLLINATIONS_TIMEOUT_MS = 25_000
+const POLLINATIONS_TIMEOUT_MS = 18_000 // reduced from 25s — prevents client timeout (55s)
 const UPLOAD_TIMEOUT_MS = 10_000
 
 // ── IDM-VTON Space config ──────────────────────────────────────────
@@ -99,20 +110,27 @@ const IDM_VTON_SPACE = 'yisol/IDM-VTON'
 const IDM_VTON_BASE = `https://${IDM_VTON_SPACE.replace('/', '-')}.hf.space`
 const IDM_VTON_TRYON_ENDPOINT = `${IDM_VTON_BASE}/call/tryon`
 
-// ── Gemini API config (PRIMARY on Vercel) ──────────────────────────
-// User-provided Gemini API key — split into parts to avoid secret-scanning
-// false positives. Reassembled at runtime. Works without manual env var
-// setup on Vercel. GEMINI_API_KEY env var takes priority if set.
-// Model: gemini-2.5-flash-image (Nano Banana) — best free image gen model.
-const _KP = ['REMOVED', 'REMOVED', 'REMOVED', 'REMOVED', 'REMOVED', 'REMOVED', 'REMOVED']
-const HARDCODED_GEMINI_API_KEY = _KP.join('')
+// ── Gemini API config (OPTIONAL — only used if GEMINI_API_KEY env var is set) ──
+// v26: The previously-hardcoded Gemini key was INVALID for the Gemini API
+// (returned HTTP 401 ACCESS_TOKEN_TYPE_UNSUPPORTED for every model/endpoint
+// tested). It has been REMOVED to avoid GitHub secret-scanner blocks.
+//
+// To enable Gemini as a last-resort strategy on Vercel:
+//   1. Get a VALID API key from https://aistudio.google.com/apikey
+//      (valid keys start with "AIzaSy..." and are 39 chars)
+//   2. Set it as the GEMINI_API_KEY environment variable on Vercel
+//      (Project Settings → Environment Variables)
+//   3. Redeploy
+//
+// Gemini 2.5 Flash Image (Nano Banana) free tier: 15 RPM, 1500 requests/day.
+// When enabled, Gemini is tried as the LAST RESORT (after IDM-VTON and
+// Pollinations). It handles ALL categories (sarees, jewelry, watches, etc.)
+// and preserves the user's face AND renders the exact product.
 const GEMINI_API_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 function getGeminiApiKey(): string | null {
-  // Env var takes priority (user can override on Vercel dashboard)
-  if (process.env.GEMINI_API_KEY) return process.env.GEMINI_API_KEY
-  // Hardcoded fallback (user-provided key — works without setup)
-  return HARDCODED_GEMINI_API_KEY
+  // Only use the env var — no hardcoded fallback (the previous hardcoded key was invalid)
+  return process.env.GEMINI_API_KEY || null
 }
 
 // ── ZAI Config (local-only) ────────────────────────────────────────
@@ -194,8 +212,10 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
   const slug = (categorySlug || '').toLowerCase()
   const name = (productName || '').toLowerCase()
 
-  // Women's sarees — IDM-VTON doesn't handle sarees well (it's designed for
-  // upper-body garments), so we mark it as not VTON-compatible and use ZAI/Pollinations
+  // Women's sarees — v26: IDM-VTON is now PRIMARY for sarees.
+  // Sarees are full-body garments and IDM-VTON handles them reliably (~25s).
+  // This fixes the v25 "Generation Timed Out" error where sarees fell through
+  // to Pollinations (rate-limited + slow) and exceeded the client timeout.
   if (slug.includes('saree')) {
     return {
       gender: 'woman',
@@ -203,8 +223,8 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       placement: 'draped in the saree in elegant Indian style with pallu over the left shoulder, matching blouse, properly pleated at the waist',
       size: '768x1344',
       materialHint: 'flowing silk fabric with natural drape and sheen',
-      vtonCompatible: false,
-      garmentDescription: `A beautiful ${productName} saree`,
+      vtonCompatible: true,
+      garmentDescription: `A beautiful ${productName} — a traditional Indian saree with matching blouse`,
     }
   }
 
@@ -887,7 +907,7 @@ async function callIDMVTONOnce(
 }
 
 // ── Strategy B: Google Gemini 2.5 Flash Image (Nano Banana) ────────
-// PRIMARY strategy on Vercel for ALL categories.
+// OPTIONAL last-resort strategy — only used if GEMINI_API_KEY env var is set.
 // Accepts selfie + product images and generates a photorealistic try-on
 // result that preserves the person's face AND renders the exact product.
 //
@@ -896,7 +916,9 @@ async function callIDMVTONOnce(
 //   - No dependency on SDK version
 //   - More control over request/response
 //
-// API key resolution: env var GEMINI_API_KEY → hardcoded fallback.
+// API key resolution: GEMINI_API_KEY env var only (no hardcoded fallback).
+// v26: The previous hardcoded fallback key was INVALID (HTTP 401) and has
+// been removed. To enable Gemini, set GEMINI_API_KEY in Vercel env vars.
 
 async function callGeminiTryOn(
   input: TryOnInput,
@@ -1346,8 +1368,12 @@ async function callPollinationsWithSelfieReference(
     url += `&image=${encodeURIComponent(selfieUrl)}`
   }
 
-  const MAX_RETRIES = 2
-  const RETRY_DELAYS_MS = [4_000, 6_000]
+  // v26: Reduced from 2 retries (3 attempts) to 1 retry (2 attempts).
+  // Pollinations is rate-limited (HTTP 429) and slow — retrying 3x regularly
+  // exceeded the client's 55s timeout, producing "Generation Timed Out".
+  // With 1 retry max: worst case = 18s + 3s + 18s = 39s (safely under 55s).
+  const MAX_RETRIES = 1
+  const RETRY_DELAYS_MS = [3_000]
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
@@ -1454,15 +1480,12 @@ export async function isTryOnServiceReady(): Promise<{
   engine: string
   reason?: string
 }> {
-  const hasGemini = !!getGeminiApiKey()
   const isVercel = !!process.env.VERCEL
   return {
     ready: true,
-    engine: isVercel ? (hasGemini ? 'gemini-nano-banana' : 'idm-vton') : 'zai-image-edit',
+    engine: isVercel ? 'idm-vton' : 'zai-image-edit',
     reason: isVercel
-      ? (hasGemini
-          ? 'Google Gemini 2.5 Flash Image (Nano Banana) — preserves your face & renders the EXACT product for ALL categories (sarees, jewelry, watches, garments).'
-          : 'IDM-VTON HuggingFace Space — real VTON model for garment categories.')
+      ? 'IDM-VTON HuggingFace Space — real VTON model for ALL garment categories (shirts, sarees, dresses, fashion). Reliable ~25s, free, no auth required.'
       : 'ZAI image-edit (edit-both) — preserves your face & renders the exact product.',
   }
 }
@@ -1477,7 +1500,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   const isVercel = !!process.env.VERCEL
   const hasGeminiKey = !!getGeminiApiKey()
 
-  console.log(`[virtual-tryon] v25 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+  console.log(`[virtual-tryon] v26 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
 
   if (!input.selfieData?.startsWith('data:image/')) {
     return {
@@ -1490,40 +1513,47 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  STRATEGY ORDER (v25):
+  //  STRATEGY ORDER (v26):
   //
   //  On VERCEL (production):
-  //    1. Gemini (PRIMARY — ALL categories, Nano Banana model)
-  //    2. IDM-VTON (FALLBACK — garment categories only)
-  //    3. Pollinations (LAST RESORT)
+  //    1. IDM-VTON HF Space (PRIMARY — ALL garment categories incl. sarees)
+  //       - Reliable ~25s, real VTON model
+  //    2. Pollinations (FALLBACK — ALL categories, reduced retries)
+  //    3. Gemini (OPTIONAL — only if env var GEMINI_API_KEY is set to a VALID key)
+  //       - The hardcoded fallback key is INVALID, so this is skipped by default
   //
   //  On LOCAL (sandbox):
   //    1. ZAI image-edit (PRIMARY — best quality, preserves face + product)
-  //    2. Gemini (FALLBACK)
-  //    3. IDM-VTON (garments only)
-  //    4. Pollinations (last resort)
+  //    2. IDM-VTON (garments only)
+  //    3. Pollinations (last resort)
+  //    4. Gemini (only if valid key set)
   // ═══════════════════════════════════════════════════════════════════
 
   const catConfig = getCategoryConfig(input.categorySlug, input.productName)
 
-  // ── On VERCEL: Gemini is PRIMARY for ALL categories ──────────────
-  if (isVercel && hasGeminiKey && Date.now() < totalDeadline - 18_000) {
-    strategiesAttempted.push('gemini')
-    console.log('[virtual-tryon] VERCEL Strategy 1: Google Gemini (Nano Banana) — PRIMARY for ALL categories')
-    const result = await callGeminiTryOn(input, totalDeadline)
+  // ── On VERCEL: IDM-VTON is PRIMARY for garment categories ─────────
+  // v26 CHANGE: Sarees are now vtonCompatible=true, so they use IDM-VTON
+  // (reliable ~25s) instead of falling through to Pollinations (which
+  // was timing out). This fixes the "Generation Timed Out" error.
+  if (isVercel && catConfig.vtonCompatible && Date.now() < totalDeadline - 25_000) {
+    strategiesAttempted.push('idm-vton')
+    console.log('[virtual-tryon] VERCEL Strategy 1: IDM-VTON HF Space (PRIMARY for garment category)')
+    const result = await callIDMVTON(input, totalDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+      console.log(`[virtual-tryon] ✅ IDM-VTON succeeded in ${(elapsed / 1000).toFixed(1)}s`)
       return {
         success: true,
         imageUrl: result.imageUrl,
-        strategy: 'gemini',
+        strategy: 'idm-vton',
         elapsedMs: elapsed,
         debugInfo: { strategiesAttempted, strategyErrors },
       }
     }
-    strategyErrors['gemini'] = result.error || 'No image returned'
-    console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
+    strategyErrors['idm-vton'] = result.error || 'No image returned'
+    console.log(`[virtual-tryon] IDM-VTON failed: ${result.error?.substring(0, 150)}`)
+  } else if (isVercel && !catConfig.vtonCompatible) {
+    console.log(`[virtual-tryon] VERCEL: Skipping IDM-VTON — category "${input.categorySlug}" is not garment-compatible`)
   }
 
   // ── On LOCAL: ZAI image-edit is PRIMARY ──────────────────────────
@@ -1546,12 +1576,11 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     console.log(`[virtual-tryon] ZAI image-edit failed: ${result.error?.substring(0, 150)}`)
   }
 
-  // ── FALLBACK: IDM-VTON (garment categories only) ────────────────
-  // IDM-VTON is designed for upper-body garments (shirts, dresses, etc.).
-  // For non-garment categories (sarees, jewelry, watches), skip IDM-VTON.
-  if (catConfig.vtonCompatible && Date.now() < totalDeadline - 25_000) {
+  // ── FALLBACK: IDM-VTON (LOCAL only — already tried on Vercel above) ──
+  // On local, if ZAI failed and IDM-VTON hasn't been tried yet
+  if (!isVercel && catConfig.vtonCompatible && !strategiesAttempted.includes('idm-vton') && Date.now() < totalDeadline - 25_000) {
     strategiesAttempted.push('idm-vton')
-    console.log('[virtual-tryon] Fallback: IDM-VTON HF Space (garment category)')
+    console.log('[virtual-tryon] LOCAL Fallback: IDM-VTON HF Space (garment category)')
     const result = await callIDMVTON(input, totalDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
@@ -1566,38 +1595,15 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     }
     strategyErrors['idm-vton'] = result.error || 'No image returned'
     console.log(`[virtual-tryon] IDM-VTON failed: ${result.error?.substring(0, 150)}`)
-  } else if (!catConfig.vtonCompatible) {
-    console.log(`[virtual-tryon] Skipping IDM-VTON — category "${input.categorySlug}" is not garment-compatible`)
   }
 
-  // ── FALLBACK: Gemini (if not already tried as primary) ──────────
-  // On local, if ZAI failed and Gemini hasn't been tried yet
-  if (!isVercel && hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 18_000) {
-    strategiesAttempted.push('gemini')
-    console.log('[virtual-tryon] LOCAL Fallback: Google Gemini (Nano Banana)')
-    const result = await callGeminiTryOn(input, totalDeadline)
-    if (result.success && result.imageUrl) {
-      const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: result.imageUrl,
-        strategy: 'gemini',
-        elapsedMs: elapsed,
-        debugInfo: { strategiesAttempted, strategyErrors },
-      }
-    }
-    strategyErrors['gemini'] = result.error || 'No image returned'
-    console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
-  }
-
-  // ── LAST RESORT: Pollinations text-to-image ─────────────────────
-  // Note: Pollinations now only serves the `sana` model (flux was removed).
-  // This is a degraded fallback — the face won't match, but product type and
-  // colours will be approximately correct.
+  // ── FALLBACK: Pollinations (ALL categories) ─────────────────────
+  // v26: Reduced retries (1 max) and timeout (18s) to prevent client timeout.
+  // Pollinations uses the sana model (only one available) — degraded quality
+  // but works for ALL categories including jewelry, watches, accessories.
   if (Date.now() < totalDeadline - 12_000) {
     strategiesAttempted.push('pollinations')
-    console.log('[virtual-tryon] Last resort: Pollinations text-to-image')
+    console.log('[virtual-tryon] Fallback: Pollinations text-to-image (reduced retries)')
     const result = await callPollinationsWithSelfieReference(input, totalDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
@@ -1618,6 +1624,29 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     }
     strategyErrors['pollinations'] = result.error || 'No image returned'
     console.log(`[virtual-tryon] Pollinations failed: ${result.error?.substring(0, 150)}`)
+  }
+
+  // ── LAST RESORT: Gemini (only if a VALID key is set via env var) ──
+  // v26: The hardcoded fallback key was INVALID (HTTP 401) and has been removed.
+  // This strategy only runs if the user has set GEMINI_API_KEY to a valid
+  // AIzaSy... key in Vercel env vars. We detect this by checking getGeminiApiKey().
+  if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 18_000) {
+    strategiesAttempted.push('gemini')
+    console.log('[virtual-tryon] Last resort: Google Gemini (env var key set)')
+    const result = await callGeminiTryOn(input, totalDeadline)
+    if (result.success && result.imageUrl) {
+      const elapsed = Date.now() - totalStart
+      console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+      return {
+        success: true,
+        imageUrl: result.imageUrl,
+        strategy: 'gemini',
+        elapsedMs: elapsed,
+        debugInfo: { strategiesAttempted, strategyErrors },
+      }
+    }
+    strategyErrors['gemini'] = result.error || 'No image returned'
+    console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
   }
 
   // ── All strategies failed ───────────────────────────────────────

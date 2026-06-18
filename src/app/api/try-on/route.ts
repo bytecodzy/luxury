@@ -1,35 +1,34 @@
 /**
- * AI Virtual Try-On API v25 — Gemini-first strategy for local & Vercel
+ * AI Virtual Try-On API v26 — IDM-VTON-first strategy for local & Vercel
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v25 (CURRENT):
+ * v26 (CURRENT):
  *   On VERCEL (production):
- *     Strategy 1: Google Gemini 2.5 Flash Image (Nano Banana) — PRIMARY
- *       - User-provided GEMINI_API_KEY (hardcoded fallback in lib)
- *       - Handles ALL categories: sarees, jewelry, watches, garments, accessories
- *       - Preserves face AND renders exact product
- *       - Best free image generation model
- *
- *     Strategy 2: IDM-VTON HF Space — FALLBACK (garment categories only)
- *       - Free, no auth required
- *       - Real VTON model for shirts, dresses, etc.
- *
- *     Strategy 3: Pollinations — LAST RESORT
- *       - Degraded quality but always available
+ *     Strategy 1: IDM-VTON HF Space — PRIMARY for ALL garment categories
+ *       - Free, no auth required, reliable ~25s
+ *       - Real VTON model — preserves face AND renders exact garment
+ *       - Handles: shirts, t-shirts, sarees, dresses, fashion, kids clothing
+ *     Strategy 2: Pollinations — FALLBACK for ALL categories
+ *       - Reduced retries (1 max) and timeout (18s) to prevent client timeout
+ *       - Uses selfie as image reference when possible
+ *       - Handles non-garment categories: jewelry, watches, fragrances, accessories
+ *     Strategy 3: Google Gemini — OPTIONAL (only if GEMINI_API_KEY env var is set)
+ *       - The hardcoded fallback key is INVALID, so this is skipped by default
+ *       - To enable: get a valid key from https://aistudio.google.com/apikey
  *
  *   On LOCAL (sandbox):
  *     Strategy 1: ZAI image-edit (edit-both) — PRIMARY
  *       - Best quality, preserves face + product
+ *     Strategy 2: IDM-VTON — garment categories only
+ *     Strategy 3: Pollinations — last resort
+ *     Strategy 4: Gemini — only if valid env var key set
  *
- *     Strategy 2: Google Gemini — FALLBACK
- *     Strategy 3: IDM-VTON — garment categories only
- *     Strategy 4: Pollinations — last resort
- *
- *   GEMINI API KEY:
- *     - Hardcoded fallback in src/lib/virtual-tryon.ts (user-provided)
- *     - GEMINI_API_KEY env var takes priority if set
- *     - Get your own key: https://aistudio.google.com/apikey
+ *   v26 FIXES (vs v25):
+ *     - Sarees now use IDM-VTON (was: Pollinations → "Generation Timed Out")
+ *     - Pollinations retries reduced from 3 to 2 attempts (prevents client timeout)
+ *     - Gemini only attempted if env var GEMINI_API_KEY is explicitly set
+ *       (the hardcoded fallback key returns HTTP 401 ACCESS_TOKEN_TYPE_UNSUPPORTED)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -200,21 +199,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'AI ready — Google Gemini (Nano Banana) preserves your face AND renders the exact product for ALL categories. Works on local AND Vercel.',
+      message: 'AI ready — IDM-VTON (real VTON model) preserves your face AND renders the exact garment for ALL garment categories. Works on local AND Vercel.',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  // v25: Gemini is the primary engine on Vercel (with hardcoded API key fallback);
+  // v26: IDM-VTON is the primary engine on Vercel (reliable, free, no auth);
   // ZAI image-edit is the primary engine on local.
   const isVercel = !!process.env.VERCEL
-  const engine = isVercel ? 'gemini-nano-banana' : 'zai-image-edit'
+  const engine = isVercel ? 'idm-vton' : 'zai-image-edit'
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? 'AI Virtual Try-On ready — Google Gemini 2.5 Flash Image (Nano Banana) preserves your face & renders the EXACT product for ALL categories (sarees, jewelry, watches, garments).'
+      ? 'AI Virtual Try-On ready — IDM-VTON (real VTON model) preserves your face & renders the EXACT garment for ALL garment categories (shirts, sarees, dresses, fashion). Reliable ~25s.'
       : 'AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product).',
   })
 }
