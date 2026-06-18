@@ -569,19 +569,58 @@ function buildEditPrompt(config: CategoryConfig, input: TryOnInput): string {
   return parts.join(' ')
 }
 
-// ── Strategy A: Direct ZAI image-edit ──────────────────────────────
+// ── Strategy A: Direct ZAI image-edit (raw HTTP, no SDK) ───────────
+// We bypass the z-ai-web-dev-sdk and make direct fetch calls to the ZAI
+// API. This gives us:
+//   1. Full visibility into the raw API response (for debugging)
+//   2. Control over the image-URL download (the API returns a URL to a
+//      Chinese cloud host that can be slow/unreachable from Vercel — we
+//      handle download failures explicitly with a timeout)
+//   3. Better error messages (no more "Cannot read properties of
+//      undefined (reading 'map')" — we check the response shape)
+
+async function downloadZAIImage(
+  imageUrl: string,
+  timeoutMs: number,
+): Promise<{ buffer: Buffer; mime: string } | null> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(imageUrl, {
+      signal: controller.signal,
+      headers: { 'User-Agent': '3BOXES-VirtualTryOn/1.0', 'Accept': 'image/*,*/*;q=0.8' },
+    })
+    clearTimeout(timeoutId)
+    if (!res.ok) {
+      console.log(`[virtual-tryon] ZAI image download failed: HTTP ${res.status}`)
+      return null
+    }
+    const ct = res.headers.get('content-type') || 'image/png'
+    const mime = ct.split(';')[0].trim()
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length < 3000) {
+      console.log(`[virtual-tryon] ZAI image download too small: ${buf.length} bytes`)
+      return null
+    }
+    return { buffer: buf, mime: mime.startsWith('image/') ? mime : 'image/png' }
+  } catch (err) {
+    clearTimeout(timeoutId)
+    console.log(`[virtual-tryon] ZAI image download error: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
 
 async function callZAIImageEdit(
   input: TryOnInput,
   deadline: number,
 ): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
-  const zai = await getZAI()
-  if (!zai) {
-    return { success: false, error: 'ZAI SDK unavailable (not configured or Vercel environment)' }
+  const config_obj = getZAIConfig()
+  if (!config_obj) {
+    return { success: false, error: 'ZAI config unavailable' }
   }
 
-  const config = getCategoryConfig(input.categorySlug, input.productName)
-  const prompt = buildEditPrompt(config, input)
+  const catConfig = getCategoryConfig(input.categorySlug, input.productName)
+  const prompt = buildEditPrompt(catConfig, input)
 
   // Use edit-both if we have a product image, otherwise edit-selfie
   const hasProductImage = input.productImageBase64 && input.productImageBase64.startsWith('data:image/')
@@ -595,46 +634,92 @@ async function callZAIImageEdit(
     return { success: false, error: `insufficient time budget (${remaining}ms) for ZAI edit` }
   }
 
-  console.log(`[virtual-tryon] ZAI image-edit (${strategyName}): ${config.size}, timeout=${remaining}ms`)
+  console.log(`[virtual-tryon] ZAI image-edit (${strategyName}): ${catConfig.size}, timeout=${remaining}ms`)
   console.log(`[virtual-tryon] Prompt (first 200): ${prompt.substring(0, 200)}...`)
+
+  // Build the request — direct HTTP call (bypasses the SDK)
+  const url = `${config_obj.baseUrl}/images/generations/edit`
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${config_obj.apiKey}`,
+    'X-Z-AI-From': 'Z',
+  }
+  if (config_obj.chatId) headers['X-Chat-Id'] = config_obj.chatId
+  if (config_obj.userId) headers['X-User-Id'] = config_obj.userId
+  if (config_obj.token) headers['X-Token'] = config_obj.token
+
+  const requestBody = { prompt, images, size: catConfig.size }
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), remaining)
 
   try {
     const start = Date.now()
-    const response = await Promise.race([
-      zai.images.generations.edit({
-        prompt,
-        images,
-        size: config.size,
-      }),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('ZAI edit timeout')), remaining)),
-    ])
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
     const elapsed = ((Date.now() - start) / 1000).toFixed(1)
 
-    const item = response?.data?.[0]
-    const b64 = item?.base64
-    if (!b64 || typeof b64 !== 'string' || b64.length < 3000) {
-      return { success: false, error: `ZAI edit returned no usable image after ${elapsed}s (base64 length=${b64?.length || 0})` }
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => 'unknown')
+      console.log(`[virtual-tryon] ZAI API HTTP ${res.status} after ${elapsed}s: ${errBody.substring(0, 300)}`)
+      return { success: false, error: `ZAI API HTTP ${res.status}: ${errBody.substring(0, 150)}` }
     }
 
-    // Detect format
-    let mime = 'image/png'
-    if (item.format === 'jpeg' || item.format === 'jpg') mime = 'image/jpeg'
-    else if (item.format === 'webp') mime = 'image/webp'
-    else {
-      const head = Buffer.from(b64.substring(0, 8), 'base64').toString('hex')
-      if (head.startsWith('ffd8ff')) mime = 'image/jpeg'
-      else if (head.startsWith('89504e47')) mime = 'image/png'
-      else if (head.startsWith('52494646')) mime = 'image/webp'
+    const result = await res.json() as any
+    console.log(`[virtual-tryon] ZAI API response after ${elapsed}s: keys=${Object.keys(result || {}).join(',')}`)
+
+    // The API returns { data: [{ url: "..." }] } or { data: [{ base64: "..." }] }
+    const item = result?.data?.[0]
+    if (!item) {
+      const raw = JSON.stringify(result).substring(0, 300)
+      console.log(`[virtual-tryon] ZAI response has no data[0]: ${raw}`)
+      return { success: false, error: `ZAI returned no image data after ${elapsed}s: ${raw.substring(0, 150)}` }
     }
 
-    const dataUrl = `data:${mime};base64,${b64}`
-    const byteLen = Math.floor(b64.length * 0.75)
-    console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded in ${elapsed}s (${(byteLen / 1024).toFixed(1)}KB, ${mime})`)
-    return { success: true, imageUrl: dataUrl }
+    // Case 1: response has base64 directly
+    if (item.base64 && typeof item.base64 === 'string' && item.base64.length > 3000) {
+      let mime = 'image/png'
+      if (item.format === 'jpeg' || item.format === 'jpg') mime = 'image/jpeg'
+      else if (item.format === 'webp') mime = 'image/webp'
+      else {
+        const head = Buffer.from(item.base64.substring(0, 8), 'base64').toString('hex')
+        if (head.startsWith('ffd8ff')) mime = 'image/jpeg'
+        else if (head.startsWith('89504e47')) mime = 'image/png'
+        else if (head.startsWith('52494646')) mime = 'image/webp'
+      }
+      const dataUrl = `data:${mime};base64,${item.base64}`
+      console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded (base64) in ${elapsed}s (${(item.base64.length * 0.75 / 1024).toFixed(1)}KB, ${mime})`)
+      return { success: true, imageUrl: dataUrl }
+    }
+
+    // Case 2: response has a URL — download the image
+    if (item.url) {
+      console.log(`[virtual-tryon] ZAI returned URL, downloading: ${item.url.substring(0, 120)}...`)
+      const downloadTimeout = Math.min(20_000, deadline - Date.now() - 2_000)
+      if (downloadTimeout < 5_000) {
+        return { success: false, error: `insufficient time to download ZAI image (${downloadTimeout}ms)` }
+      }
+      const downloaded = await downloadZAIImage(item.url, downloadTimeout)
+      if (!downloaded) {
+        return { success: false, error: `ZAI image download failed after ${elapsed}s (URL unreachable from this environment)` }
+      }
+      const dataUrl = `data:${downloaded.mime};base64,${downloaded.buffer.toString('base64')}`
+      console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded (url→download) in ${elapsed}s + download (${(downloaded.buffer.length / 1024).toFixed(1)}KB, ${downloaded.mime})`)
+      return { success: true, imageUrl: dataUrl }
+    }
+
+    return { success: false, error: `ZAI response had neither base64 nor url after ${elapsed}s` }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.log(`[virtual-tryon] ZAI ${strategyName} failed: ${msg.substring(0, 200)}`)
-    return { success: false, error: msg.substring(0, 200) }
+    clearTimeout(timeoutId)
+    const isTimeout = err instanceof DOMException && err.name === 'AbortError'
+    const msg = isTimeout ? `ZAI edit timed out (${remaining}ms)` : `ZAI error: ${(err as Error).message.substring(0, 150)}`
+    console.log(`[virtual-tryon] ZAI ${strategyName} failed: ${msg}`)
+    return { success: false, error: msg }
   }
 }
 
@@ -854,7 +939,9 @@ let spaceAwakeCache: { awake: boolean; timestamp: number } | null = null
 const SPACE_CACHE_TTL = 20_000
 
 export async function preWarmSpace(): Promise<boolean> {
-  void getZAI() // warm the ZAI SDK cache
+  // v23: we use direct HTTP calls (not the ZAI SDK instance), so there's
+  // nothing to pre-warm. Just verify the config is available.
+  void getZAIConfig()
   return true
 }
 
