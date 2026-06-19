@@ -1,49 +1,50 @@
 /**
- * AI Virtual Try-On API v28 — ZAI + Gradio/HF + Pollinations + Image Composite (FREE FOREVER)
+ * AI Virtual Try-On API v30 — Concrete & Accurate (FREE FOREVER, no mismatches)
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v28 (CURRENT) — Standard ZAI + Gradio + Hugging Face + Image Composite:
+ * v30 (CURRENT) — Concrete & Accurate (root cause fix for mismatches):
  *
+ *   ROOT CAUSE (v28/v29 still produced mismatches):
+ *     - Saree product images show a BLACK MANNEQUIN wearing the saree on a
+ *       BROWN background. Image composite's bg-removal removes the brown bg
+ *       but KEEPS the black mannequin → composite places mannequin over
+ *       user's face → "different person" mismatch.
+ *     - Pollinations (saree fallback) generates a NEW person from text →
+ *       "different person AND different product" mismatch.
+ *
+ *   v30 FIX:
  *   On VERCEL (production):
- *     JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES:
- *       Strategy 1: Image Composite (PRIMARY — 100% reliable, instant, free)
- *         - Takes the user's selfie (preserves the EXACT face)
- *         - Removes white background from the product image (chroma key)
- *         - Detects face region using skin-tone analysis
- *         - Composites product at correct anatomical position
- *         - ALWAYS produces a result (never rate-limits, never fails)
- *       Strategy 2: Pollinations text-to-image (fallback)
- *       Strategy 3: Gemini (optional — if GEMINI_API_KEY env var set)
- *
  *     SAREES:
- *       Strategy 1: Pollinations with PRODUCT reference (PRIMARY)
- *       Strategy 2: Image Composite (pallu over shoulder — instant fallback)
- *       Strategy 3: Gemini (optional — if env var set)
+ *       Strategy 1: Gemini (optional — if GEMINI_API_KEY env var set)
+ *       Strategy 2: Showcase Composite (PRIMARY — split-view, 100% reliable,
+ *         always shows user's real face + real saree side-by-side)
+ *       NO Image Composite (mannequin shows over face → mismatch)
+ *       NO Pollinations (generates new person → mismatch)
+ *
+ *     JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES:
+ *       Strategy 1: Gemini (optional — if env var set)
+ *       Strategy 2: Image Composite v3 (PRIMARY — with NEW mannequin detection.
+ *         For jewelry on BLACK bg, bg-removal eliminates both bg AND mannequin,
+ *         leaving just the jewelry piece → composite works perfectly.)
+ *       Strategy 3: Showcase Composite (fallback if mannequin detected)
  *
  *     GARMENTS (shirts, dresses, fashion, kids):
- *       Strategy 1: IDM-VTON HF Space (PRIMARY — real VTON, preserves face + garment)
- *       Strategy 2: Pollinations with SELFIE reference (fallback)
- *       Strategy 3: Image Composite (last resort)
- *       Strategy 4: Gemini (optional — if env var set)
+ *       Strategy 1: Gemini (optional — if env var set)
+ *       Strategy 2: IDM-VTON HF Space (PRIMARY — real VTON, preserves face + garment)
+ *       Strategy 3: Pollinations with SELFIE reference (degraded fallback)
+ *       Strategy 4: Showcase Composite (ultimate fallback)
  *
  *   On LOCAL (sandbox):
  *     Strategy 1: ZAI image-edit (PRIMARY — handles ALL categories incl. sarees/jewelry)
- *     Strategy 2: Image Composite (instant fallback for non-garments)
+ *     Strategy 2: Image Composite v3 (with mannequin check)
  *     Strategy 3: IDM-VTON (garments only)
- *     Strategy 4: Pollinations (last resort)
+ *     Strategy 4: Showcase Composite (ultimate fallback)
  *     Strategy 5: Gemini (only if valid key set)
  *
- *   v28 FIXES (vs v27):
- *     - Jewelry/Watches/Accessories/Fragrances: Image Composite is PRIMARY
- *       (100% reliable, instant ~0.5s, free, preserves face + exact product)
- *     - No more "Style Preview Unavailable" for jewelry/watches/accessories
- *     - No more total mismatch — composite uses the EXACT product image
- *     - Sarees: Pollinations PRIMARY + Composite FALLBACK (always succeeds)
- *
  *   100% FREE FOREVER: ZAI (free in sandbox), IDM-VTON (free HF Space, no auth),
- *   Pollinations (free, rate-limited), Image Composite (sharp — free, instant),
- *   Gemini (free tier 1500/day if key set). No paid APIs. No credit cards.
+ *   Image Composite (sharp — free, instant), Showcase Composite (sharp — free,
+ *   instant), Gemini (free tier 1500/day if key set). No paid APIs. No credit cards.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -214,23 +215,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'v28 AI ready — Image Composite (100% reliable for jewelry/watches/accessories), IDM-VTON for garments, Pollinations for sarees. Free forever, no auth required.',
+      message: 'v30 AI ready — Showcase Composite (100% reliable for sarees — no mismatch), Image Composite v3 (mannequin-checked) for jewelry, IDM-VTON for garments. Free forever, no auth required.',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  // v28: Image Composite is the primary engine for JEWELRY/WATCHES/ACCESSORIES/FRAGRANCES on Vercel;
+  // v30: Showcase Composite is the primary engine for SAREES on Vercel (no mismatch possible);
+  // Image Composite v3 (with mannequin detection) is the primary engine for JEWELRY/WATCHES/ACCESSORIES on Vercel;
   // IDM-VTON is the primary engine for GARMENTS on Vercel;
-  // Pollinations with product-reference is primary for SAREES on Vercel;
   // ZAI image-edit is the primary engine on local (handles ALL categories).
   const isVercel = !!process.env.VERCEL
-  const engine = isVercel ? 'composite-idm-vton-pollinations-v28' : 'zai-image-edit'
+  const engine = isVercel ? 'showcase-composite-idm-vton-v30' : 'zai-image-edit'
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? 'v28 AI Virtual Try-On ready — Image Composite for jewelry/watches/accessories (100% reliable, preserves face + exact product), IDM-VTON for garments, Pollinations for sarees. Free forever, no auth required.'
-      : 'v28 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
+      ? 'v30 AI Virtual Try-On ready — Showcase Composite for sarees (100% reliable, no mismatch), Image Composite v3 for jewelry/watches (mannequin-checked), IDM-VTON for garments. Free forever, no auth required.'
+      : 'v30 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
   })
 }

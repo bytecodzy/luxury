@@ -85,6 +85,76 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v))
 }
 
+// ── v3: Mannequin/Model Detection ──────────────────────────────────
+// Product images often show a mannequin or model wearing the product.
+// When we composite such an image over the user's selfie, the mannequin's
+// body/face appears OVER the user's face → "different person" mismatch.
+//
+// This function analyses the product image AFTER background removal to
+// detect if a large connected opaque region remains in the center (which
+// indicates a mannequin/body that bg removal couldn't eliminate).
+//
+// Returns true if a mannequin is likely present (composite should be skipped).
+
+async function detectMannequin(bgRemovedBuf: Buffer): Promise<{ hasMannequin: boolean; opaqueRatio: number; centralOpacity: number }> {
+  try {
+    const meta = await sharp(bgRemovedBuf).metadata()
+    const w = meta.width || 400
+    const h = meta.height || 400
+
+    // Downscale for fast analysis
+    const smallW = Math.min(150, w)
+    const smallH = Math.round((smallW / w) * h)
+    const { data, info } = await sharp(bgRemovedBuf)
+      .resize(smallW, smallH, { fit: 'fill' })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+
+    const actualW = info.width
+    const actualH = info.height
+    const totalPixels = actualW * actualH
+
+    let opaquePixels = 0
+    let centralOpaque = 0
+    const centralX0 = Math.floor(actualW * 0.25)
+    const centralX1 = Math.floor(actualW * 0.75)
+    const centralY0 = Math.floor(actualH * 0.25)
+    const centralY1 = Math.floor(actualH * 0.75)
+    const centralArea = (centralX1 - centralX0) * (centralY1 - centralY0)
+
+    for (let y = 0; y < actualH; y++) {
+      for (let x = 0; x < actualW; x++) {
+        const idx = (y * actualW + x) * 4
+        const alpha = data[idx + 3]
+        if (alpha > 128) {
+          opaquePixels++
+          if (x >= centralX0 && x < centralX1 && y >= centralY0 && y < centralY1) {
+            centralOpaque++
+          }
+        }
+      }
+    }
+
+    const opaqueRatio = opaquePixels / totalPixels
+    const centralOpacity = centralOpaque / centralArea
+
+    // Heuristics for mannequin detection:
+    // - Very high opaque ratio (>65%) → likely no real bg was removed, mannequin fills frame
+    // - High central opacity (>80%) with moderate overall opacity → mannequin body in center
+    // - For jewelry, expected opaque ratio is 5-30% (just the jewelry piece)
+    // - For garments on mannequins, opaque ratio is 50-85%
+    const hasMannequin = opaqueRatio > 0.65 || (opaqueRatio > 0.40 && centralOpacity > 0.85)
+
+    console.log(`[image-composite] v3: Mannequin check — opaqueRatio=${opaqueRatio.toFixed(2)}, centralOpacity=${centralOpacity.toFixed(2)}, hasMannequin=${hasMannequin}`)
+
+    return { hasMannequin, opaqueRatio, centralOpacity }
+  } catch (err) {
+    console.log(`[image-composite] v3: Mannequin detection failed: ${(err as Error).message}`)
+    return { hasMannequin: false, opaqueRatio: 0, centralOpacity: 0 }
+  }
+}
+
 // ── v2: Smart Background Removal ───────────────────────────────────
 // Detects transparent PNGs, samples border colors, handles gradients.
 
@@ -369,12 +439,24 @@ function calculatePlacement(
 
   switch (category) {
     case 'necklace': {
-      // Below the chin, centered on face
-      const w = clamp(faceW * 1.5, canvasW * 0.25, canvasW * 0.85)
-      const h = Math.round(w / Math.max(productAspect, 0.4))
+      // Below the chin, centered on face. v3: Constrain size so the necklace
+      // fits in the space below the chin (canvasH - chinY), never overlapping
+      // the face. Previous version allowed huge necklaces that covered the face.
+      // v3.1: Further reduced max size — necklaces often have tall pendants that
+      // visually extend toward the face even when placed below the chin.
+      const spaceBelowChin = canvasH - chinY
+      const maxW = Math.min(faceW * 0.9, canvasW * 0.45)
+      const maxH = Math.min(spaceBelowChin * 0.7, canvasH * 0.22)
+      let w = maxW
+      let h = Math.round(w / Math.max(productAspect, 0.4))
+      // If too tall, scale down to fit
+      if (h > maxH) {
+        h = Math.round(maxH)
+        w = Math.round(h * productAspect)
+      }
       placements.push({
         x: Math.round(clamp(fcx - w / 2, 0, canvasW - w)),
-        y: Math.round(clamp(chinY + faceH * 0.15, 0, canvasH - h)),
+        y: Math.round(clamp(chinY + faceH * 0.05, 0, canvasH - h)),
         w: Math.round(w),
         h: Math.round(h),
         opacity: 0.95,
@@ -384,8 +466,9 @@ function calculatePlacement(
 
     case 'earrings': {
       // At ear level (face vertical center), at face left/right edges
-      const earSize = Math.max(faceW * 0.22, canvasW * 0.05)
-      const earH = Math.round(earSize / Math.max(productAspect, 0.4))
+      // v3: Constrain earring size to face proportions
+      const earSize = clamp(faceW * 0.18, canvasW * 0.04, canvasW * 0.15)
+      const earH = Math.round(Math.min(earSize / Math.max(productAspect, 0.4), faceH * 0.5))
       const earY = Math.round(fcy + faceH * 0.15) // slightly below face center (earlobe)
       // Left ear (at left edge of face)
       placements.push({
@@ -407,30 +490,38 @@ function calculatePlacement(
     }
 
     case 'jewelry-set': {
-      // Necklace + earrings
-      const neckW = clamp(faceW * 1.5, canvasW * 0.25, canvasW * 0.85)
-      const neckH = Math.round(neckW / Math.max(productAspect, 0.4))
+      // Necklace + earrings (v3.1: constrained sizes — same as necklace)
+      const spaceBelowChin = canvasH - chinY
+      const neckMaxW = Math.min(faceW * 0.9, canvasW * 0.45)
+      const neckMaxH = Math.min(spaceBelowChin * 0.7, canvasH * 0.22)
+      let neckW = neckMaxW
+      let neckH = Math.round(neckW / Math.max(productAspect, 0.4))
+      if (neckH > neckMaxH) {
+        neckH = Math.round(neckMaxH)
+        neckW = Math.round(neckH * productAspect)
+      }
       placements.push({
         x: Math.round(clamp(fcx - neckW / 2, 0, canvasW - neckW)),
-        y: Math.round(clamp(chinY + faceH * 0.15, 0, canvasH - neckH)),
+        y: Math.round(clamp(chinY + faceH * 0.05, 0, canvasH - neckH)),
         w: Math.round(neckW),
         h: Math.round(neckH),
         opacity: 0.95,
       })
-      const earSize = Math.max(faceW * 0.22, canvasW * 0.05)
+      const earSize = clamp(faceW * 0.18, canvasW * 0.04, canvasW * 0.15)
       const earY = Math.round(fcy + faceH * 0.15)
+      const earH = Math.round(Math.min(earSize, faceH * 0.5))
       placements.push({
         x: Math.round(clamp(fcx - faceW / 2 - earSize * 0.3, 0, canvasW - earSize)),
-        y: Math.round(clamp(earY, 0, canvasH - earSize)),
+        y: Math.round(clamp(earY, 0, canvasH - earH)),
         w: Math.round(earSize),
-        h: Math.round(earSize),
+        h: earH,
         opacity: 0.95,
       })
       placements.push({
         x: Math.round(clamp(fcx + faceW / 2 - earSize * 0.7, 0, canvasW - earSize)),
-        y: Math.round(clamp(earY, 0, canvasH - earSize)),
+        y: Math.round(clamp(earY, 0, canvasH - earH)),
         w: Math.round(earSize),
-        h: Math.round(earSize),
+        h: earH,
         opacity: 0.95,
       })
       break
@@ -659,6 +750,21 @@ export async function compositeProductOnSelfie(
     const productMeta = await sharp(productNoBg).metadata()
     const productAspect = (productMeta.width || 1) / (productMeta.height || 1)
     console.log(`[image-composite] v2: Product (bg removed): ${productMeta.width}x${productMeta.height}, aspect=${productAspect.toFixed(2)}`)
+
+    // v3: Mannequin detection — if the product image has a mannequin/model
+    // (common for sarees, garments on models), the composite would place the
+    // mannequin OVER the user's face → "different person" mismatch.
+    // In that case, FAIL FAST so the caller falls back to showcase composite.
+    const mannequinCheck = await detectMannequin(productNoBg)
+    if (mannequinCheck.hasMannequin) {
+      console.log(`[image-composite] v3: ❌ Mannequin detected — skipping composite to avoid mismatch (opaqueRatio=${mannequinCheck.opaqueRatio.toFixed(2)})`)
+      return {
+        success: false,
+        error: `Product image contains a mannequin/model (opaqueRatio=${mannequinCheck.opaqueRatio.toFixed(2)}) — composite would cause mismatch. Use showcase instead.`,
+        strategy: 'composite-image',
+      }
+    }
+    console.log(`[image-composite] v3: ✅ No mannequin detected — safe to composite (opaqueRatio=${mannequinCheck.opaqueRatio.toFixed(2)})`)
 
     // 3. Detect face region (v2 better detection)
     const face = await detectFaceRegion(selfieBuf, canvasW, canvasH)

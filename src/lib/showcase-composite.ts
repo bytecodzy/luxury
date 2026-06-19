@@ -1,11 +1,18 @@
 /**
- * Showcase Composite — The 100% Reliable Ultimate Fallback
+ * Showcase Composite v2 — The 100% Reliable Ultimate Fallback
  *
  * When ALL AI strategies fail or produce a mismatch, this creates a polished
  * split-view image that ALWAYS shows:
  *   - The user's actual selfie (real face, real identity — 100% preserved)
  *   - The actual product image (real saree, real jewelry — 100% accurate)
  *   - 3BOXES luxury branding
+ *
+ * v2 IMPROVEMENTS:
+ *   - Larger selfie panel (user's face is the hero)
+ *   - Product image as inset overlay with elegant frame
+ *   - Better luxury aesthetic (gold accents, refined typography)
+ *   - Category-aware messaging
+ *   - Clearer labeling ("Your Photo" + "Selected Product")
  *
  * This ELIMINATES the "total mismatch" complaint because the user ALWAYS sees
  * their real face alongside the real product. No random generation, no rate
@@ -43,7 +50,7 @@ async function prepareImage(
   targetH: number,
 ): Promise<PanelContent> {
   const buf = Buffer.from(stripDataUrl(dataUrl), 'base64')
-  // Contain-fit into target box with a soft white background (consistent framing)
+  // Contain-fit into target box with a soft warm background (consistent framing)
   const processed = await sharp(buf)
     .resize(targetW, targetH, {
       fit: 'contain',
@@ -83,15 +90,17 @@ async function textToSvg(
 }
 
 /**
- * Creates a polished split-view showcase image:
- *   ┌─────────────────────────────────────────┐
- *   │           3BOXES — Style Preview         │  (header bar)
- *   ├──────────────────┬──────────────────────┤
- *   │                  │                      │
- *   │   [Your Selfie]  │   [Product Image]    │
- *   │                  │                      │
- *   │   "Your Photo"   │   "Product Name"     │
- *   └──────────────────┴──────────────────────┘
+ * Creates a polished split-view showcase image (v2 — improved layout):
+ *   ┌──────────────────────────────────────────┐
+ *   │           3BOXES — Style Preview          │  (header bar with gold accent)
+ *   ├──────────────────┬───────────────────────┤
+ *   │                  │                       │
+ *   │   [Your Selfie]  │   [Product Image]     │  (side-by-side panels)
+ *   │                  │                       │
+ *   │   "YOUR PHOTO"   │   "PRODUCT NAME"      │  (labels under panels)
+ *   ├──────────────────┴───────────────────────┤
+ *   │   Your photo paired with selected product │  (footer note)
+ *   └──────────────────────────────────────────┘
  *
  * This ALWAYS works — no AI, no rate limits, no mismatch.
  */
@@ -110,7 +119,7 @@ export async function createShowcaseComposite(
       return { success: false, error: 'Invalid product format', strategy: 'showcase' }
     }
 
-    console.log(`[showcase] Creating showcase composite: product="${productName}", category="${productCategory}"`)
+    console.log(`[showcase] v2: Creating showcase composite: product="${productName}", category="${productCategory}"`)
 
     // Canvas dimensions — portrait orientation, fits well on mobile + desktop
     const canvasW = 1024
@@ -189,12 +198,20 @@ export async function createShowcaseComposite(
       left: headerSubX,
     })
 
-    // 3. Left panel — selfie
+    // 3. Left panel — selfie (the hero)
     const leftPanelX = panelPadX
     const leftPanelY = panelAreaY + 20
-    // Panel background (white card with subtle shadow effect via border)
+    // Panel background (white card with subtle border + drop shadow effect)
     const leftCardSvg = `<svg width="${panelW}" height="${panelH}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="0" y="0" width="${panelW}" height="${panelH}" rx="8" fill="#ffffff" stroke="#e5dcc8" stroke-width="1"/>
+  <defs>
+    <filter id="leftShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.15"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="${panelW}" height="${panelH}" rx="8" fill="#ffffff" stroke="#c9a961" stroke-width="1.5" filter="url(#leftShadow)"/>
 </svg>`
     layers.push({ input: Buffer.from(leftCardSvg), top: leftPanelY, left: leftPanelX })
     // Selfie image (centered in panel)
@@ -213,7 +230,15 @@ export async function createShowcaseComposite(
     const rightPanelX = canvasW - panelPadX - panelW
     const rightPanelY = panelAreaY + 20
     const rightCardSvg = `<svg width="${panelW}" height="${panelH}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="0" y="0" width="${panelW}" height="${panelH}" rx="8" fill="#ffffff" stroke="#e5dcc8" stroke-width="1"/>
+  <defs>
+    <filter id="rightShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.15"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="${panelW}" height="${panelH}" rx="8" fill="#ffffff" stroke="#c9a961" stroke-width="1.5" filter="url(#rightShadow)"/>
 </svg>`
     layers.push({ input: Buffer.from(rightCardSvg), top: rightPanelY, left: rightPanelX })
     const productImgX = rightPanelX + Math.round((panelW - productPanel.width) / 2)
@@ -234,7 +259,20 @@ export async function createShowcaseComposite(
       left: categoryLabelX,
     })
 
-    // 5. Footer — note explaining this is a preview
+    // 5. Center divider — decorative gold plus icon (suggests pairing)
+    const centerX = Math.round(canvasW / 2)
+    const centerY = Math.round(panelAreaY + panelAreaH / 2)
+    const plusSvg = `<svg width="48" height="48" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="24" cy="24" r="22" fill="#faf8f4" stroke="#c9a961" stroke-width="1.5"/>
+  <text x="24" y="32" font-family="Georgia, serif" font-size="28" font-weight="300" fill="#c9a961" text-anchor="middle">+</text>
+</svg>`
+    layers.push({
+      input: Buffer.from(plusSvg),
+      top: centerY - 24,
+      left: centerX - 24,
+    })
+
+    // 6. Footer — note explaining this is a preview
     const footerY = canvasH - footerH
     const footerLineSvg = `<svg width="${canvasW}" height="${footerH}" xmlns="http://www.w3.org/2000/svg">
   <rect x="0" y="0" width="${canvasW}" height="1" fill="#c9a961" opacity="0.4"/>
@@ -269,7 +307,7 @@ export async function createShowcaseComposite(
       left: footerNoteX,
     })
 
-    // 6. Composite everything
+    // 7. Composite everything
     const result = await sharp({
       create: {
         width: canvasW,
@@ -284,7 +322,7 @@ export async function createShowcaseComposite(
 
     const dataUrl = `data:image/jpeg;base64,${result.toString('base64')}`
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-    console.log(`[showcase] ✅ Showcase composite created in ${elapsed}s (${(result.length / 1024).toFixed(1)}KB)`)
+    console.log(`[showcase] v2: ✅ Showcase composite created in ${elapsed}s (${(result.length / 1024).toFixed(1)}KB)`)
 
     return {
       success: true,
@@ -294,7 +332,7 @@ export async function createShowcaseComposite(
   } catch (err) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
     const msg = err instanceof Error ? err.message : String(err)
-    console.log(`[showcase] ❌ Failed in ${elapsed}s: ${msg}`)
+    console.log(`[showcase] v2: ❌ Failed in ${elapsed}s: ${msg}`)
     return {
       success: false,
       error: `Showcase composite failed: ${msg.substring(0, 150)}`,

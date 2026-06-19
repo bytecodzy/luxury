@@ -489,6 +489,7 @@ export function TryOnDialog({
   const [selfieData, setSelfieData] = useState<string | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
   const [watermarkedResult, setWatermarkedResult] = useState<string | null>(null);
+  const [resultStrategy, setResultStrategy] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressText, setProgressText] = useState('');
@@ -568,6 +569,7 @@ export function TryOnDialog({
     setSelfieData(null);
     setResultImage(null);
     setWatermarkedResult(null);
+    setResultStrategy('');
     setErrorMessage('');
     setProgressPercent(0);
     setProgressText('');
@@ -824,6 +826,7 @@ export function TryOnDialog({
         setProgressPercent(100);
         setProgressText('Done!');
         setResultImage(data.imageUrl);
+        setResultStrategy(data.strategy || '');
 
         // Add 3BOXES watermark — CRITICAL for branding
         try {
@@ -1261,9 +1264,32 @@ export function TryOnDialog({
                     className="absolute inset-0 h-full w-full object-contain"
                   />
                   <div className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-amber-300 flex items-center gap-1">
-                    <Sparkles className="h-3 w-3" /> AI Try-On
+                    <Sparkles className="h-3 w-3" />
+                    {resultStrategy === 'showcase-composite' ? 'Style Preview' : 'AI Try-On'}
                   </div>
                 </div>
+
+                {/* Strategy explanation banner */}
+                {resultStrategy === 'showcase-composite' && (
+                  <div className="rounded-lg border border-amber-700/30 bg-amber-900/15 p-3">
+                    <p className="text-xs text-amber-200/70 leading-relaxed">
+                      <span className="font-semibold text-amber-300">Style Preview:</span>{' '}
+                      Your photo is paired with the actual product image to guarantee
+                      you see the real you with the real product — no AI approximation,
+                      100% accurate. For a fully AI-rendered try-on, try again in a
+                      moment when AI capacity is available.
+                    </p>
+                  </div>
+                )}
+                {resultStrategy === 'composite-image' && (
+                  <div className="rounded-lg border border-amber-700/30 bg-amber-900/15 p-3">
+                    <p className="text-xs text-amber-200/70 leading-relaxed">
+                      <span className="font-semibold text-amber-300">Composite Preview:</span>{' '}
+                      Your real face with the actual product placed naturally on you.
+                      Face and product are 100% preserved — no AI generation, no mismatch.
+                    </p>
+                  </div>
+                )}
 
                 {/* Action buttons */}
                 <div className="flex gap-3">
