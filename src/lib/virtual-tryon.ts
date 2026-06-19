@@ -76,6 +76,7 @@ import {
   resolveCompositeCategory,
   type CompositeCategory,
 } from '@/lib/image-composite'
+import { createShowcaseComposite } from '@/lib/showcase-composite'
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -1593,7 +1594,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   const isVercel = !!process.env.VERCEL
   const hasGeminiKey = !!getGeminiApiKey()
 
-  console.log(`[virtual-tryon] v27 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+  console.log(`[virtual-tryon] v29 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
 
   if (!input.selfieData?.startsWith('data:image/')) {
     return {
@@ -1606,49 +1607,94 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  STRATEGY ORDER (v28) — ZAI + Gradio/HF + Pollinations + Image Composite
+  //  v29 STRATEGY ORDER — CONCRETE & ACCURATE (no more "different person")
+  //
+  //  THE FIX: v28 used Pollinations text-to-image as PRIMARY for sarees.
+  //  Pollinations GENERATES A NEW PERSON from text — it CANNOT preserve
+  //  the user's face. This was the root cause of "total mismatch" complaints.
+  //
+  //  v29 REMOVES Pollinations as primary for sarees. New order:
   //
   //  On VERCEL (production):
-  //    JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES (vtonCompatible=false, not saree):
-  //      1. Image Composite (PRIMARY — 100% reliable, instant, free)
-  //      2. Pollinations with PRODUCT reference (fallback)
-  //      3. Gemini (if GEMINI_API_KEY env var set)
-  //
-  //    SAREES (vtonCompatible=false, isSaree=true):
-  //      1. Pollinations with PRODUCT reference (PRIMARY — guarantees correct
-  //         product type). 3 attempts, full 50s budget.
-  //      2. Image Composite (pallu over shoulder — instant fallback)
-  //      3. Gemini (if env var set)
-  //
-  //    GARMENTS (vtonCompatible=true):
-  //      1. IDM-VTON HF Space (PRIMARY — preserves face + exact garment)
-  //      2. Pollinations with SELFIE reference (fallback)
-  //      3. Image Composite (last resort)
-  //      4. Gemini (if env var set)
+  //    ALL categories:
+  //      1. Gemini Nano Banana (if valid AIzaSy... key set) — TRUE image
+  //         editing, preserves face + product. Best quality.
+  //      2. Category-specific primary:
+  //         - GARMENTS (shirts/dresses/fashion): IDM-VTON HF Space
+  //         - JEWELRY/WATCHES/ACCESSORIES: Image Composite v2 (preserves
+  //           face + exact product, 100% reliable)
+  //         - SAREES: Image Composite v2 (pallu drape — preserves face +
+  //           shows real saree fabric)
+  //      3. Pollinations (degraded fallback — generates new person, but
+  //         better than nothing for full-body garments)
+  //      4. ★ SHOWCASE COMPOSITE (ULTIMATE FALLBACK — 100% reliable) ★
+  //         Creates a polished split-view: user's selfie + product image
+  //         side-by-side with 3BOXES branding. NO mismatch possible —
+  //         the user ALWAYS sees their real face + the real product.
   //
   //  On LOCAL (sandbox):
-  //    1. ZAI image-edit (PRIMARY — handles ALL categories incl. sarees/jewelry)
-  //    2. Image Composite (instant fallback for non-garments)
+  //    1. ZAI image-edit (PRIMARY — handles ALL categories)
+  //    2. Image Composite v2 (instant fallback)
   //    3. IDM-VTON (garments only)
-  //    4. Pollinations (last resort — uses product ref for non-garments)
-  //    5. Gemini (if valid key set)
+  //    4. Gemini (if key set)
+  //    5. Showcase Composite (ultimate fallback)
   // ═══════════════════════════════════════════════════════════════════
 
   const catConfig = getCategoryConfig(input.categorySlug, input.productName)
-  const isNonGarment = !catConfig.vtonCompatible  // sarees, jewelry, watches, accessories, fragrances
-  // v28: Resolve the composite category to decide if composite is appropriate
+  const isNonGarment = !catConfig.vtonCompatible
   const compositeCategory = resolveCompositeCategory(input.categorySlug, input.productName)
   const isSaree = compositeCategory === 'saree'
-  // Composite is PRIMARY for: jewelry, watches, accessories, fragrances
-  // Composite is FALLBACK for: sarees (Pollinations is primary for full-body)
-  const compositeIsPrimary = isNonGarment && !isSaree
 
-  console.log(`[virtual-tryon] v28 Category: vtonCompatible=${catConfig.vtonCompatible}, isNonGarment=${isNonGarment}, compositeCategory="${compositeCategory}", isSaree=${isSaree}, compositeIsPrimary=${compositeIsPrimary}`)
+  console.log(`[virtual-tryon] v29 Category: vtonCompatible=${catConfig.vtonCompatible}, compositeCategory="${compositeCategory}", isSaree=${isSaree}`)
+
+  // Helper: build the showcase composite result (used as ultimate fallback)
+  const buildShowcaseResult = async (): Promise<TryOnResult> => {
+    if (!input.productImageBase64) {
+      return {
+        success: false,
+        error: 'Showcase composite requires a product image.',
+        errorCode: 'NO_PRODUCT_IMAGE',
+        elapsedMs: Date.now() - totalStart,
+        debugInfo: { strategiesAttempted, strategyErrors },
+      }
+    }
+    strategiesAttempted.push('showcase')
+    console.log('[virtual-tryon] v29 ULTIMATE FALLBACK: Showcase Composite (split-view — always shows real selfie + real product)')
+    const showcaseResult = await createShowcaseComposite(
+      input.selfieData,
+      input.productImageBase64,
+      input.productName,
+      input.categorySlug,
+    )
+    if (showcaseResult.success && showcaseResult.imageUrl) {
+      const elapsed = Date.now() - totalStart
+      console.log(`[virtual-tryon] ✅ Showcase composite succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+      return {
+        success: true,
+        imageUrl: showcaseResult.imageUrl,
+        strategy: 'showcase-composite',
+        elapsedMs: elapsed,
+        debugInfo: {
+          strategiesAttempted,
+          strategyErrors,
+          extractedColors: input.clientProductColors,
+          promptPreview: `showcase: ${input.productName}`,
+          selfieUploaded: true,
+        },
+      }
+    }
+    strategyErrors['showcase'] = showcaseResult.error || 'Showcase failed'
+    const elapsed = Date.now() - totalStart
+    return {
+      success: false,
+      error: 'We could not generate your style preview right now. Please try again in a moment.',
+      errorCode: 'ALL_STRATEGIES_FAILED',
+      elapsedMs: elapsed,
+      debugInfo: { strategiesAttempted, strategyErrors },
+    }
+  }
 
   // ── On LOCAL: ZAI image-edit is PRIMARY (handles ALL categories) ──
-  // ZAI is the best option locally — it preserves the face AND renders the
-  // exact product, and it handles sarees, jewelry, watches, etc. that
-  // IDM-VTON cannot.
   if (!isVercel && Date.now() < totalDeadline - 18_000) {
     strategiesAttempted.push('zai-image-edit')
     console.log('[virtual-tryon] LOCAL Strategy 1: ZAI image-edit (edit-both) — PRIMARY')
@@ -1669,19 +1715,40 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v28: For NON-GARMENT categories (jewelry, watches, accessories, fragrances, sarees),
-  //  IDM-VTON is NEVER attempted (confirmed to return "error: null" every time).
-  //
-  //  v28 NEW: Image Composite (sharp) is PRIMARY for jewelry/watches/accessories/
-  //  fragrances — 100% reliable, instant, free, preserves the user's face exactly.
-  //  For sarees, Pollinations is PRIMARY (better for full-body) with composite as fallback.
+  //  v29: Gemini Nano Banana is PRIMARY when a valid key is set.
+  //  It's the ONLY free service that does TRUE multi-image editing
+  //  (preserves the user's face AND renders the exact product).
+  //  Works for ALL categories: sarees, jewelry, garments, accessories.
+  // ═══════════════════════════════════════════════════════════════════
+  if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 20_000) {
+    strategiesAttempted.push('gemini')
+    console.log('[virtual-tryon] v29 PRIMARY: Google Gemini Nano Banana (valid key set) — handles ALL categories')
+    const result = await callGeminiTryOn(input, totalDeadline)
+    if (result.success && result.imageUrl) {
+      const elapsed = Date.now() - totalStart
+      console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+      return {
+        success: true,
+        imageUrl: result.imageUrl,
+        strategy: 'gemini',
+        elapsedMs: elapsed,
+        debugInfo: { strategiesAttempted, strategyErrors },
+      }
+    }
+    strategyErrors['gemini'] = result.error || 'No image returned'
+    console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  //  v29: Category-specific PRIMARY strategies
   // ═══════════════════════════════════════════════════════════════════
   if (isNonGarment) {
-    // ── v28: Image Composite (PRIMARY for jewelry/watches/accessories/fragrances) ──
-    // 100% reliable, instant (~0.5s), free, preserves face + shows exact product
-    if (compositeIsPrimary && input.productImageBase64 && !strategiesAttempted.includes('composite')) {
+    // ── JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES / SAREES ──
+    // Image Composite v2 is PRIMARY — preserves face + exact product.
+    // v29: Now ALSO primary for sarees (pallu drape) instead of Pollinations.
+    if (input.productImageBase64 && !strategiesAttempted.includes('composite')) {
       strategiesAttempted.push('composite')
-      console.log(`[virtual-tryon] v28 PRIMARY: Image Composite (sharp) — category="${compositeCategory}"`)
+      console.log(`[virtual-tryon] v29 PRIMARY: Image Composite v2 — category="${compositeCategory}"`)
       const compositeResult = await compositeProductOnSelfie(
         input.selfieData,
         input.productImageBase64,
@@ -1690,7 +1757,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       )
       if (compositeResult.success && compositeResult.imageUrl) {
         const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ Image Composite succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        console.log(`[virtual-tryon] ✅ Image Composite v2 succeeded in ${(elapsed / 1000).toFixed(1)}s`)
         return {
           success: true,
           imageUrl: compositeResult.imageUrl,
@@ -1700,30 +1767,30 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
             strategiesAttempted,
             strategyErrors,
             extractedColors: input.clientProductColors,
-            promptPreview: `composite(${compositeCategory}): ${input.productName}`,
+            promptPreview: `composite-v2(${compositeCategory}): ${input.productName}`,
             selfieUploaded: true,
           },
         }
       }
       strategyErrors['composite'] = compositeResult.error || 'Composite failed'
-      console.log(`[virtual-tryon] Image Composite failed: ${compositeResult.error?.substring(0, 150)}`)
+      console.log(`[virtual-tryon] Image Composite v2 failed: ${compositeResult.error?.substring(0, 150)}`)
     }
 
-    // ── v28: Pollinations (PRIMARY for sarees, FALLBACK for other non-garments) ──
-    // For sarees: full 50s budget, product-as-reference (guarantees correct product type)
-    // For other non-garments: only if composite failed (less time available)
-    const isSareePrimary = isSaree
-    const pollinationsBudget = isSareePrimary
-      ? { maxRetries: 2, perAttemptMs: 14_000, retryDelaysMs: [5_000, 5_000], useProductAsReference: true }
-      : { maxRetries: 1, perAttemptMs: 14_000, retryDelaysMs: [3_000], useProductAsReference: true }
-
-    if (Date.now() < totalDeadline - 12_000) {
+    // ── FALLBACK: Pollinations with PRODUCT reference ──
+    // Only used for sarees (full-body) where composite pallu isn't enough.
+    // For jewelry/accessories, skip Pollinations (it generates a new person).
+    if (isSaree && Date.now() < totalDeadline - 12_000) {
       strategiesAttempted.push('pollinations')
-      console.log(`[virtual-tryon] ${isSareePrimary ? 'PRIMARY' : 'FALLBACK'}: Pollinations (product-ref, maxRetries=${pollinationsBudget.maxRetries}, perAttempt=14s)`)
-      const result = await callPollinationsWithSelfieReference(input, totalDeadline, pollinationsBudget)
+      console.log('[virtual-tryon] v29 FALLBACK (saree only): Pollinations (product-ref)')
+      const result = await callPollinationsWithSelfieReference(input, totalDeadline, {
+        maxRetries: 1,
+        perAttemptMs: 14_000,
+        retryDelaysMs: [4_000],
+        useProductAsReference: true,
+      })
       if (result.success && result.imageUrl) {
         const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ Pollinations (product-ref) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        console.log(`[virtual-tryon] ✅ Pollinations (saree) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
         return {
           success: true,
           imageUrl: result.imageUrl,
@@ -1739,68 +1806,23 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
         }
       }
       strategyErrors['pollinations'] = result.error || 'No image returned'
-      console.log(`[virtual-tryon] Pollinations (product-ref) failed: ${result.error?.substring(0, 150)}`)
+      console.log(`[virtual-tryon] Pollinations (saree) failed: ${result.error?.substring(0, 150)}`)
     }
 
-    // ── v28: Image Composite (FALLBACK for sarees when Pollinations fails) ──
-    if (isSaree && input.productImageBase64 && !strategiesAttempted.includes('composite')) {
-      strategiesAttempted.push('composite')
-      console.log(`[virtual-tryon] v28 FALLBACK: Image Composite (saree pallu) — Pollinations failed`)
-      const compositeResult = await compositeProductOnSelfie(
-        input.selfieData,
-        input.productImageBase64,
-        compositeCategory,
-        input.productName,
-      )
-      if (compositeResult.success && compositeResult.imageUrl) {
-        const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ Image Composite (saree fallback) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-        return {
-          success: true,
-          imageUrl: compositeResult.imageUrl,
-          strategy: 'composite-image',
-          elapsedMs: elapsed,
-          debugInfo: {
-            strategiesAttempted,
-            strategyErrors,
-            extractedColors: input.clientProductColors,
-            promptPreview: `composite(saree): ${input.productName}`,
-            selfieUploaded: true,
-          },
-        }
-      }
-      strategyErrors['composite'] = compositeResult.error || 'Composite failed'
-      console.log(`[virtual-tryon] Image Composite (saree fallback) failed: ${compositeResult.error?.substring(0, 150)}`)
-    }
-
-    // v28: Last resort for non-garments — Gemini (if env var set)
-    if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 18_000) {
-      strategiesAttempted.push('gemini')
-      console.log('[virtual-tryon] Non-garment last resort: Google Gemini (env var key set)')
-      const result = await callGeminiTryOn(input, totalDeadline)
-      if (result.success && result.imageUrl) {
-        const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-        return {
-          success: true,
-          imageUrl: result.imageUrl,
-          strategy: 'gemini',
-          elapsedMs: elapsed,
-          debugInfo: { strategiesAttempted, strategyErrors },
-        }
-      }
-      strategyErrors['gemini'] = result.error || 'No image returned'
-      console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
+    // ── ULTIMATE FALLBACK: Showcase Composite (100% reliable) ──
+    // ALWAYS shows the user's real selfie + the real product side-by-side.
+    // No mismatch possible — the user sees their actual face + actual product.
+    if (input.productImageBase64) {
+      return await buildShowcaseResult()
     }
   } else {
     // ═══════════════════════════════════════════════════════════════════
-    //  v27: For GARMENT categories (shirts, dresses, fashion, kids),
-    //  IDM-VTON is PRIMARY (real VTON model — preserves face + garment).
-    //  Pollinations with SELFIE reference is the fallback.
+    //  GARMENTS (shirts, dresses, fashion, kids)
     // ═══════════════════════════════════════════════════════════════════
+    // ── PRIMARY: IDM-VTON HF Space (real VTON — preserves face + garment) ──
     if (catConfig.vtonCompatible && !strategiesAttempted.includes('idm-vton') && Date.now() < totalDeadline - 25_000) {
       strategiesAttempted.push('idm-vton')
-      console.log('[virtual-tryon] Garment Strategy: IDM-VTON HF Space (PRIMARY)')
+      console.log('[virtual-tryon] v29 PRIMARY (garment): IDM-VTON HF Space')
       const result = await callIDMVTON(input, totalDeadline)
       if (result.success && result.imageUrl) {
         const elapsed = Date.now() - totalStart
@@ -1817,20 +1839,50 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       console.log(`[virtual-tryon] IDM-VTON failed: ${result.error?.substring(0, 150)}`)
     }
 
-    // ── FALLBACK: Pollinations with SELFIE reference (garment categories) ──
-    // v27: For garments, use SELFIE as reference (preserves face match).
-    // IDM-VTON was tried, so less time remains → 1 retry, 18s per attempt.
+    // ── FALLBACK: Image Composite v2 (preserves face + shows product) ──
+    if (input.productImageBase64 && !strategiesAttempted.includes('composite')) {
+      strategiesAttempted.push('composite')
+      console.log(`[virtual-tryon] v29 FALLBACK (garment): Image Composite v2 — category="${compositeCategory}"`)
+      const compositeResult = await compositeProductOnSelfie(
+        input.selfieData,
+        input.productImageBase64,
+        compositeCategory,
+        input.productName,
+      )
+      if (compositeResult.success && compositeResult.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ Image Composite v2 (garment) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: compositeResult.imageUrl,
+          strategy: 'composite-image',
+          elapsedMs: elapsed,
+          debugInfo: {
+            strategiesAttempted,
+            strategyErrors,
+            extractedColors: input.clientProductColors,
+            promptPreview: `composite-v2(${compositeCategory}): ${input.productName}`,
+            selfieUploaded: true,
+          },
+        }
+      }
+      strategyErrors['composite'] = compositeResult.error || 'Composite failed'
+      console.log(`[virtual-tryon] Image Composite v2 (garment) failed: ${compositeResult.error?.substring(0, 150)}`)
+    }
+
+    // ── FALLBACK: Pollinations with SELFIE reference ──
     if (Date.now() < totalDeadline - 12_000) {
       strategiesAttempted.push('pollinations')
-      const idmVtonTried = strategiesAttempted.includes('idm-vton')
-      const pollinationsOptions = idmVtonTried
-        ? { maxRetries: 1, perAttemptMs: 18_000, retryDelaysMs: [5_000], useProductAsReference: false }
-        : { maxRetries: 2, perAttemptMs: 14_000, retryDelaysMs: [5_000, 5_000], useProductAsReference: false }
-      console.log(`[virtual-tryon] Fallback: Pollinations (selfie-ref, idmVtonTried=${idmVtonTried}, maxRetries=${pollinationsOptions.maxRetries})`)
-      const result = await callPollinationsWithSelfieReference(input, totalDeadline, pollinationsOptions)
+      console.log('[virtual-tryon] v29 FALLBACK (garment): Pollinations (selfie-ref)')
+      const result = await callPollinationsWithSelfieReference(input, totalDeadline, {
+        maxRetries: 1,
+        perAttemptMs: 14_000,
+        retryDelaysMs: [3_000],
+        useProductAsReference: false,
+      })
       if (result.success && result.imageUrl) {
         const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ Pollinations (selfie-ref) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        console.log(`[virtual-tryon] ✅ Pollinations (garment) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
         return {
           success: true,
           imageUrl: result.imageUrl,
@@ -1846,64 +1898,16 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
         }
       }
       strategyErrors['pollinations'] = result.error || 'No image returned'
-      console.log(`[virtual-tryon] Pollinations (selfie-ref) failed: ${result.error?.substring(0, 150)}`)
+      console.log(`[virtual-tryon] Pollinations (garment) failed: ${result.error?.substring(0, 150)}`)
     }
 
-    // ── v28: LAST RESORT — Image Composite (preserves face + shows product) ──
-    // If IDM-VTON and Pollinations both failed, composite the product on the selfie.
-    // This ALWAYS works (100% reliable) and preserves the user's face.
-    if (input.productImageBase64 && !strategiesAttempted.includes('composite')) {
-      strategiesAttempted.push('composite')
-      console.log(`[virtual-tryon] v28 LAST RESORT: Image Composite (sharp) — category="${compositeCategory}"`)
-      const compositeResult = await compositeProductOnSelfie(
-        input.selfieData,
-        input.productImageBase64,
-        compositeCategory,
-        input.productName,
-      )
-      if (compositeResult.success && compositeResult.imageUrl) {
-        const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ Image Composite (garment fallback) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-        return {
-          success: true,
-          imageUrl: compositeResult.imageUrl,
-          strategy: 'composite-image',
-          elapsedMs: elapsed,
-          debugInfo: {
-            strategiesAttempted,
-            strategyErrors,
-            extractedColors: input.clientProductColors,
-            promptPreview: `composite(${compositeCategory}): ${input.productName}`,
-            selfieUploaded: true,
-          },
-        }
-      }
-      strategyErrors['composite'] = compositeResult.error || 'Composite failed'
-      console.log(`[virtual-tryon] Image Composite (garment fallback) failed: ${compositeResult.error?.substring(0, 150)}`)
-    }
-
-    // ── LAST RESORT: Gemini (only if a VALID key is set via env var) ──
-    if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 18_000) {
-      strategiesAttempted.push('gemini')
-      console.log('[virtual-tryon] Last resort: Google Gemini (env var key set)')
-      const result = await callGeminiTryOn(input, totalDeadline)
-      if (result.success && result.imageUrl) {
-        const elapsed = Date.now() - totalStart
-        console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-        return {
-          success: true,
-          imageUrl: result.imageUrl,
-          strategy: 'gemini',
-          elapsedMs: elapsed,
-          debugInfo: { strategiesAttempted, strategyErrors },
-        }
-      }
-      strategyErrors['gemini'] = result.error || 'No image returned'
-      console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
+    // ── ULTIMATE FALLBACK: Showcase Composite (100% reliable) ──
+    if (input.productImageBase64) {
+      return await buildShowcaseResult()
     }
   }
 
-  // ── All strategies failed ───────────────────────────────────────
+  // ── If we get here, no product image was available for showcase ──
   const elapsed = Date.now() - totalStart
   console.log(`[virtual-tryon] ❌ All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
   console.log(`[virtual-tryon] Strategies: ${strategiesAttempted.join(', ')}`)
