@@ -878,33 +878,68 @@ export async function compositeProductOnSelfie(
 export function resolveCompositeCategory(
   categorySlug: string,
   productName: string,
+  productDescription?: string,
+  productTags?: string[],
 ): CompositeCategory {
   const slug = (categorySlug || '').toLowerCase()
   const name = (productName || '').toLowerCase()
+  const desc = (productDescription || '').toLowerCase()
+  const tags = (productTags || []).join(' ').toLowerCase()
+  const haystack = `${slug} ${name} ${desc} ${tags}`
 
-  // Sarees — special handling (full-body garment, composite only pallu)
-  if (slug.includes('saree')) return 'saree'
+  // v31: Robust keyword matching across ALL product metadata.
+  // Previous v30 only checked slug — sarees misclassified as garments when
+  // slug was 'women-fashion' but product name was 'Banarasi Saree'. This is
+  // the smoking gun for the "different person AND different product" mismatch.
 
-  // Jewelry — detect sub-type from product name
-  if (slug.includes('jewel')) {
-    if (name.includes('set') || name.includes('bridal') || name.includes('collection')) return 'jewelry-set'
-    if (name.includes('earring') || name.includes('jhumka') || name.includes('stud') || name.includes('top')) return 'earrings'
-    if (name.includes('necklace') || name.includes('choker') || name.includes('pendant') || name.includes('temple') || name.includes('haar') || name.includes('mala')) return 'necklace'
-    if (name.includes('bracelet') || name.includes('bangle') || name.includes('cuff') || name.includes('kada')) return 'bracelet'
-    if (name.includes('ring') || name.includes('band') || name.includes('soli')) return 'ring'
+  // Sarees — full-body Indian garment (composite only pallu)
+  if (
+    haystack.includes('saree') || haystack.includes('sari') ||
+    haystack.includes('banarasi') || haystack.includes('kanjivaram') ||
+    haystack.includes('kanjeevaram') || haystack.includes('kanchi') ||
+    haystack.includes('chiffon') || haystack.includes('georgette') ||
+    haystack.includes('lehenga') || haystack.includes('patola') ||
+    haystack.includes('pochampally') || haystack.includes('chanderi')
+  ) {
+    return 'saree'
+  }
+
+  // Jewelry — detect sub-type from product name/description/tags
+  if (
+    slug.includes('jewel') ||
+    haystack.includes('necklace') || haystack.includes('earring') ||
+    haystack.includes('jhumka') || haystack.includes('bracelet') ||
+    haystack.includes('bangle') || haystack.includes('ring') ||
+    haystack.includes('pendant') || haystack.includes('choker') ||
+    haystack.includes('temple') || haystack.includes('haar') ||
+    haystack.includes('mala') || haystack.includes('kada') ||
+    haystack.includes('mangalsutra') || haystack.includes('nose pin') ||
+    haystack.includes('nosepin') || haystack.includes('maang tikka')
+  ) {
+    if (haystack.includes('set') || haystack.includes('bridal') || haystack.includes('collection')) return 'jewelry-set'
+    if (haystack.includes('earring') || haystack.includes('jhumka') || haystack.includes('stud') || haystack.includes('top')) return 'earrings'
+    if (haystack.includes('necklace') || haystack.includes('choker') || haystack.includes('pendant') || haystack.includes('temple') || haystack.includes('haar') || haystack.includes('mala') || haystack.includes('mangalsutra')) return 'necklace'
+    if (haystack.includes('bracelet') || haystack.includes('bangle') || haystack.includes('cuff') || haystack.includes('kada')) return 'bracelet'
+    if (haystack.includes('ring') || haystack.includes('band') || haystack.includes('soli')) return 'ring'
     return 'necklace' // default for jewelry
   }
 
   // Watches
-  if (slug.includes('watch')) return 'watch'
+  if (slug.includes('watch') || haystack.includes('watch') || haystack.includes('chronograph') || haystack.includes('tourbillon')) return 'watch'
 
   // Fragrances
-  if (slug.includes('fragrance') || slug.includes('perfume')) return 'fragrance'
+  if (slug.includes('fragrance') || slug.includes('perfume') || haystack.includes('parfum') || haystack.includes('cologne') || haystack.includes('eau de')) return 'fragrance'
 
-  // Accessories — bags, sunglasses, etc.
-  if (slug.includes('accessor') || slug.includes('men-acc') || slug.includes('women-acc')) {
-    if (name.includes('sunglass') || name.includes('glass')) return 'sunglasses'
-    if (name.includes('bag') || name.includes('tote') || name.includes('clutch') || name.includes('wallet')) return 'bag'
+  // Accessories — bags, sunglasses, belts, scarves, etc.
+  if (
+    slug.includes('accessor') || slug.includes('men-acc') || slug.includes('women-acc') ||
+    haystack.includes('sunglass') || haystack.includes('bag') ||
+    haystack.includes('tote') || haystack.includes('clutch') ||
+    haystack.includes('wallet') || haystack.includes('belt') ||
+    haystack.includes('scarf') || haystack.includes('cufflink')
+  ) {
+    if (haystack.includes('sunglass') || haystack.includes('glass')) return 'sunglasses'
+    if (haystack.includes('bag') || haystack.includes('tote') || haystack.includes('clutch') || haystack.includes('wallet')) return 'bag'
     return 'accessory'
   }
 

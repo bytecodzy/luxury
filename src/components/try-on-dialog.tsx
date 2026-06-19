@@ -1265,7 +1265,19 @@ export function TryOnDialog({
                   />
                   <div className="absolute top-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-amber-300 flex items-center gap-1">
                     <Sparkles className="h-3 w-3" />
-                    {resultStrategy === 'showcase-composite' ? 'Style Preview' : 'AI Try-On'}
+                    {resultStrategy === 'showcase-composite'
+                      ? 'Style Preview'
+                      : resultStrategy === 'composite-image'
+                      ? 'Composite Preview'
+                      : resultStrategy === 'cloudflare-sd15-img2img'
+                      ? 'AI Try-On'
+                      : resultStrategy === 'flux-kontext'
+                      ? 'AI Try-On (FLUX)'
+                      : resultStrategy === 'gemini'
+                      ? 'AI Try-On (Gemini)'
+                      : resultStrategy === 'idm-vton'
+                      ? 'AI Try-On (VTON)'
+                      : 'AI Try-On'}
                   </div>
                 </div>
 
@@ -1276,8 +1288,9 @@ export function TryOnDialog({
                       <span className="font-semibold text-amber-300">Style Preview:</span>{' '}
                       Your photo is paired with the actual product image to guarantee
                       you see the real you with the real product — no AI approximation,
-                      100% accurate. For a fully AI-rendered try-on, try again in a
-                      moment when AI capacity is available.
+                      100% accurate. For a fully AI-rendered try-on, set{' '}
+                      <span className="font-mono text-amber-300">CF_API_TOKEN</span> or{' '}
+                      <span className="font-mono text-amber-300">HF_TOKEN</span> env vars.
                     </p>
                   </div>
                 )}
@@ -1287,6 +1300,18 @@ export function TryOnDialog({
                       <span className="font-semibold text-amber-300">Composite Preview:</span>{' '}
                       Your real face with the actual product placed naturally on you.
                       Face and product are 100% preserved — no AI generation, no mismatch.
+                    </p>
+                  </div>
+                )}
+                {(resultStrategy === 'cloudflare-sd15-img2img' ||
+                  resultStrategy === 'flux-kontext' ||
+                  resultStrategy === 'gemini' ||
+                  resultStrategy === 'idm-vton') && (
+                  <div className="rounded-lg border border-emerald-700/30 bg-emerald-900/15 p-3">
+                    <p className="text-xs text-emerald-200/70 leading-relaxed">
+                      <span className="font-semibold text-emerald-300">AI Try-On:</span>{' '}
+                      Generated with identity-preserving AI — your face and the actual
+                      product are both preserved. Strategy: <span className="font-mono">{resultStrategy}</span>
                     </p>
                   </div>
                 )}

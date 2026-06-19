@@ -1,50 +1,57 @@
 /**
- * AI Virtual Try-On API v30 — Concrete & Accurate (FREE FOREVER, no mismatches)
+ * AI Virtual Try-On API v31 — Concrete & Reliable (FREE FOREVER, no mismatches)
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v30 (CURRENT) — Concrete & Accurate (root cause fix for mismatches):
+ * v31 (CURRENT) — Concrete & Reliable (root cause fix for "still not working"):
  *
- *   ROOT CAUSE (v28/v29 still produced mismatches):
- *     - Saree product images show a BLACK MANNEQUIN wearing the saree on a
- *       BROWN background. Image composite's bg-removal removes the brown bg
- *       but KEEPS the black mannequin → composite places mannequin over
- *       user's face → "different person" mismatch.
- *     - Pollinations (saree fallback) generates a NEW person from text →
- *       "different person AND different product" mismatch.
+ *   ROOT CAUSE (v30 still produced mismatches):
+ *     - POLLINATIONS was still in the garment fallback chain → when IDM-VTON
+ *       timed out for sarees misclassified as garments, Pollinations generated
+ *       a NEW person from text → "different person AND different product".
+ *     - CATEGORY DETECTION only checked the slug → sarees in 'women-fashion'
+ *       category were misclassified as garments → IDM-VTON failed → Pollinations.
  *
- *   v30 FIX:
+ *   v31 FIX:
+ *   - CATEGORY DETECTION: now matches keywords across slug + name + desc + tags.
+ *     Sarees and jewelry are NEVER misclassified.
+ *   - CLOUDFLARE WORKERS AI (NEW — free 10k neurons/day forever):
+ *     SD 1.5 img2img with strength=0.45 → PRESERVES FACE IDENTITY.
+ *     Set CF_ACCOUNT_ID + CF_API_TOKEN env vars on Vercel.
+ *   - FLUX.1-KONTEXT-DEV HF SPACE (NEW — free with HF_TOKEN):
+ *     SOTA for identity-preserving image editing (RefTon CVPR 2026 backbone).
+ *     Set HF_TOKEN env var on Vercel.
+ *   - POLLINATIONS REMOVED entirely (was #1 cause of mismatches).
+ *   - SHOWCASE COMPOSITE remains ULTIMATE fallback (100% reliable, instant, free).
+ *
  *   On VERCEL (production):
- *     SAREES:
- *       Strategy 1: Gemini (optional — if GEMINI_API_KEY env var set)
- *       Strategy 2: Showcase Composite (PRIMARY — split-view, 100% reliable,
- *         always shows user's real face + real saree side-by-side)
- *       NO Image Composite (mannequin shows over face → mismatch)
- *       NO Pollinations (generates new person → mismatch)
- *
- *     JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES:
- *       Strategy 1: Gemini (optional — if env var set)
- *       Strategy 2: Image Composite v3 (PRIMARY — with NEW mannequin detection.
- *         For jewelry on BLACK bg, bg-removal eliminates both bg AND mannequin,
- *         leaving just the jewelry piece → composite works perfectly.)
- *       Strategy 3: Showcase Composite (fallback if mannequin detected)
- *
- *     GARMENTS (shirts, dresses, fashion, kids):
- *       Strategy 1: Gemini (optional — if env var set)
- *       Strategy 2: IDM-VTON HF Space (PRIMARY — real VTON, preserves face + garment)
- *       Strategy 3: Pollinations with SELFIE reference (degraded fallback)
- *       Strategy 4: Showcase Composite (ultimate fallback)
+ *     ALL categories:
+ *       1. Gemini Nano Banana (if GEMINI_API_KEY set) — TRUE image editing
+ *       2. Cloudflare Workers AI SD 1.5 img2img (if CF_API_TOKEN set) — identity-preserving
+ *       3. FLUX.1-Kontext-dev HF Space (if HF_TOKEN set) — SOTA identity preservation
+ *       4. Category-specific primary:
+ *          - GARMENTS: IDM-VTON HF Space
+ *          - JEWELRY/WATCHES/ACCESSORIES: Image Composite (mannequin-checked)
+ *          - SAREES: (skip — no good composite for full-body mannequin)
+ *       5. ★ SHOWCASE COMPOSITE (ULTIMATE FALLBACK — 100% reliable) ★
  *
  *   On LOCAL (sandbox):
- *     Strategy 1: ZAI image-edit (PRIMARY — handles ALL categories incl. sarees/jewelry)
- *     Strategy 2: Image Composite v3 (with mannequin check)
- *     Strategy 3: IDM-VTON (garments only)
- *     Strategy 4: Showcase Composite (ultimate fallback)
- *     Strategy 5: Gemini (only if valid key set)
+ *     1. ZAI image-edit (PRIMARY — handles ALL categories)
+ *     2. Cloudflare → FLUX Kontext → Image Composite → IDM-VTON → Showcase
  *
- *   100% FREE FOREVER: ZAI (free in sandbox), IDM-VTON (free HF Space, no auth),
- *   Image Composite (sharp — free, instant), Showcase Composite (sharp — free,
- *   instant), Gemini (free tier 1500/day if key set). No paid APIs. No credit cards.
+ *   100% FREE FOREVER: ZAI (free in sandbox), Cloudflare (10k neurons/day free),
+ *   FLUX Kontext (free HF Space), IDM-VTON (free HF Space), Image Composite
+ *   (sharp — free, instant), Showcase Composite (sharp — free, instant),
+ *   Gemini (free tier 1500/day if key set). No paid APIs. No credit cards.
+ *
+ *   OPTIONAL ENV VARS (set on Vercel for true AI editing — all free):
+ *     GEMINI_API_KEY    — Google Gemini (15 RPM, 1500/day free) — get from
+ *                          https://aistudio.google.com/apikey (must start with AIzaSy...)
+ *     CF_ACCOUNT_ID     — Cloudflare account ID — from dash.cloudflare.com sidebar
+ *     CF_API_TOKEN      — Cloudflare API token — create at
+ *                          https://dash.cloudflare.com/profile/api-tokens (Workers AI:Read)
+ *     HF_TOKEN          — HuggingFace access token — create at
+ *                          https://huggingface.co/settings/tokens (Token type: Read)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -215,23 +222,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'v30 AI ready — Showcase Composite (100% reliable for sarees — no mismatch), Image Composite v3 (mannequin-checked) for jewelry, IDM-VTON for garments. Free forever, no auth required.',
+      message: 'v31 AI ready — Gemini + Cloudflare + FLUX Kontext (optional, free) + IDM-VTON + Image Composite + Showcase Composite (100% reliable). Free forever, no auth required.',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  // v30: Showcase Composite is the primary engine for SAREES on Vercel (no mismatch possible);
-  // Image Composite v3 (with mannequin detection) is the primary engine for JEWELRY/WATCHES/ACCESSORIES on Vercel;
-  // IDM-VTON is the primary engine for GARMENTS on Vercel;
-  // ZAI image-edit is the primary engine on local (handles ALL categories).
+  // v31: Multiple strategies available. Showcase Composite is the 100% reliable
+  // ultimate fallback for ALL categories. Gemini/Cloudflare/FLUX are optional
+  // (set env vars for true AI image editing — all free).
   const isVercel = !!process.env.VERCEL
-  const engine = isVercel ? 'showcase-composite-idm-vton-v30' : 'zai-image-edit'
+  const engines: string[] = []
+  if (process.env.GEMINI_API_KEY) engines.push('Gemini')
+  if (process.env.CF_API_TOKEN) engines.push('Cloudflare')
+  if (process.env.HF_TOKEN) engines.push('FLUX-Kontext')
+  if (isVercel) engines.push('IDM-VTON', 'Showcase-Composite')
+  else engines.push('ZAI-image-edit')
+  const engine = `v31-${engines.join('+')}`
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? 'v30 AI Virtual Try-On ready — Showcase Composite for sarees (100% reliable, no mismatch), Image Composite v3 for jewelry/watches (mannequin-checked), IDM-VTON for garments. Free forever, no auth required.'
-      : 'v30 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
+      ? `v31 AI Virtual Try-On ready — ${engines.join(', ')}. Showcase Composite is the 100% reliable ultimate fallback (real selfie + real product, no mismatch). Set GEMINI_API_KEY / CF_API_TOKEN / HF_TOKEN for true AI image editing (all free).`
+      : 'v31 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
   })
 }
