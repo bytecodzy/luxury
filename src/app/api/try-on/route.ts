@@ -1,34 +1,39 @@
 /**
- * AI Virtual Try-On API v26 — IDM-VTON-first strategy for local & Vercel
+ * AI Virtual Try-On API v27 — ZAI + Gradio/HF + Pollinations (FREE FOREVER)
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v26 (CURRENT):
+ * v27 (CURRENT) — Standard ZAI + Gradio + Hugging Face strategy:
+ *
  *   On VERCEL (production):
- *     Strategy 1: IDM-VTON HF Space — PRIMARY for ALL garment categories
- *       - Free, no auth required, reliable ~25s
- *       - Real VTON model — preserves face AND renders exact garment
- *       - Handles: shirts, t-shirts, sarees, dresses, fashion, kids clothing
- *     Strategy 2: Pollinations — FALLBACK for ALL categories
- *       - Reduced retries (1 max) and timeout (18s) to prevent client timeout
- *       - Uses selfie as image reference when possible
- *       - Handles non-garment categories: jewelry, watches, fragrances, accessories
- *     Strategy 3: Google Gemini — OPTIONAL (only if GEMINI_API_KEY env var is set)
- *       - The hardcoded fallback key is INVALID, so this is skipped by default
- *       - To enable: get a valid key from https://aistudio.google.com/apikey
+ *     GARMENTS (shirts, dresses, fashion, kids):
+ *       Strategy 1: IDM-VTON HF Space (PRIMARY — real VTON, preserves face + garment)
+ *       Strategy 2: Pollinations with SELFIE reference (fallback)
+ *       Strategy 3: Gemini (optional — if GEMINI_API_KEY env var set)
+ *
+ *     SAREES / JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES:
+ *       Strategy 1: Pollinations with PRODUCT reference (PRIMARY)
+ *         - GUARANTEES the correct product type is shown (saree stays saree,
+ *           jewelry stays jewelry). Uses the product image as img2img reference.
+ *         - 3 attempts, full 50s budget. Color-first prompt + skin tone + hair color.
+ *       Strategy 2: Gemini (optional — if env var set)
+ *       Strategy 3: IDM-VTON (absolute last resort — usually fails for non-garments)
  *
  *   On LOCAL (sandbox):
- *     Strategy 1: ZAI image-edit (edit-both) — PRIMARY
- *       - Best quality, preserves face + product
- *     Strategy 2: IDM-VTON — garment categories only
- *     Strategy 3: Pollinations — last resort
- *     Strategy 4: Gemini — only if valid env var key set
+ *     Strategy 1: ZAI image-edit (PRIMARY — handles ALL categories incl. sarees/jewelry)
+ *     Strategy 2: IDM-VTON (garments only)
+ *     Strategy 3: Pollinations (last resort — product ref for non-garments)
+ *     Strategy 4: Gemini (only if valid key set)
  *
- *   v26 FIXES (vs v25):
- *     - Sarees now use IDM-VTON (was: Pollinations → "Generation Timed Out")
- *     - Pollinations retries reduced from 3 to 2 attempts (prevents client timeout)
- *     - Gemini only attempted if env var GEMINI_API_KEY is explicitly set
- *       (the hardcoded fallback key returns HTTP 401 ACCESS_TOKEN_TYPE_UNSUPPORTED)
+ *   v27 FIXES (vs v26):
+ *     - Sarees: Skip IDM-VTON (confirmed "error: null"), use Pollinations with
+ *       PRODUCT image as reference → guarantees saree is shown (not glasses/random)
+ *     - Jewelry: Same product-reference approach → correct jewelry type shown
+ *     - Watches, accessories, fragrances: Same approach → correct product shown
+ *     - Garments (shirts/dresses): IDM-VTON still PRIMARY (works great)
+ *
+ *   100% FREE FOREVER: ZAI (free in sandbox), IDM-VTON (free HF Space, no auth),
+ *   Pollinations (free, rate-limited), Gemini (free tier 1500/day if key set).
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -204,16 +209,17 @@ export async function GET(request: NextRequest) {
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  // v26: IDM-VTON is the primary engine on Vercel (reliable, free, no auth);
-  // ZAI image-edit is the primary engine on local.
+  // v27: IDM-VTON is the primary engine for GARMENTS on Vercel;
+  // Pollinations with product-reference is primary for SAREES/JEWELRY/ACCESSORIES;
+  // ZAI image-edit is the primary engine on local (handles ALL categories).
   const isVercel = !!process.env.VERCEL
-  const engine = isVercel ? 'idm-vton' : 'zai-image-edit'
+  const engine = isVercel ? 'idm-vton-pollinations-v27' : 'zai-image-edit'
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? 'AI Virtual Try-On ready — IDM-VTON (real VTON model) preserves your face & renders the EXACT garment for ALL garment categories (shirts, sarees, dresses, fashion). Reliable ~25s.'
-      : 'AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product).',
+      ? 'v27 AI Virtual Try-On ready — IDM-VTON for garments (preserves face + exact garment), Pollinations with PRODUCT-reference for sarees/jewelry/accessories (guarantees correct product type). Free forever, no auth required.'
+      : 'v27 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
   })
 }

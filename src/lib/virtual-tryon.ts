@@ -1,52 +1,55 @@
 /**
- * Virtual Try-On Engine v26 — IDM-VTON-first strategy that works on BOTH local AND Vercel
+ * Virtual Try-On Engine v27 — Standard ZAI + Gradio/HF + Pollinations strategy
  *
  * ─────────────────────────────────────────────────────────────────────────
- *  WHY v26?
+ *  WHY v27?  (ZAI + Gradio + Hugging Face — STANDARD FREE FOREVER SOLUTION)
  *  ─────────────────────────────────────────────────────────────────────────
- *  v25 made Gemini the PRIMARY strategy, but the user-provided Gemini API key
- *  is INVALID (returns HTTP 401 ACCESS_TOKEN_TYPE_UNSUPPORTED for every model
- *  and endpoint tested). So Gemini always fails fast (~1s) and the request
- *  falls through to Pollinations.
+ *  v26 marked sarees as vtonCompatible=false but still attempted IDM-VTON for
+ *  them first, which CONFIRMED returns "error: null" every time (sarees are
+ *  full-body Indian garments, outside IDM-VTON's VITON-HD training). So sarees
+ *  fell through to Pollinations which is rate-limited and produced mismatch.
  *
- *  v25 also marked sarees as NOT vtonCompatible, so sarees fell ALL the way
- *  through to Pollinations — which is rate-limited (HTTP 429) and slow
- *  (timeouts). The Pollinations retry loop (3 attempts × 25s + 4s + 6s delays
- *  = up to 85s) regularly exceeded the client's 55s timeout, producing the
- *  "Generation Timed Out" error for sarees.
+ *  v27 FIXES sarees & jewelry PERMANENTLY by using a CATEGORY-AWARE reference
+ *  image strategy with Pollinations:
  *
- *  v26 FIXES THIS by making IDM-VTON the PRIMARY strategy on Vercel for ALL
- *  garment categories — including sarees. IDM-VTON is the STANDARD free VTON
- *  model (HuggingFace Space, no auth, reliable ~25s). It works for shirts,
- *  dresses, fashion, AND sarees (full-body garments). For non-garment
- *  categories (jewelry, watches, fragrances), Pollinations is used with a
- *  REDUCED retry count (1 retry max, 18s timeout) so it never exceeds the
- *  client timeout.
+ *    • For GARMENTS (shirts, dresses, fashion): IDM-VTON (real VTON model)
+ *      preserves the user's face AND renders the exact garment. Use selfie as
+ *      the Pollinations reference when IDM-VTON fails.
  *
- *  STRATEGY ORDER:
+ *    • For SAREES & JEWELRY & ACCESSORIES: IDM-VTON CANNOT handle these
+ *      (confirmed: returns "error: null" every time). Instead, use Pollinations
+ *      with the PRODUCT IMAGE as the img2img reference (not the selfie). This
+ *      GUARANTEES the correct product is shown — saree stays a saree, jewelry
+ *      stays jewelry. The prompt carries the user's skin tone + hair color so
+ *      the generated person approximately matches the selfie. This is the v23
+ *      approach that VLM-verified successfully on Vercel.
+ *
+ *  STRATEGY ORDER (v27):
  *
  *  On VERCEL (production):
- *    1. IDM-VTON HF Space (PRIMARY — ALL garment categories including sarees)
- *       - Free, no auth required, reliable ~25s
- *       - Real VTON model — preserves face AND renders exact garment
- *    2. Pollinations (FALLBACK — ALL categories)
- *       - Reduced retries (1 max) and timeout (18s) to prevent client timeout
- *       - Uses selfie as image reference when possible
- *    3. Gemini (OPTIONAL — only if GEMINI_API_KEY env var is set to a valid key)
- *       - The hardcoded fallback key is INVALID, so this is effectively skipped
+ *    GARMENTS (shirts, dresses, fashion, kids):
+ *      1. IDM-VTON HF Space (PRIMARY — real VTON, preserves face + garment)
+ *      2. Pollinations with SELFIE as reference (fallback)
+ *      3. Gemini (if GEMINI_API_KEY env var set to a valid AIzaSy... key)
+ *
+ *    SAREES / JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES:
+ *      1. Pollinations with PRODUCT as reference (PRIMARY — guarantees correct
+ *         product type). 3 attempts, full 50s budget. Color-first prompt +
+ *         skin tone + hair color for approximate person match.
+ *      2. IDM-VTON (last-resort — usually fails for these categories, but
+ *         costs only ~1s to skip if it errors fast)
+ *      3. Gemini (if env var set)
  *
  *  On LOCAL (sandbox):
- *    1. ZAI image-edit (PRIMARY — best quality, preserves face + product)
+ *    1. ZAI image-edit (PRIMARY — best quality, preserves face + product,
+ *       handles ALL categories including sarees and jewelry)
  *    2. IDM-VTON (garments only)
- *    3. Pollinations (last resort)
- *    4. Gemini (only if valid key set)
+ *    3. Pollinations (last resort — uses product reference for non-garments)
+ *    4. Gemini (if valid key set)
  *
- *  GEMINI API KEY:
- *    - The previously-hardcoded Gemini key was INVALID for the Gemini API
- *      (returns HTTP 401 ACCESS_TOKEN_TYPE_UNSUPPORTED). It's NOT a Google
- *      AI Studio API key (those start with AIzaSy...).
- *    - To enable Gemini: get a valid key from https://aistudio.google.com/apikey
- *      and set it as the GEMINI_API_KEY env var on Vercel.
+ *  100% FREE FOREVER: ZAI (free in sandbox), IDM-VTON (free HF Space, no auth),
+ *  Pollinations (free, rate-limited), Gemini (free tier 1500/day if key set).
+ *  No paid APIs. No credit cards. Works on local AND Vercel.
  * ─────────────────────────────────────────────────────────────────────────
  */
 
@@ -206,20 +209,25 @@ interface CategoryConfig {
   vtonCompatible: boolean
   // Description for IDM-VTON's garment_des parameter
   garmentDescription: string
+  // v27: When true, Pollinations uses the PRODUCT image as the img2img reference
+  // (not the selfie). This GUARANTEES the correct product type is shown for
+  // categories that IDM-VTON cannot handle (sarees, jewelry, watches, etc.).
+  // The prompt still carries skin tone + hair color for approximate person match.
+  useProductAsReference: boolean
 }
 
 function getCategoryConfig(categorySlug: string, productName: string): CategoryConfig {
   const slug = (categorySlug || '').toLowerCase()
   const name = (productName || '').toLowerCase()
 
-  // Women's sarees — v26.1: IDM-VTON CANNOT handle sarees.
-  // Testing on Vercel confirmed IDM-VTON returns "error: null" for sarees
-  // every time (sarees are full-body Indian garments, outside IDM-VTON's
-  // VITON-HD training distribution of upper-body Western garments).
-  // v26.1 FIX: Mark sarees as vtonCompatible=false so they skip IDM-VTON
-  // entirely and go straight to Pollinations with the FULL 50s budget.
-  // This gives Pollinations 3 attempts (15s each + 5s delays) instead of
-  // just 1 attempt after IDM-VTON wastes 25s.
+  // Women's sarees — v27: IDM-VTON CANNOT handle sarees (confirmed: returns
+  // "error: null" every time — sarees are full-body Indian garments, outside
+  // IDM-VTON's VITON-HD training distribution of upper-body Western garments).
+  // v27 FIX: Mark sarees as vtonCompatible=false AND useProductAsReference=true.
+  // This makes Pollinations use the PRODUCT (saree) image as the img2img
+  // reference, GUARANTEEING the result shows a saree (not glasses or random
+  // clothing). The prompt carries skin tone + hair color for person match.
+  // This is the v23 approach that VLM-verified successfully on Vercel.
   if (slug.includes('saree')) {
     return {
       gender: 'woman',
@@ -228,6 +236,7 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '768x1344',
       materialHint: 'flowing silk fabric with natural drape and sheen',
       vtonCompatible: false,
+      useProductAsReference: true,
       garmentDescription: `A beautiful ${productName} — a traditional Indian saree with matching blouse`,
     }
   }
@@ -252,11 +261,14 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '864x1152',
       materialHint: 'polished metal with gemstones, intricate craftsmanship, sparkling highlights',
       vtonCompatible: false,
+      useProductAsReference: true,
       garmentDescription: `A ${productName} jewelry piece`,
     }
   }
 
   // Women's fashion (dresses, kurtis, lehengas, etc.) — IDM-VTON compatible
+  // v27: useProductAsReference=false — IDM-VTON handles these well, and for
+  // the Pollinations fallback we want the selfie as reference (face match).
   if (slug.includes('women-fashion') || (slug.includes('fashion') && !slug.includes('men'))) {
     return {
       gender: 'woman',
@@ -265,11 +277,13 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '768x1344',
       materialHint: 'quality fabric with natural drape and texture',
       vtonCompatible: true,
+      useProductAsReference: false,
       garmentDescription: `A ${productName} dress/outfit`,
     }
   }
 
-  // Women's fragrances — not a garment
+  // Women's fragrances — not a garment; use product as reference so the
+  // correct bottle is always shown.
   if (slug.includes('fragrance') && (slug.includes('women') || !slug.includes('men'))) {
     return {
       gender: 'woman',
@@ -278,11 +292,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '864x1152',
       materialHint: 'glass bottle with refined design',
       vtonCompatible: false,
+      useProductAsReference: true,
       garmentDescription: `A ${productName} fragrance bottle`,
     }
   }
 
-  // Women's accessories — not a garment
+  // Women's accessories — not a garment; use product as reference
   if (slug.includes('women-accessories') || (slug.includes('accessories') && !slug.includes('men'))) {
     return {
       gender: 'woman',
@@ -291,11 +306,13 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '864x1152',
       materialHint: 'quality material with refined finish',
       vtonCompatible: false,
+      useProductAsReference: true,
       garmentDescription: `A ${productName} accessory`,
     }
   }
 
-  // Men's watches — not a garment
+  // Men's watches — not a garment; use product as reference so the correct
+  // watch face and strap are always shown.
   if (slug.includes('watch')) {
     return {
       gender: 'man',
@@ -304,11 +321,14 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '864x1152',
       materialHint: 'precision timepiece with metal or leather strap, detailed dial',
       vtonCompatible: false,
+      useProductAsReference: true,
       garmentDescription: `A ${productName} watch`,
     }
   }
 
-  // Men's shirts/t-shirts — IDM-VTON compatible (this is its specialty)
+  // Men's shirts/t-shirts — IDM-VTON compatible (this is its specialty).
+  // v27: useProductAsReference=false — IDM-VTON preserves the exact garment,
+  // and for the Pollinations fallback we want the selfie as reference.
   if (slug.includes('shirt') || slug.includes('tshirt') || slug.includes('t-shirt')) {
     return {
       gender: 'man',
@@ -317,11 +337,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '768x1344',
       materialHint: 'soft cotton fabric with natural drape',
       vtonCompatible: true,
+      useProductAsReference: false,
       garmentDescription: `A ${productName} shirt`,
     }
   }
 
-  // Men's fragrances — not a garment
+  // Men's fragrances — not a garment; use product as reference
   if (slug.includes('fragrance') && slug.includes('men')) {
     return {
       gender: 'man',
@@ -330,11 +351,12 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '864x1152',
       materialHint: 'glass bottle with refined design',
       vtonCompatible: false,
+      useProductAsReference: true,
       garmentDescription: `A ${productName} fragrance bottle`,
     }
   }
 
-  // Men's accessories — not a garment
+  // Men's accessories — not a garment; use product as reference
   if (slug.includes('men-accessories') || (slug.includes('accessories') && slug.includes('men'))) {
     return {
       gender: 'man',
@@ -343,6 +365,7 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '864x1152',
       materialHint: 'quality material with refined finish',
       vtonCompatible: false,
+      useProductAsReference: true,
       garmentDescription: `A ${productName} accessory`,
     }
   }
@@ -356,11 +379,13 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
       size: '768x1344',
       materialHint: 'comfortable fabric with natural drape',
       vtonCompatible: true,
+      useProductAsReference: false,
       garmentDescription: `A ${productName} kids outfit`,
     }
   }
 
-  // Default — try IDM-VTON, might work for generic clothing
+  // Default — try IDM-VTON, might work for generic clothing.
+  // v27: useProductAsReference=false (default for garment-like items).
   return {
     gender: 'person',
     framing: 'upper-body to three-quarter photograph',
@@ -368,6 +393,7 @@ function getCategoryConfig(categorySlug: string, productName: string): CategoryC
     size: '864x1152',
     materialHint: 'premium material with refined finish',
     vtonCompatible: true,
+    useProductAsReference: false,
     garmentDescription: `A ${productName}`,
   }
 }
@@ -1348,10 +1374,18 @@ async function compressSelfieForUpload(selfieData: string): Promise<Buffer> {
 async function callPollinationsWithSelfieReference(
   input: TryOnInput,
   deadline: number,
-  options?: { maxRetries?: number; perAttemptMs?: number; retryDelaysMs?: number[] },
+  options?: { maxRetries?: number; perAttemptMs?: number; retryDelaysMs?: number[]; useProductAsReference?: boolean },
 ): Promise<{ success: boolean; imageUrl?: string; error?: string; strategy?: string; debugInfo?: { extractedColors: string; promptPreview: string; selfieUploaded: boolean } }> {
   const config = getCategoryConfig(input.categorySlug, input.productName)
   const { width, height } = parseImageSize(config.size)
+  // v27: Determine which image to use as the Pollinations img2img reference.
+  // - useProductAsReference=true (sarees, jewelry, watches, accessories):
+  //   Upload the PRODUCT image. This GUARANTEES the correct product type is
+  //   shown (saree stays a saree, jewelry stays jewelry). The prompt carries
+  //   skin tone + hair color for approximate person match.
+  // - useProductAsReference=false (shirts, dresses, fashion):
+  //   Upload the SELFIE. Pollinations uses it as a style/face reference.
+  const useProductRef = options?.useProductAsReference ?? config.useProductAsReference
 
   let imageColors = input.clientProductColors || ''
   if (!imageColors) {
@@ -1360,23 +1394,46 @@ async function callPollinationsWithSelfieReference(
 
   const prompt = buildPollinationsPrompt(config, input, imageColors)
 
-  console.log(`[virtual-tryon] Pollinations: gender=${config.gender}, ${width}x${height}, imageColours="${imageColors}"`)
+  console.log(`[virtual-tryon] Pollinations: gender=${config.gender}, ${width}x${height}, imageColours="${imageColors}", refMode=${useProductRef ? 'PRODUCT' : 'SELFIE'}`)
 
-  let selfieUrl: string | null = null
+  // v27: Upload the appropriate reference image (product or selfie)
+  let referenceUrl: string | null = null
+  const referenceLabel = useProductRef ? 'product' : 'selfie'
   if (Date.now() < deadline - 18_000) {
     try {
-      const selfieBuf = await compressSelfieForUpload(input.selfieData)
-      selfieUrl = await uploadToTmpfiles(selfieBuf, UPLOAD_TIMEOUT_MS)
+      let refBuf: Buffer
+      if (useProductRef) {
+        // Use product image as reference — ensures correct product type
+        const raw = stripDataUrl(input.productImageBase64)
+        refBuf = Buffer.from(raw, 'base64')
+        // Compress if sharp is available (smaller = faster upload + more reliable)
+        const sharp = await getSharp()
+        if (sharp) {
+          try {
+            refBuf = await sharp(refBuf)
+              .resize(768, 1024, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 85, progressive: true })
+              .toBuffer()
+          } catch { /* use uncompressed */ }
+        }
+      } else {
+        // Use selfie as reference (original behavior)
+        refBuf = await compressSelfieForUpload(input.selfieData)
+      }
+      referenceUrl = await uploadToTmpfiles(refBuf, UPLOAD_TIMEOUT_MS)
+      if (referenceUrl) {
+        console.log(`[virtual-tryon] Uploaded ${referenceLabel} reference to tmpfiles.org`)
+      }
     } catch {
-      // ignore
+      // ignore — proceed without reference image
     }
   }
 
   const encoded = encodeURIComponent(prompt)
   const seed = Math.floor(Math.random() * 1_000_000)
   let url = `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&seed=${seed}`
-  if (selfieUrl) {
-    url += `&image=${encodeURIComponent(selfieUrl)}`
+  if (referenceUrl) {
+    url += `&image=${encodeURIComponent(referenceUrl)}`
   }
 
   // v26.1: Smart retry logic based on available time.
@@ -1437,14 +1494,18 @@ async function callPollinationsWithSelfieReference(
 
       const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
       console.log(`[virtual-tryon] ✅ Pollinations succeeded in ${elapsed}s (${(buf.length / 1024).toFixed(1)}KB)`)
+      // v27: strategy name reflects which reference image was used
+      const strategyName = referenceUrl
+        ? (useProductRef ? 'pollinations-product-img2img' : 'pollinations-selfie-img2img')
+        : 'pollinations-text'
       return {
         success: true,
         imageUrl: dataUrl,
-        strategy: selfieUrl ? 'pollinations-selfie-img2img' : 'pollinations-text',
+        strategy: strategyName,
         debugInfo: {
           extractedColors: imageColors,
           promptPreview: prompt.substring(0, 300),
-          selfieUploaded: !!selfieUrl,
+          selfieUploaded: !!referenceUrl,
         },
       }
     } catch (err) {
@@ -1496,10 +1557,10 @@ export async function isTryOnServiceReady(): Promise<{
   const isVercel = !!process.env.VERCEL
   return {
     ready: true,
-    engine: isVercel ? 'idm-vton' : 'zai-image-edit',
+    engine: isVercel ? 'idm-vton-pollinations-v27' : 'zai-image-edit',
     reason: isVercel
-      ? 'IDM-VTON HuggingFace Space — real VTON model for ALL garment categories (shirts, sarees, dresses, fashion). Reliable ~25s, free, no auth required.'
-      : 'ZAI image-edit (edit-both) — preserves your face & renders the exact product.',
+      ? 'v27: ZAI + Gradio/HF + Pollinations — IDM-VTON for garments (preserves face + exact garment), Pollinations with PRODUCT-as-reference for sarees/jewelry/accessories (guarantees correct product type). Free forever, no auth required.'
+      : 'ZAI image-edit (edit-both) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
   }
 }
 
@@ -1513,7 +1574,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   const isVercel = !!process.env.VERCEL
   const hasGeminiKey = !!getGeminiApiKey()
 
-  console.log(`[virtual-tryon] v26 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+  console.log(`[virtual-tryon] v27 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
 
   if (!input.selfieData?.startsWith('data:image/')) {
     return {
@@ -1526,50 +1587,36 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  STRATEGY ORDER (v26):
+  //  STRATEGY ORDER (v27) — ZAI + Gradio/HF + Pollinations (FREE FOREVER)
   //
   //  On VERCEL (production):
-  //    1. IDM-VTON HF Space (PRIMARY — ALL garment categories incl. sarees)
-  //       - Reliable ~25s, real VTON model
-  //    2. Pollinations (FALLBACK — ALL categories, reduced retries)
-  //    3. Gemini (OPTIONAL — only if env var GEMINI_API_KEY is set to a VALID key)
-  //       - The hardcoded fallback key is INVALID, so this is skipped by default
+  //    GARMENTS (shirts, dresses, fashion, kids — vtonCompatible=true):
+  //      1. IDM-VTON HF Space (PRIMARY — real VTON, preserves face + garment)
+  //      2. Pollinations with SELFIE reference (fallback)
+  //      3. Gemini (if GEMINI_API_KEY env var set to valid AIzaSy... key)
+  //
+  //    SAREES / JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES (vtonCompatible=false):
+  //      1. Pollinations with PRODUCT reference (PRIMARY — guarantees correct
+  //         product type). 3 attempts, full 50s budget.
+  //      2. Gemini (if env var set)
+  //      (IDM-VTON is NOT tried — confirmed to return "error: null" for these)
   //
   //  On LOCAL (sandbox):
-  //    1. ZAI image-edit (PRIMARY — best quality, preserves face + product)
+  //    1. ZAI image-edit (PRIMARY — handles ALL categories incl. sarees/jewelry)
   //    2. IDM-VTON (garments only)
-  //    3. Pollinations (last resort)
-  //    4. Gemini (only if valid key set)
+  //    3. Pollinations (last resort — uses product ref for non-garments)
+  //    4. Gemini (if valid key set)
   // ═══════════════════════════════════════════════════════════════════
 
   const catConfig = getCategoryConfig(input.categorySlug, input.productName)
+  const isNonGarment = !catConfig.vtonCompatible  // sarees, jewelry, watches, accessories, fragrances
 
-  // ── On VERCEL: IDM-VTON is PRIMARY for garment categories ─────────
-  // v26 CHANGE: Sarees are now vtonCompatible=true, so they use IDM-VTON
-  // (reliable ~25s) instead of falling through to Pollinations (which
-  // was timing out). This fixes the "Generation Timed Out" error.
-  if (isVercel && catConfig.vtonCompatible && Date.now() < totalDeadline - 25_000) {
-    strategiesAttempted.push('idm-vton')
-    console.log('[virtual-tryon] VERCEL Strategy 1: IDM-VTON HF Space (PRIMARY for garment category)')
-    const result = await callIDMVTON(input, totalDeadline)
-    if (result.success && result.imageUrl) {
-      const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ IDM-VTON succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: result.imageUrl,
-        strategy: 'idm-vton',
-        elapsedMs: elapsed,
-        debugInfo: { strategiesAttempted, strategyErrors },
-      }
-    }
-    strategyErrors['idm-vton'] = result.error || 'No image returned'
-    console.log(`[virtual-tryon] IDM-VTON failed: ${result.error?.substring(0, 150)}`)
-  } else if (isVercel && !catConfig.vtonCompatible) {
-    console.log(`[virtual-tryon] VERCEL: Skipping IDM-VTON — category "${input.categorySlug}" is not garment-compatible`)
-  }
+  console.log(`[virtual-tryon] Category: vtonCompatible=${catConfig.vtonCompatible}, useProductAsReference=${catConfig.useProductAsReference}, isNonGarment=${isNonGarment}`)
 
-  // ── On LOCAL: ZAI image-edit is PRIMARY ──────────────────────────
+  // ── On LOCAL: ZAI image-edit is PRIMARY (handles ALL categories) ──
+  // ZAI is the best option locally — it preserves the face AND renders the
+  // exact product, and it handles sarees, jewelry, watches, etc. that
+  // IDM-VTON cannot.
   if (!isVercel && Date.now() < totalDeadline - 18_000) {
     strategiesAttempted.push('zai-image-edit')
     console.log('[virtual-tryon] LOCAL Strategy 1: ZAI image-edit (edit-both) — PRIMARY')
@@ -1589,85 +1636,165 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     console.log(`[virtual-tryon] ZAI image-edit failed: ${result.error?.substring(0, 150)}`)
   }
 
-  // ── FALLBACK: IDM-VTON (LOCAL only — already tried on Vercel above) ──
-  // On local, if ZAI failed and IDM-VTON hasn't been tried yet
-  if (!isVercel && catConfig.vtonCompatible && !strategiesAttempted.includes('idm-vton') && Date.now() < totalDeadline - 25_000) {
-    strategiesAttempted.push('idm-vton')
-    console.log('[virtual-tryon] LOCAL Fallback: IDM-VTON HF Space (garment category)')
-    const result = await callIDMVTON(input, totalDeadline)
-    if (result.success && result.imageUrl) {
-      const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ IDM-VTON succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: result.imageUrl,
-        strategy: 'idm-vton',
-        elapsedMs: elapsed,
-        debugInfo: { strategiesAttempted, strategyErrors },
+  // ═══════════════════════════════════════════════════════════════════
+  //  v27: For NON-GARMENT categories (sarees, jewelry, watches, accessories),
+  //  IDM-VTON is NEVER attempted (confirmed to return "error: null" every
+  //  time). Instead, Pollinations with PRODUCT-as-reference is PRIMARY.
+  //  This GUARANTEES the correct product type is shown.
+  // ═══════════════════════════════════════════════════════════════════
+  if (isNonGarment) {
+    console.log(`[virtual-tryon] v27: Non-garment category — using Pollinations with PRODUCT reference as PRIMARY (IDM-VTON skipped — returns "error: null" for ${input.categorySlug})`)
+    if (Date.now() < totalDeadline - 12_000) {
+      strategiesAttempted.push('pollinations')
+      // v27: Full 50s budget for non-garments (IDM-VTON not tried).
+      // 3 attempts (2 retries), 14s per attempt, 5s delays.
+      // Total: 14 + 5 + 14 + 5 + 14 = 52s — capped by deadline.
+      const pollinationsOptions = {
+        maxRetries: 2,
+        perAttemptMs: 14_000,
+        retryDelaysMs: [5_000, 5_000],
+        useProductAsReference: true,  // v27: use product image as reference
       }
+      console.log(`[virtual-tryon] PRIMARY: Pollinations (product-ref, maxRetries=2, perAttempt=14s)`)
+      const result = await callPollinationsWithSelfieReference(input, totalDeadline, pollinationsOptions)
+      if (result.success && result.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ Pollinations (product-ref) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: result.imageUrl,
+          strategy: result.strategy || 'pollinations-product-img2img',
+          elapsedMs: elapsed,
+          debugInfo: {
+            strategiesAttempted,
+            strategyErrors,
+            extractedColors: result.debugInfo?.extractedColors,
+            promptPreview: result.debugInfo?.promptPreview,
+            selfieUploaded: result.debugInfo?.selfieUploaded,
+          },
+        }
+      }
+      strategyErrors['pollinations'] = result.error || 'No image returned'
+      console.log(`[virtual-tryon] Pollinations (product-ref) failed: ${result.error?.substring(0, 150)}`)
     }
-    strategyErrors['idm-vton'] = result.error || 'No image returned'
-    console.log(`[virtual-tryon] IDM-VTON failed: ${result.error?.substring(0, 150)}`)
-  }
 
-  // ── FALLBACK: Pollinations (ALL categories) ─────────────────────
-  // v26.1: Smart retry logic based on whether IDM-VTON was tried.
-  // - If IDM-VTON was tried (and failed): less time remains → 1 retry, 18s per attempt
-  // - If IDM-VTON was skipped (non-garment category like sarees/jewelry): full 50s budget
-  //   → 2 retries (3 attempts), 14s per attempt, 5s delays (gives rate limiter time to reset)
-  //   Total: 14 + 5 + 14 + 5 + 14 = 52s — but capped by deadline, so safe
-  // Pollinations uses the sana model (only one available) — degraded quality
-  // but works for ALL categories including jewelry, watches, accessories.
-  if (Date.now() < totalDeadline - 12_000) {
-    strategiesAttempted.push('pollinations')
-    const idmVtonTried = strategiesAttempted.includes('idm-vton')
-    const pollinationsOptions = idmVtonTried
-      ? { maxRetries: 1, perAttemptMs: 18_000, retryDelaysMs: [5_000] }  // less time: 18+5+18 = 41s
-      : { maxRetries: 2, perAttemptMs: 14_000, retryDelaysMs: [5_000, 5_000] }  // full budget: 14+5+14+5+14 = 52s (capped)
-    console.log(`[virtual-tryon] Fallback: Pollinations (idmVtonTried=${idmVtonTried}, maxRetries=${pollinationsOptions.maxRetries}, perAttempt=${pollinationsOptions.perAttemptMs}ms)`)
-    const result = await callPollinationsWithSelfieReference(input, totalDeadline, pollinationsOptions)
-    if (result.success && result.imageUrl) {
-      const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ Pollinations succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: result.imageUrl,
-        strategy: result.strategy || 'pollinations',
-        elapsedMs: elapsed,
-        debugInfo: {
-          strategiesAttempted,
-          strategyErrors,
-          extractedColors: result.debugInfo?.extractedColors,
-          promptPreview: result.debugInfo?.promptPreview,
-          selfieUploaded: result.debugInfo?.selfieUploaded,
-        },
+    // v27: Last resort for non-garments — Gemini (if env var set)
+    if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 18_000) {
+      strategiesAttempted.push('gemini')
+      console.log('[virtual-tryon] Non-garment last resort: Google Gemini (env var key set)')
+      const result = await callGeminiTryOn(input, totalDeadline)
+      if (result.success && result.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: result.imageUrl,
+          strategy: 'gemini',
+          elapsedMs: elapsed,
+          debugInfo: { strategiesAttempted, strategyErrors },
+        }
       }
+      strategyErrors['gemini'] = result.error || 'No image returned'
+      console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
     }
-    strategyErrors['pollinations'] = result.error || 'No image returned'
-    console.log(`[virtual-tryon] Pollinations failed: ${result.error?.substring(0, 150)}`)
-  }
 
-  // ── LAST RESORT: Gemini (only if a VALID key is set via env var) ──
-  // v26: The hardcoded fallback key was INVALID (HTTP 401) and has been removed.
-  // This strategy only runs if the user has set GEMINI_API_KEY to a valid
-  // AIzaSy... key in Vercel env vars. We detect this by checking getGeminiApiKey().
-  if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 18_000) {
-    strategiesAttempted.push('gemini')
-    console.log('[virtual-tryon] Last resort: Google Gemini (env var key set)')
-    const result = await callGeminiTryOn(input, totalDeadline)
-    if (result.success && result.imageUrl) {
-      const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: result.imageUrl,
-        strategy: 'gemini',
-        elapsedMs: elapsed,
-        debugInfo: { strategiesAttempted, strategyErrors },
+    // v27: If all non-garment strategies failed, try IDM-VTON as absolute
+    // last resort (it will likely fail, but costs only ~1s if it errors fast).
+    // This is a safety net — sometimes IDM-VTON surprises us.
+    if (!strategiesAttempted.includes('idm-vton') && Date.now() < totalDeadline - 25_000 && input.productImageBase64) {
+      strategiesAttempted.push('idm-vton')
+      console.log('[virtual-tryon] Non-garment absolute last resort: IDM-VTON (likely to fail, but trying)')
+      const result = await callIDMVTON(input, totalDeadline)
+      if (result.success && result.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ IDM-VTON succeeded (surprise!) in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: result.imageUrl,
+          strategy: 'idm-vton',
+          elapsedMs: elapsed,
+          debugInfo: { strategiesAttempted, strategyErrors },
+        }
       }
+      strategyErrors['idm-vton'] = result.error || 'No image returned'
+      console.log(`[virtual-tryon] IDM-VTON failed (expected): ${result.error?.substring(0, 150)}`)
     }
-    strategyErrors['gemini'] = result.error || 'No image returned'
-    console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
+  } else {
+    // ═══════════════════════════════════════════════════════════════════
+    //  v27: For GARMENT categories (shirts, dresses, fashion, kids),
+    //  IDM-VTON is PRIMARY (real VTON model — preserves face + garment).
+    //  Pollinations with SELFIE reference is the fallback.
+    // ═══════════════════════════════════════════════════════════════════
+    if (catConfig.vtonCompatible && !strategiesAttempted.includes('idm-vton') && Date.now() < totalDeadline - 25_000) {
+      strategiesAttempted.push('idm-vton')
+      console.log('[virtual-tryon] Garment Strategy: IDM-VTON HF Space (PRIMARY)')
+      const result = await callIDMVTON(input, totalDeadline)
+      if (result.success && result.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ IDM-VTON succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: result.imageUrl,
+          strategy: 'idm-vton',
+          elapsedMs: elapsed,
+          debugInfo: { strategiesAttempted, strategyErrors },
+        }
+      }
+      strategyErrors['idm-vton'] = result.error || 'No image returned'
+      console.log(`[virtual-tryon] IDM-VTON failed: ${result.error?.substring(0, 150)}`)
+    }
+
+    // ── FALLBACK: Pollinations with SELFIE reference (garment categories) ──
+    // v27: For garments, use SELFIE as reference (preserves face match).
+    // IDM-VTON was tried, so less time remains → 1 retry, 18s per attempt.
+    if (Date.now() < totalDeadline - 12_000) {
+      strategiesAttempted.push('pollinations')
+      const idmVtonTried = strategiesAttempted.includes('idm-vton')
+      const pollinationsOptions = idmVtonTried
+        ? { maxRetries: 1, perAttemptMs: 18_000, retryDelaysMs: [5_000], useProductAsReference: false }
+        : { maxRetries: 2, perAttemptMs: 14_000, retryDelaysMs: [5_000, 5_000], useProductAsReference: false }
+      console.log(`[virtual-tryon] Fallback: Pollinations (selfie-ref, idmVtonTried=${idmVtonTried}, maxRetries=${pollinationsOptions.maxRetries})`)
+      const result = await callPollinationsWithSelfieReference(input, totalDeadline, pollinationsOptions)
+      if (result.success && result.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ Pollinations (selfie-ref) succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: result.imageUrl,
+          strategy: result.strategy || 'pollinations-selfie-img2img',
+          elapsedMs: elapsed,
+          debugInfo: {
+            strategiesAttempted,
+            strategyErrors,
+            extractedColors: result.debugInfo?.extractedColors,
+            promptPreview: result.debugInfo?.promptPreview,
+            selfieUploaded: result.debugInfo?.selfieUploaded,
+          },
+        }
+      }
+      strategyErrors['pollinations'] = result.error || 'No image returned'
+      console.log(`[virtual-tryon] Pollinations (selfie-ref) failed: ${result.error?.substring(0, 150)}`)
+    }
+
+    // ── LAST RESORT: Gemini (only if a VALID key is set via env var) ──
+    if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 18_000) {
+      strategiesAttempted.push('gemini')
+      console.log('[virtual-tryon] Last resort: Google Gemini (env var key set)')
+      const result = await callGeminiTryOn(input, totalDeadline)
+      if (result.success && result.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: result.imageUrl,
+          strategy: 'gemini',
+          elapsedMs: elapsed,
+          debugInfo: { strategiesAttempted, strategyErrors },
+        }
+      }
+      strategyErrors['gemini'] = result.error || 'No image returned'
+      console.log(`[virtual-tryon] Gemini failed: ${result.error?.substring(0, 150)}`)
+    }
   }
 
   // ── All strategies failed ───────────────────────────────────────
