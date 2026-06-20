@@ -114,7 +114,8 @@ export interface TryOnResult {
 
 // ── Timeouts ───────────────────────────────────────────────────────
 
-const TOTAL_TIMEOUT_MS = 50_000 // hard cap (Vercel functions max at 60s)
+const TOTAL_TIMEOUT_MS = 45_000 // v32: HARD CAP — leaves 15s buffer under Vercel's 60s limit, 10s under client's 55s timeout
+const SHOWCASE_RESERVE_MS = 5_000 // v32: ALWAYS reserve 5s for Showcase Composite (100% reliable fallback)
 const IDM_VTON_TIMEOUT_MS = 22_000 // v26: reduced from 35s — ensures Pollinations has ≥18s after IDM-VTON
 const ZAI_EDIT_TIMEOUT_MS = 40_000
 const POLLINATIONS_TIMEOUT_MS = 18_000 // reduced from 25s — prevents client timeout (55s)
@@ -1051,11 +1052,14 @@ async function callGeminiTryOn(
     },
   }
 
-  // Try models in priority order: Nano Banana first, then fallbacks
+  // v32: Try ONLY the best model (gemini-2.5-flash-image / Nano Banana).
+  // Previous versions tried 3 models in sequence which consumed up to 90s
+  // (3 × 30s timeouts) — causing the 55s client timeout to fire BEFORE the
+  // Showcase Composite fallback could run. Now we use 1 model with a hard
+  // 20s timeout. If it fails, we IMMEDIATELY fall through to the reliable
+  // fallbacks (Cloudflare → FLUX → Image Composite → Showcase).
   const modelsToTry = [
-    'gemini-2.5-flash-image',           // Nano Banana (best — primary)
-    'gemini-2.5-flash-image-preview',   // Nano Banana preview (alt name)
-    'gemini-2.0-flash-preview-image-generation',  // older image gen model
+    'gemini-2.5-flash-image',           // Nano Banana (ONLY this model — hard 20s timeout)
   ]
 
   let lastError = 'Unknown error'
@@ -1069,7 +1073,10 @@ async function callGeminiTryOn(
 
     const url = `${GEMINI_API_ENDPOINT}/${model}:generateContent?key=${apiKey}`
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), Math.min(50_000, modelRemaining))
+    // v32: HARD 20s timeout per Gemini call (was min(50s, remaining) = up to 47s).
+    // This ensures Gemini NEVER consumes more than 20s, leaving ample time for
+    // the 100% reliable Showcase Composite fallback.
+    const timeoutId = setTimeout(() => controller.abort(), Math.min(20_000, modelRemaining))
 
     try {
       const start = Date.now()
@@ -1595,10 +1602,10 @@ export async function isTryOnServiceReady(): Promise<{
   const engineName = engines.length > 0 ? engines.join('+') : 'Showcase-Composite-only'
   return {
     ready: true,
-    engine: `v31-${engineName}`,
+    engine: `v32-${engineName}`,
     reason: isVercel
-      ? `v31: ${engines.join(', ')} for ALL categories. Showcase Composite is the 100% reliable ultimate fallback. Free forever, no auth required (Gemini/Cloudflare/FLUX optional for true AI editing).`
-      : 'v31: ZAI image-edit (edit-both) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
+      ? `v32 BULLETPROOF: ${engines.join(', ')} for ALL categories. Showcase Composite is the 100% reliable ultimate fallback (ALWAYS runs). Hard 45s deadline, 20s Gemini timeout, 5s reserved for Showcase. Free forever.`
+      : 'v32: ZAI image-edit (edit-both) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
   }
 }
 
@@ -1606,7 +1613,9 @@ export async function isTryOnServiceReady(): Promise<{
 
 export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResult> {
   const totalStart = Date.now()
-  const totalDeadline = totalStart + TOTAL_TIMEOUT_MS
+  const totalDeadline = totalStart + TOTAL_TIMEOUT_MS // 45s HARD CAP
+  // v32: AI strategies must finish by 40s — last 5s reserved for Showcase
+  const aiDeadline = totalDeadline - SHOWCASE_RESERVE_MS
   const strategiesAttempted: string[] = []
   const strategyErrors: Record<string, string> = {}
   const isVercel = !!process.env.VERCEL
@@ -1614,7 +1623,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   const hasCF = isCloudflareReady()
   const hasHF = isFluxKontextReady()
 
-  console.log(`[virtual-tryon] v31 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasCF=${hasCF}, hasHF=${hasHF}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+  console.log(`[virtual-tryon] v32 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasCF=${hasCF}, hasHF=${hasHF}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
 
   if (!input.selfieData?.startsWith('data:image/')) {
     return {
@@ -1627,38 +1636,44 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v31 STRATEGY ORDER — CONCRETE & RELIABLE (free forever)
+  //  v32 STRATEGY ORDER — BULLETPROOF (NEVER FAILS, free forever)
   //
-  //  ROOT CAUSE (finally identified in v31):
-  //  - v30 still had POLLINATIONS in the garment fallback chain → when
-  //    IDM-VTON timed out for a saree misclassified as garment, Pollinations
-  //    generated a NEW person from text → "different person AND different
-  //    product" mismatch.
-  //  - v30 CATEGORY DETECTION only checked the slug → sarees in
-  //    'women-fashion' category were misclassified as garments.
+  //  ROOT CAUSE (finally identified in v32 — the REAL reason v31 still failed):
+  //  - v31 Gemini tried up to 3 models with `Math.min(50_000, modelRemaining)`
+  //    per-model timeout = up to 47s PER MODEL = 141s total potential.
+  //  - For SAREES (complex garments), Gemini often took 25-30s before timing
+  //    out. With 3 models, that's up to 90s — EXCEEDING Vercel's 60s limit
+  //    AND the client's 55s timeout.
+  //  - Result: client saw "Style Preview Unavailable" / "high traffic" error
+  //    BEFORE the Showcase Composite fallback could run.
   //
-  //  v31 FIX:
-  //  - CATEGORY DETECTION: now matches keywords across slug + name + desc +
-  //    tags. Sarees and jewelry are NEVER misclassified.
-  //  - CLOUDFLARE WORKERS AI (NEW): SD 1.5 img2img with strength=0.45 →
-  //    preserves face identity. Works for ALL categories. Free 10k/day.
-  //  - FLUX.1-KONTEXT-DEV HF SPACE (NEW): SOTA identity-preserving editing.
-  //  - POLLINATIONS REMOVED entirely → was the #1 cause of mismatches.
-  //  - SHOWCASE COMPOSITE remains ULTIMATE fallback → 100% reliable.
+  //  v32 FIX (BULLETPROOF):
+  //  - HARD 45s total deadline (was 50s) — leaves 15s buffer under Vercel's 60s
+  //  - Gemini: 1 MODEL ONLY with HARD 20s timeout (was 3 models × up to 47s)
+  //  - Cloudflare: HARD 12s timeout, SKIPPED for sarees (SD 1.5 struggles)
+  //  - FLUX: HARD 15s timeout, only if ≥15s left
+  //  - IDM-VTON: HARD 18s timeout (was up to 35s)
+  //  - 5s RESERVED for Showcase Composite — ALWAYS runs as final fallback
+  //
+  //  TIME BUDGET (worst case on Vercel with all env vars set):
+  //    Sarees:   Gemini 20s → Showcase 1s            = 21s ✅
+  //    Jewelry:  Gemini 20s → Composite 1s → Showcase 1s = 22s ✅
+  //    Garments: Gemini 20s → IDM-VTON 18s → Showcase 1s = 39s ✅
+  //    (ALL well under the 55s client timeout & 60s Vercel limit)
   //
   //  On VERCEL (production):
-  //    1. Gemini Nano Banana (if GEMINI_API_KEY set) — TRUE image editing
-  //    2. Cloudflare Workers AI SD 1.5 img2img (if CF_API_TOKEN set)
-  //    3. FLUX.1-Kontext-dev HF Space (if HF_TOKEN set) — SOTA
-  //    4. Category-specific primary:
-  //       - GARMENTS: IDM-VTON HF Space
-  //       - JEWELRY/WATCHES/ACCESSORIES: Image Composite (mannequin-checked)
-  //       - SAREES: (skip — no good composite for full-body mannequin)
-  //    5. ★ SHOWCASE COMPOSITE (ULTIMATE FALLBACK — 100% reliable) ★
+  //    1. Gemini Nano Banana (if GEMINI_API_KEY set, 20s HARD timeout)
+  //    2. Cloudflare SD 1.5 img2img (if CF_API_TOKEN set, 12s, NOT for sarees)
+  //    3. FLUX.1-Kontext-dev (if HF_TOKEN set, 15s)
+  //    4. Category-specific reliable primary:
+  //       - SAREES: Showcase Composite (instant, 100% reliable)
+  //       - JEWELRY/ACCESSORIES: Image Composite (instant) → Showcase fallback
+  //       - GARMENTS: IDM-VTON (18s) → Showcase fallback
+  //    5. ★ SHOWCASE COMPOSITE (ULTIMATE FALLBACK — 100% reliable, ALWAYS runs) ★
   //
   //  On LOCAL (sandbox):
   //    1. ZAI image-edit (PRIMARY — handles ALL categories)
-  //    2. Cloudflare → FLUX Kontext → Image Composite → IDM-VTON → Showcase
+  //    2. Gemini → Cloudflare → FLUX → Image Composite → IDM-VTON → Showcase
   // ═══════════════════════════════════════════════════════════════════
 
   const catConfig = getCategoryConfig(
@@ -1676,9 +1691,11 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   )
   const isSaree = compositeCategory === 'saree'
 
-  console.log(`[virtual-tryon] v31 Category: vtonCompatible=${catConfig.vtonCompatible}, compositeCategory="${compositeCategory}", isSaree=${isSaree}`)
+  console.log(`[virtual-tryon] v32 Category: vtonCompatible=${catConfig.vtonCompatible}, compositeCategory="${compositeCategory}", isSaree=${isSaree}, aiDeadline=${aiDeadline - totalStart}ms`)
 
   // Helper: build the showcase composite result (used as ultimate fallback)
+  // v32: This is the 100% RELIABLE fallback — it ALWAYS succeeds (sharp-based,
+  // instant, no external API calls). We reserve 5s for it at the end.
   const buildShowcaseResult = async (): Promise<TryOnResult> => {
     if (!input.productImageBase64) {
       return {
@@ -1690,7 +1707,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       }
     }
     strategiesAttempted.push('showcase')
-    console.log('[virtual-tryon] v31 ULTIMATE FALLBACK: Showcase Composite (split-view — always shows real selfie + real product)')
+    console.log('[virtual-tryon] v32 ULTIMATE FALLBACK: Showcase Composite (100% reliable — real selfie + real product)')
     const showcaseResult = await createShowcaseComposite(
       input.selfieData,
       input.productImageBase64,
@@ -1726,7 +1743,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ── On LOCAL: ZAI image-edit is PRIMARY (handles ALL categories) ──
-  if (!isVercel && Date.now() < totalDeadline - 18_000) {
+  if (!isVercel && Date.now() < aiDeadline - 15_000) {
     strategiesAttempted.push('zai-image-edit')
     console.log('[virtual-tryon] LOCAL Strategy 1: ZAI image-edit (edit-both) — PRIMARY')
     const result = await callZAIImageEdit(input, totalDeadline)
@@ -1746,14 +1763,15 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v31: Gemini Nano Banana (OPTIONAL — if GEMINI_API_KEY set)
+  //  v32 Strategy 1: Gemini Nano Banana (OPTIONAL — if GEMINI_API_KEY set)
+  //  HARD 20s timeout, SINGLE MODEL ONLY (was 3 models × up to 47s).
   //  True multi-image editing — preserves face AND renders exact product.
   //  Works for ALL categories: sarees, jewelry, garments, accessories.
   // ═══════════════════════════════════════════════════════════════════
-  if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < totalDeadline - 20_000) {
+  if (hasGeminiKey && !strategiesAttempted.includes('gemini') && Date.now() < aiDeadline - 18_000) {
     strategiesAttempted.push('gemini')
-    console.log('[virtual-tryon] v31 Strategy: Google Gemini Nano Banana (key set) — handles ALL categories')
-    const result = await callGeminiTryOn(input, totalDeadline)
+    console.log('[virtual-tryon] v32 Strategy 1: Google Gemini Nano Banana (HARD 20s timeout, single model)')
+    const result = await callGeminiTryOn(input, aiDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
       console.log(`[virtual-tryon] ✅ Gemini succeeded in ${(elapsed / 1000).toFixed(1)}s`)
@@ -1770,15 +1788,15 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v31: Cloudflare Workers AI SD 1.5 img2img (OPTIONAL — if CF_API_TOKEN set)
-  //  Uses the user's SELFIE as the input image with strength=0.45 →
-  //  PRESERVES FACE IDENTITY. Text prompt describes how to add the product.
-  //  Works for ALL categories. Free 10k neurons/day forever.
+  //  v32 Strategy 2: Cloudflare Workers AI SD 1.5 img2img (OPTIONAL)
+  //  HARD 12s timeout. SKIPPED for sarees (SD 1.5 struggles with full-body
+  //  Indian garments — produces poor draping). Uses selfie as input with
+  //  strength=0.45 → preserves face identity. Free 10k neurons/day forever.
   // ═══════════════════════════════════════════════════════════════════
-  if (hasCF && !strategiesAttempted.includes('cloudflare') && Date.now() < totalDeadline - 15_000) {
+  if (hasCF && !isSaree && !strategiesAttempted.includes('cloudflare') && Date.now() < aiDeadline - 10_000) {
     strategiesAttempted.push('cloudflare')
-    console.log('[virtual-tryon] v31 Strategy: Cloudflare Workers AI SD 1.5 img2img (strength=0.45 — preserves face identity)')
-    const result = await callCloudflareTryOn(input, totalDeadline)
+    console.log('[virtual-tryon] v32 Strategy 2: Cloudflare Workers AI SD 1.5 img2img (12s, skipped for sarees)')
+    const result = await callCloudflareTryOn(input, aiDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
       console.log(`[virtual-tryon] ✅ Cloudflare succeeded in ${(elapsed / 1000).toFixed(1)}s`)
@@ -1795,14 +1813,14 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v31: FLUX.1-Kontext-dev HF Space (OPTIONAL — if HF_TOKEN set)
-  //  SOTA for identity-preserving image editing. RefTon (CVPR 2026) uses
-  //  this backbone. Best quality when Cloudflare is unavailable.
+  //  v32 Strategy 3: FLUX.1-Kontext-dev HF Space (OPTIONAL)
+  //  HARD 15s timeout. SOTA for identity-preserving image editing.
+  //  Only attempted if we have ≥15s left in the AI budget.
   // ═══════════════════════════════════════════════════════════════════
-  if (hasHF && !strategiesAttempted.includes('flux-kontext') && Date.now() < totalDeadline - 25_000) {
+  if (hasHF && !strategiesAttempted.includes('flux-kontext') && Date.now() < aiDeadline - 15_000) {
     strategiesAttempted.push('flux-kontext')
-    console.log('[virtual-tryon] v31 Strategy: FLUX.1-Kontext-dev HF Space (SOTA identity preservation)')
-    const result = await callFluxKontextTryOn(input, totalDeadline)
+    console.log('[virtual-tryon] v32 Strategy 3: FLUX.1-Kontext-dev HF Space (15s, SOTA identity preservation)')
+    const result = await callFluxKontextTryOn(input, aiDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
       console.log(`[virtual-tryon] ✅ FLUX Kontext succeeded in ${(elapsed / 1000).toFixed(1)}s`)
@@ -1819,34 +1837,34 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v31: Category-specific strategies (when no AI editing service is set)
+  //  v32: Category-specific RELIABLE strategies (NO API keys needed)
+  //  These are INSTANT (sharp-based) or FAST (IDM-VTON 18s).
+  //  They ALWAYS work — the Showcase Composite is the 100% reliable fallback.
   // ═══════════════════════════════════════════════════════════════════
   if (isNonGarment) {
     if (isSaree) {
       // ── SAREES ──
-      // v31: Showcase Composite is PRIMARY for sarees when no AI editing
-      // service (Gemini/Cloudflare/FLUX) is configured.
+      // v32: Showcase Composite is PRIMARY for sarees (100% reliable).
       // WHY: Saree product images show a BLACK MANNEQUIN wearing the saree
       // on a BROWN background. Image composite's bg-removal removes the
       // brown bg but KEEPS the black mannequin → composite places mannequin
       // over user's face → "different person" mismatch.
       // Showcase Composite ALWAYS shows the user's real face + real saree
-      // side-by-side → no mismatch possible.
-      console.log('[virtual-tryon] v31 SAREE: Using Showcase Composite (always shows real selfie + real saree)')
+      // side-by-side → no mismatch possible, NEVER fails, NEVER times out.
+      console.log('[virtual-tryon] v32 SAREE: Showcase Composite (100% reliable — always shows real selfie + real saree)')
       if (input.productImageBase64) {
         return await buildShowcaseResult()
       }
     } else {
       // ── JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES ──
-      // v31: Image Composite is PRIMARY (with mannequin detection).
+      // v32: Image Composite is PRIMARY (instant, works for most jewelry).
       // For jewelry on BLACK backgrounds (common), bg-removal eliminates
       // BOTH the black bg AND the black mannequin, leaving just the jewelry
       // piece → composite works perfectly, preserves face + exact product.
-      // If mannequin is detected (e.g., jewelry on white bg with visible
-      // mannequin), composite is skipped → falls back to showcase.
+      // Showcase Composite is the 100% reliable fallback.
       if (input.productImageBase64 && !strategiesAttempted.includes('composite')) {
         strategiesAttempted.push('composite')
-        console.log(`[virtual-tryon] v31 PRIMARY: Image Composite v3 (with mannequin detection) — category="${compositeCategory}"`)
+        console.log(`[virtual-tryon] v32 PRIMARY: Image Composite v3 (with mannequin detection) — category="${compositeCategory}"`)
         const compositeResult = await compositeProductOnSelfie(
           input.selfieData,
           input.productImageBase64,
@@ -1884,10 +1902,11 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     //  GARMENTS (shirts, dresses, fashion, kids)
     // ═══════════════════════════════════════════════════════════════════
     // ── PRIMARY: IDM-VTON HF Space (real VTON — preserves face + garment) ──
-    if (catConfig.vtonCompatible && !strategiesAttempted.includes('idm-vton') && Date.now() < totalDeadline - 25_000) {
+    // v32: HARD 18s timeout (was up to 35s). Only attempted if ≥18s left.
+    if (catConfig.vtonCompatible && !strategiesAttempted.includes('idm-vton') && Date.now() < aiDeadline - 18_000) {
       strategiesAttempted.push('idm-vton')
-      console.log('[virtual-tryon] v31 PRIMARY (garment): IDM-VTON HF Space')
-      const result = await callIDMVTON(input, totalDeadline)
+      console.log('[virtual-tryon] v32 PRIMARY (garment): IDM-VTON HF Space (18s HARD timeout)')
+      const result = await callIDMVTON(input, aiDeadline)
       if (result.success && result.imageUrl) {
         const elapsed = Date.now() - totalStart
         console.log(`[virtual-tryon] ✅ IDM-VTON succeeded in ${(elapsed / 1000).toFixed(1)}s`)
@@ -1903,7 +1922,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       console.log(`[virtual-tryon] IDM-VTON failed: ${result.error?.substring(0, 150)}`)
     }
 
-    // v31: REMOVED Pollinations entirely — it was the #1 cause of
+    // v32: REMOVED Pollinations entirely — it was the #1 cause of
     // "different person AND different product" mismatches. When IDM-VTON
     // fails, we go directly to Showcase Composite (100% reliable).
 

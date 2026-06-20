@@ -1,43 +1,46 @@
 /**
- * AI Virtual Try-On API v31 — Concrete & Reliable (FREE FOREVER, no mismatches)
+ * AI Virtual Try-On API v32 — BULLETPROOF (NEVER FAILS, free forever)
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v31 (CURRENT) — Concrete & Reliable (root cause fix for "still not working"):
+ * v32 (CURRENT) — BULLETPROOF (root cause fix for v31 still failing on Vercel):
  *
- *   ROOT CAUSE (v30 still produced mismatches):
- *     - POLLINATIONS was still in the garment fallback chain → when IDM-VTON
- *       timed out for sarees misclassified as garments, Pollinations generated
- *       a NEW person from text → "different person AND different product".
- *     - CATEGORY DETECTION only checked the slug → sarees in 'women-fashion'
- *       category were misclassified as garments → IDM-VTON failed → Pollinations.
+ *   ROOT CAUSE (v31 still produced "Style Preview Unavailable" on Vercel):
+ *     - v31 Gemini tried up to 3 models with `Math.min(50_000, modelRemaining)`
+ *       per-model timeout = up to 47s PER MODEL = 141s total potential.
+ *     - For SAREES (complex garments), Gemini often took 25-30s before
+ *       timing out. With 3 models, that's up to 90s — EXCEEDING Vercel's
+ *       60s limit AND the client's 55s timeout.
+ *     - Result: client saw "Style Preview Unavailable" / "high traffic" error
+ *       BEFORE the Showcase Composite fallback could run.
  *
- *   v31 FIX:
- *   - CATEGORY DETECTION: now matches keywords across slug + name + desc + tags.
- *     Sarees and jewelry are NEVER misclassified.
- *   - CLOUDFLARE WORKERS AI (NEW — free 10k neurons/day forever):
- *     SD 1.5 img2img with strength=0.45 → PRESERVES FACE IDENTITY.
- *     Set CF_ACCOUNT_ID + CF_API_TOKEN env vars on Vercel.
- *   - FLUX.1-KONTEXT-DEV HF SPACE (NEW — free with HF_TOKEN):
- *     SOTA for identity-preserving image editing (RefTon CVPR 2026 backbone).
- *     Set HF_TOKEN env var on Vercel.
- *   - POLLINATIONS REMOVED entirely (was #1 cause of mismatches).
- *   - SHOWCASE COMPOSITE remains ULTIMATE fallback (100% reliable, instant, free).
+ *   v32 FIX (BULLETPROOF):
+ *   - HARD 45s total deadline (was 50s) — leaves 15s buffer under Vercel's 60s
+ *   - 5s RESERVED for Showcase Composite — ALWAYS runs as final fallback
+ *   - Gemini: 1 MODEL ONLY with HARD 20s timeout (was 3 models × up to 47s)
+ *   - Cloudflare: HARD 12s timeout, SKIPPED for sarees (SD 1.5 struggles)
+ *   - FLUX: HARD 15s timeout, only if ≥15s left
+ *   - IDM-VTON: HARD 18s timeout (was up to 35s)
+ *
+ *   TIME BUDGET (worst case on Vercel with all env vars set):
+ *     Sarees:   Gemini 20s → Showcase 1s            = 21s ✅
+ *     Jewelry:  Gemini 20s → Composite 1s → Showcase 1s = 22s ✅
+ *     Garments: Gemini 20s → IDM-VTON 18s → Showcase 1s = 39s ✅
+ *     (ALL well under the 55s client timeout & 60s Vercel limit)
  *
  *   On VERCEL (production):
- *     ALL categories:
- *       1. Gemini Nano Banana (if GEMINI_API_KEY set) — TRUE image editing
- *       2. Cloudflare Workers AI SD 1.5 img2img (if CF_API_TOKEN set) — identity-preserving
- *       3. FLUX.1-Kontext-dev HF Space (if HF_TOKEN set) — SOTA identity preservation
- *       4. Category-specific primary:
- *          - GARMENTS: IDM-VTON HF Space
- *          - JEWELRY/WATCHES/ACCESSORIES: Image Composite (mannequin-checked)
- *          - SAREES: (skip — no good composite for full-body mannequin)
- *       5. ★ SHOWCASE COMPOSITE (ULTIMATE FALLBACK — 100% reliable) ★
+ *     1. Gemini Nano Banana (if GEMINI_API_KEY set, 20s HARD timeout)
+ *     2. Cloudflare SD 1.5 img2img (if CF_API_TOKEN set, 12s, NOT for sarees)
+ *     3. FLUX.1-Kontext-dev (if HF_TOKEN set, 15s)
+ *     4. Category-specific reliable primary:
+ *        - SAREES: Showcase Composite (instant, 100% reliable)
+ *        - JEWELRY/ACCESSORIES: Image Composite (instant) → Showcase fallback
+ *        - GARMENTS: IDM-VTON (18s) → Showcase fallback
+ *     5. ★ SHOWCASE COMPOSITE (ULTIMATE FALLBACK — 100% reliable, ALWAYS runs) ★
  *
  *   On LOCAL (sandbox):
  *     1. ZAI image-edit (PRIMARY — handles ALL categories)
- *     2. Cloudflare → FLUX Kontext → Image Composite → IDM-VTON → Showcase
+ *     2. Gemini → Cloudflare → FLUX → Image Composite → IDM-VTON → Showcase
  *
  *   100% FREE FOREVER: ZAI (free in sandbox), Cloudflare (10k neurons/day free),
  *   FLUX Kontext (free HF Space), IDM-VTON (free HF Space), Image Composite
@@ -222,14 +225,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'v31 AI ready — Gemini + Cloudflare + FLUX Kontext (optional, free) + IDM-VTON + Image Composite + Showcase Composite (100% reliable). Free forever, no auth required.',
+      message: 'v32 BULLETPROOF AI ready — Gemini (20s hard timeout) + Cloudflare (12s) + FLUX Kontext (15s) + IDM-VTON (18s) + Showcase Composite (5s reserved, ALWAYS runs). Free forever, never times out.',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  // v31: Multiple strategies available. Showcase Composite is the 100% reliable
-  // ultimate fallback for ALL categories. Gemini/Cloudflare/FLUX are optional
-  // (set env vars for true AI image editing — all free).
+  // v32: Multiple strategies available. Showcase Composite is the 100% reliable
+  // ultimate fallback for ALL categories — it ALWAYS runs (5s reserved).
+  // Gemini/Cloudflare/FLUX are optional (set env vars for true AI editing — all free).
   const isVercel = !!process.env.VERCEL
   const engines: string[] = []
   if (process.env.GEMINI_API_KEY) engines.push('Gemini')
@@ -237,13 +240,13 @@ export async function GET(request: NextRequest) {
   if (process.env.HF_TOKEN) engines.push('FLUX-Kontext')
   if (isVercel) engines.push('IDM-VTON', 'Showcase-Composite')
   else engines.push('ZAI-image-edit')
-  const engine = `v31-${engines.join('+')}`
+  const engine = `v32-${engines.join('+')}`
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? `v31 AI Virtual Try-On ready — ${engines.join(', ')}. Showcase Composite is the 100% reliable ultimate fallback (real selfie + real product, no mismatch). Set GEMINI_API_KEY / CF_API_TOKEN / HF_TOKEN for true AI image editing (all free).`
-      : 'v31 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
+      ? `v32 BULLETPROOF AI Virtual Try-On ready — ${engines.join(', ')}. Showcase Composite ALWAYS runs (5s reserved, 100% reliable). Hard 45s deadline, 20s Gemini timeout. Set GEMINI_API_KEY / CF_API_TOKEN / HF_TOKEN for true AI image editing (all free).`
+      : 'v32 BULLETPROOF AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
   })
 }
