@@ -36,7 +36,17 @@
  * It ALWAYS produces a result and preserves the user's EXACT face + EXACT product.
  */
 
-import sharp from 'sharp'
+// v32.3: Dynamic sharp import — prevents module-load failures on Vercel.
+// If sharp fails to initialize (native binary issue), the module still loads
+// and only the composite function fails (which is caught and falls back).
+let _sharpModule: any = null
+async function getSharp(): Promise<any> {
+  if (!_sharpModule) {
+    const mod = await import('sharp')
+    _sharpModule = (mod as any).default || mod
+  }
+  return _sharpModule
+}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -98,6 +108,7 @@ function clamp(v: number, min: number, max: number): number {
 
 async function detectMannequin(bgRemovedBuf: Buffer): Promise<{ hasMannequin: boolean; opaqueRatio: number; centralOpacity: number }> {
   try {
+    const sharp = await getSharp()
     const meta = await sharp(bgRemovedBuf).metadata()
     const w = meta.width || 400
     const h = meta.height || 400
@@ -159,6 +170,7 @@ async function detectMannequin(bgRemovedBuf: Buffer): Promise<{ hasMannequin: bo
 // Detects transparent PNGs, samples border colors, handles gradients.
 
 async function removeWhiteBackground(buf: Buffer): Promise<Buffer> {
+  const sharp = await getSharp()
   const image = sharp(buf)
   const meta = await image.metadata()
 
@@ -313,6 +325,7 @@ async function detectFaceRegion(
   height: number,
 ): Promise<BBox> {
   try {
+    const sharp = await getSharp()
     const smallW = Math.min(220, width)
     const smallH = Math.round((smallW / width) * height)
     const { data, info } = await sharp(buf)
@@ -636,6 +649,7 @@ function calculatePlacement(
 // ── v2: Better Shadow (blurred ellipse, not just offset rect) ──────
 
 async function createSoftShadow(width: number, height: number): Promise<Buffer> {
+  const sharp = await getSharp()
   // Create a soft elliptical shadow with proper blur
   const padW = width + 20
   const padH = height + 20
@@ -664,6 +678,7 @@ async function matchProductToSelfie(
   selfieBuf: Buffer,
 ): Promise<Buffer> {
   try {
+    const sharp = await getSharp()
     // Sample average brightness of selfie (mid-tones only)
     const selfieStats = await sharp(selfieBuf)
       .resize(100, 100, { fit: 'fill' })
@@ -727,6 +742,7 @@ export async function compositeProductOnSelfie(
   productName: string,
 ): Promise<CompositeResult> {
   const startTime = Date.now()
+  const sharp = await getSharp()
   try {
     if (!selfieDataUrl.startsWith('data:image/')) {
       return { success: false, error: 'Invalid selfie format', strategy: 'composite' }

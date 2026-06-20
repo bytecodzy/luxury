@@ -21,7 +21,16 @@
  * 100% FREE FOREVER — uses sharp (libvips) only. Works on Vercel serverless.
  */
 
-import sharp from 'sharp'
+// v32.3: Dynamic sharp import — prevents module-load failures on Vercel.
+// If sharp fails to initialize (native binary issue), the module still loads
+// and only the composite function fails (which is caught and falls back).
+let _sharpModule: typeof import('sharp') | null = null
+async function getSharp(): Promise<typeof import('sharp')['default']> {
+  if (!_sharpModule) {
+    _sharpModule = await import('sharp')
+  }
+  return (_sharpModule as any).default || _sharpModule
+}
 
 export interface ShowcaseResult {
   success: boolean
@@ -50,6 +59,7 @@ async function prepareImage(
   targetH: number,
 ): Promise<PanelContent> {
   const buf = Buffer.from(stripDataUrl(dataUrl), 'base64')
+  const sharp = await getSharp()
   // Contain-fit into target box with a soft warm background (consistent framing)
   const processed = await sharp(buf)
     .resize(targetW, targetH, {
@@ -308,6 +318,7 @@ export async function createShowcaseComposite(
     })
 
     // 7. Composite everything
+    const sharp = await getSharp()
     const result = await sharp({
       create: {
         width: canvasW,
