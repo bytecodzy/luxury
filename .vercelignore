@@ -5,7 +5,10 @@ shopify-theme/
 agent-ctx/
 public/downloads/
 public/app/
-public/images/products/
+# v32.3: REMOVED public/images/products/ from ignore — these images are
+# ESSENTIAL for the virtual try-on (Showcase Composite needs the product
+# image). Without them deployed, Vercel returns 404 → no product image →
+# "Style Preview Unavailable" error.
 public/images/categories/
 public/uploads/
 skills/
