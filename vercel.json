@@ -2,11 +2,11 @@
   "framework": "nextjs",
   "functions": {
     "src/app/api/virtual-tryon/**/*.ts": {
-      "memory": 1536,
+      "memory": 1024,
       "maxDuration": 60
     },
     "src/app/api/try-on/**/*.ts": {
-      "memory": 1536,
+      "memory": 1024,
       "maxDuration": 60
     },
     "src/app/api/image-proxy/**/*.ts": {
