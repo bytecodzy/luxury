@@ -145,8 +145,31 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Resolve product image (needed by both the ai-proxy and Pollinations fallback)
+    // Resolve product image (v32: validate — if invalid, re-fetch from URL)
+    // The client-side fetchImageAsBase64 can sometimes return corrupted data
+    // (e.g., when the image proxy returns an error page or truncated response).
+    // We validate via magic-byte check; if invalid, we re-fetch from the URL.
     let productImageBase64 = clientBase64 || null
+    if (productImageBase64) {
+      // Lightweight validation: check magic bytes (JPEG/PNG/WebP/GIF)
+      try {
+        const rawBase64 = productImageBase64.includes(',')
+          ? productImageBase64.split(',').slice(1).join(',')
+          : productImageBase64
+        const buf = Buffer.from(rawBase64, 'base64')
+        // JPEG: FF D8 FF, PNG: 89 50 4E 47, WebP: 52 49 46 46...57 45 42 50, GIF: 47 49 46 38
+        const isJpeg = buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff
+        const isPng = buf.length > 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
+        const isWebp = buf.length > 12 && buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP'
+        const isGif = buf.length > 3 && buf.slice(0, 3).toString('ascii') === 'GIF'
+        if (!isJpeg && !isPng && !isWebp && !isGif) {
+          console.log(`[try-on] Client productImageBase64 failed magic-byte check (first 4 bytes: ${buf.slice(0, 4).toString('hex')}), re-fetching from URL: ${productImageUrl}`)
+          productImageBase64 = null
+        }
+      } catch {
+        productImageBase64 = null
+      }
+    }
     if (!productImageBase64 && productImageUrl) {
       productImageBase64 = await getProductImageBase64(productImageUrl)
     }
