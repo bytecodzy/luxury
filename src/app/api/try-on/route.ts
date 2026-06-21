@@ -248,28 +248,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'v32 BULLETPROOF AI ready — Gemini (20s hard timeout) + Cloudflare (12s) + FLUX Kontext (15s) + IDM-VTON (18s) + Showcase Composite (5s reserved, ALWAYS runs). Free forever, never times out.',
+      message: 'v33 AI ready — Gemini + Cloudflare (garments) + FLUX Kontext (sarees/garments, precise-colour prompt) + IDM-VTON + Image Composite (jewelry primary) + Showcase Composite (100% reliable fallback). Free forever.',
     })
   }
 
   const statusResult = await checkIDMVTONSpaceStatus()
-  // v32: Multiple strategies available. Showcase Composite is the 100% reliable
-  // ultimate fallback for ALL categories — it ALWAYS runs (5s reserved).
-  // Gemini/Cloudflare/FLUX are optional (set env vars for true AI editing — all free).
+  // v33: Multiple strategies available. Image Composite (real product) is the
+  // PRIMARY for jewelry/accessories; FLUX Kontext (with precise-colour prompt)
+  // is primary for sarees; Showcase Composite is the 100% reliable fallback.
   const isVercel = !!process.env.VERCEL
   const engines: string[] = []
   if (process.env.GEMINI_API_KEY) engines.push('Gemini')
   if (process.env.CF_API_TOKEN) engines.push('Cloudflare')
   if (process.env.HF_TOKEN) engines.push('FLUX-Kontext')
-  if (isVercel) engines.push('IDM-VTON', 'Showcase-Composite')
+  if (isVercel) engines.push('IDM-VTON', 'Image-Composite', 'Showcase-Composite')
   else engines.push('ZAI-image-edit')
-  const engine = `v32-${engines.join('+')}`
+  const engine = `v33-${engines.join('+')}`
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? `v32 BULLETPROOF AI Virtual Try-On ready — ${engines.join(', ')}. Showcase Composite ALWAYS runs (5s reserved, 100% reliable). Hard 45s deadline, 20s Gemini timeout. Set GEMINI_API_KEY / CF_API_TOKEN / HF_TOKEN for true AI image editing (all free).`
-      : 'v32 BULLETPROOF AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
+      ? `v33 AI Virtual Try-On ready — ${engines.join(', ')}. Jewelry uses Image Composite (real product); sarees use FLUX Kontext with precise-colour extraction; Showcase Composite ALWAYS runs (100% reliable fallback).`
+      : 'v33 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
   })
 }

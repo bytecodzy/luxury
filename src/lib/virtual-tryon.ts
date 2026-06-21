@@ -1690,8 +1690,15 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     input.productTags,
   )
   const isSaree = compositeCategory === 'saree'
+  // v33: Jewelry / watches / accessories / fragrances — these are NON-GARMENT
+  // and NON-SAREE. FLUX Kontext and Cloudflare SD 1.5 only receive the SELFIE
+  // (they cannot see the product image), so for jewelry they generate RANDOM
+  // jewelry from text → "not at all working" complaint. The Image Composite
+  // uses the REAL product image overlaid on the selfie, so it is the correct
+  // PRIMARY strategy for these categories. We skip FLUX + Cloudflare for them.
+  const isJewelryOrAccessory = isNonGarment && !isSaree
 
-  console.log(`[virtual-tryon] v32 Category: vtonCompatible=${catConfig.vtonCompatible}, compositeCategory="${compositeCategory}", isSaree=${isSaree}, aiDeadline=${aiDeadline - totalStart}ms`)
+  console.log(`[virtual-tryon] v33 Category: vtonCompatible=${catConfig.vtonCompatible}, compositeCategory="${compositeCategory}", isSaree=${isSaree}, isJewelryOrAccessory=${isJewelryOrAccessory}, aiDeadline=${aiDeadline - totalStart}ms`)
 
   // Helper: build the showcase composite result (used as ultimate fallback)
   // v32: This is the 100% RELIABLE fallback — it ALWAYS succeeds (sharp-based,
@@ -1788,14 +1795,17 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v32 Strategy 2: Cloudflare Workers AI SD 1.5 img2img (OPTIONAL)
-  //  HARD 12s timeout. SKIPPED for sarees (SD 1.5 struggles with full-body
-  //  Indian garments — produces poor draping). Uses selfie as input with
-  //  strength=0.45 → preserves face identity. Free 10k neurons/day forever.
+  //  v33 Strategy 2: Cloudflare Workers AI SD 1.5 img2img (OPTIONAL)
+  //  HARD 12s timeout. v33: SKIPPED for ALL non-garments (sarees, jewelry,
+  //  watches, accessories, fragrances) — Cloudflare only receives the SELFIE
+  //  as img2img input and generates the product from a text prompt, so for
+  //  non-garments it produces RANDOM items that don't match the real product.
+  //  Only useful as a garment fallback (where the text prompt + selfie is a
+  //  reasonable approximation). Uses selfie as input with strength=0.45.
   // ═══════════════════════════════════════════════════════════════════
-  if (hasCF && !isSaree && !strategiesAttempted.includes('cloudflare') && Date.now() < aiDeadline - 10_000) {
+  if (hasCF && catConfig.vtonCompatible && !strategiesAttempted.includes('cloudflare') && Date.now() < aiDeadline - 10_000) {
     strategiesAttempted.push('cloudflare')
-    console.log('[virtual-tryon] v32 Strategy 2: Cloudflare Workers AI SD 1.5 img2img (12s, skipped for sarees)')
+    console.log('[virtual-tryon] v33 Strategy 2: Cloudflare Workers AI SD 1.5 img2img (12s, garments only)')
     const result = await callCloudflareTryOn(input, aiDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
@@ -1813,13 +1823,19 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v32 Strategy 3: FLUX.1-Kontext-dev HF Space (OPTIONAL)
+  //  v33 Strategy 3: FLUX.1-Kontext-dev HF Space (OPTIONAL)
   //  HARD 15s timeout. SOTA for identity-preserving image editing.
+  //  v33: SKIPPED for jewelry/watches/accessories/fragrances — FLUX only
+  //  receives the SELFIE (not the product image), so it generates RANDOM
+  //  jewelry from text → wrong product. For these categories the Image
+  //  Composite (which uses the REAL product image) is the correct primary.
+  //  FLUX is kept for SAREES (with v33 precise-colour prompt — see
+  //  flux-kontext-tryon.ts) and GARMENTS (reasonable text approximation).
   //  Only attempted if we have ≥15s left in the AI budget.
   // ═══════════════════════════════════════════════════════════════════
-  if (hasHF && !strategiesAttempted.includes('flux-kontext') && Date.now() < aiDeadline - 15_000) {
+  if (hasHF && !isJewelryOrAccessory && !strategiesAttempted.includes('flux-kontext') && Date.now() < aiDeadline - 15_000) {
     strategiesAttempted.push('flux-kontext')
-    console.log('[virtual-tryon] v32 Strategy 3: FLUX.1-Kontext-dev HF Space (15s, SOTA identity preservation)')
+    console.log('[virtual-tryon] v33 Strategy 3: FLUX.1-Kontext-dev HF Space (15s, skipped for jewelry/accessories)')
     const result = await callFluxKontextTryOn(input, aiDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
@@ -1857,14 +1873,18 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       }
     } else {
       // ── JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES ──
-      // v32: Image Composite is PRIMARY (instant, works for most jewelry).
+      // v33: Image Composite is the PRIMARY strategy (FLUX + Cloudflare are
+      // SKIPPED for these categories above, because they only receive the
+      // selfie and would generate RANDOM jewelry from text). The Image
+      // Composite uses the REAL product image (background-removed) overlaid
+      // precisely on the selfie at the neck/wrist/ear → exact product shown.
       // For jewelry on BLACK backgrounds (common), bg-removal eliminates
-      // BOTH the black bg AND the black mannequin, leaving just the jewelry
-      // piece → composite works perfectly, preserves face + exact product.
+      // BOTH the black bg AND any mannequin, leaving just the jewelry piece.
+      // Mannequin detection guards against model-worn product images.
       // Showcase Composite is the 100% reliable fallback.
       if (input.productImageBase64 && !strategiesAttempted.includes('composite')) {
         strategiesAttempted.push('composite')
-        console.log(`[virtual-tryon] v32 PRIMARY: Image Composite v3 (with mannequin detection) — category="${compositeCategory}"`)
+        console.log(`[virtual-tryon] v33 PRIMARY: Image Composite (real product) — category="${compositeCategory}"`)
         const compositeResult = await compositeProductOnSelfie(
           input.selfieData,
           input.productImageBase64,
@@ -1873,7 +1893,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
         )
         if (compositeResult.success && compositeResult.imageUrl) {
           const elapsed = Date.now() - totalStart
-          console.log(`[virtual-tryon] ✅ Image Composite v3 succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+          console.log(`[virtual-tryon] ✅ Image Composite succeeded in ${(elapsed / 1000).toFixed(1)}s`)
           return {
             success: true,
             imageUrl: compositeResult.imageUrl,
@@ -1883,13 +1903,13 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
               strategiesAttempted,
               strategyErrors,
               extractedColors: input.clientProductColors,
-              promptPreview: `composite-v3(${compositeCategory}): ${input.productName}`,
+              promptPreview: `composite(${compositeCategory}): ${input.productName}`,
               selfieUploaded: true,
             },
           }
         }
         strategyErrors['composite'] = compositeResult.error || 'Composite failed'
-        console.log(`[virtual-tryon] Image Composite v3 failed: ${compositeResult.error?.substring(0, 150)}`)
+        console.log(`[virtual-tryon] Image Composite failed: ${compositeResult.error?.substring(0, 150)}`)
       }
 
       // ── FALLBACK: Showcase Composite (100% reliable) ──
