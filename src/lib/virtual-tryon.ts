@@ -1602,10 +1602,10 @@ export async function isTryOnServiceReady(): Promise<{
   const engineName = engines.length > 0 ? engines.join('+') : 'Showcase-Composite-only'
   return {
     ready: true,
-    engine: `v32-${engineName}`,
+    engine: `v39-${engineName}`,
     reason: isVercel
-      ? `v32 BULLETPROOF: ${engines.join(', ')} for ALL categories. Showcase Composite is the 100% reliable ultimate fallback (ALWAYS runs). Hard 45s deadline, 20s Gemini timeout, 5s reserved for Showcase. Free forever.`
-      : 'v32: ZAI image-edit (edit-both) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
+      ? `v39: Sarees: FLUX Kontext + Colour Transfer. Jewelry: Image Composite (real product). Watches: FLUX Kontext. Garments: IDM-VTON. Showcase Composite is the 100% reliable ultimate fallback. Free forever.`
+      : 'v39: ZAI image-edit (edit-both) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
   }
 }
 
@@ -1697,6 +1697,11 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   // uses the REAL product image overlaid on the selfie, so it is the correct
   // PRIMARY strategy for these categories. We skip FLUX + Cloudflare for them.
   const isJewelryOrAccessory = isNonGarment && !isSaree
+  // v39: Watches now use FLUX Kontext (realistic wrist placement) instead of
+  // the raw image composite. Pure jewelry (necklaces, earrings, etc.) still
+  // skips FLUX (it can't reproduce the exact design) and uses the real-product
+  // Image Composite as primary.
+  const isPureJewelry = isJewelryOrAccessory && compositeCategory !== 'watch'
 
   console.log(`[virtual-tryon] v33 Category: vtonCompatible=${catConfig.vtonCompatible}, compositeCategory="${compositeCategory}", isSaree=${isSaree}, isJewelryOrAccessory=${isJewelryOrAccessory}, aiDeadline=${aiDeadline - totalStart}ms`)
 
@@ -1833,9 +1838,9 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   //  flux-kontext-tryon.ts) and GARMENTS (reasonable text approximation).
   //  Only attempted if we have ≥15s left in the AI budget.
   // ═══════════════════════════════════════════════════════════════════
-  if (hasHF && !isJewelryOrAccessory && !strategiesAttempted.includes('flux-kontext') && Date.now() < aiDeadline - 15_000) {
+  if (hasHF && !isPureJewelry && !strategiesAttempted.includes('flux-kontext') && Date.now() < aiDeadline - 15_000) {
     strategiesAttempted.push('flux-kontext')
-    console.log('[virtual-tryon] v33 Strategy 3: FLUX.1-Kontext-dev HF Space (15s, skipped for jewelry/accessories)')
+    console.log('[virtual-tryon] v39 Strategy 3: FLUX.1-Kontext-dev HF Space (sarees + garments + watches; skipped for pure jewelry)')
     const result = await callFluxKontextTryOn(input, aiDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart

@@ -248,7 +248,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'v33 AI ready — Gemini + Cloudflare (garments) + FLUX Kontext (sarees/garments, precise-colour prompt) + IDM-VTON + Image Composite (jewelry primary) + Showcase Composite (100% reliable fallback). Free forever.',
+      message: 'v39 AI ready — Sarees: FLUX Kontext + Colour Transfer (matches product colour). Jewelry: Image Composite (real product). Watches: FLUX Kontext (realistic wrist placement). Garments: IDM-VTON. Showcase Composite fallback. Free forever.',
     })
   }
 
@@ -263,13 +263,13 @@ export async function GET(request: NextRequest) {
   if (process.env.HF_TOKEN) engines.push('FLUX-Kontext')
   if (isVercel) engines.push('IDM-VTON', 'Image-Composite', 'Showcase-Composite')
   else engines.push('ZAI-image-edit')
-  const engine = `v33-${engines.join('+')}`
+  const engine = `v39-${engines.join('+')}`
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? `v33 AI Virtual Try-On ready — ${engines.join(', ')}. Jewelry uses Image Composite (real product); sarees use FLUX Kontext with precise-colour extraction; Showcase Composite ALWAYS runs (100% reliable fallback).`
-      : 'v33 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
+      ? `v39 AI Virtual Try-On ready — ${engines.join(', ')}. Sarees: FLUX + Colour Transfer. Jewelry: Image Composite (real product). Watches: FLUX Kontext. Garments: IDM-VTON. Showcase Composite ALWAYS runs (100% reliable fallback).`
+      : 'v39 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
   })
 }

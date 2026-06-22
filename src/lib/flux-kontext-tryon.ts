@@ -185,6 +185,125 @@ async function extractDominantColor(imageBase64: string): Promise<PreciseColor |
   }
 }
 
+// ── v39: Saree Colour Transfer ──────────────────────────────────────
+// FLUX Kontext generates a good drape but rarely matches the product's
+// exact colour (it can't see the product image). This function post-
+// processes the FLUX output: for each pixel in the lower body region
+// (below the face), if it's fabric (not skin, not background), it
+// recolours it to match the product's dominant hue+saturation while
+// preserving the original luminance (drape/shadow detail).
+
+function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
+  const rn = r / 255, gn = g / 255, bn = b / 255
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn)
+  const delta = max - min
+  const v = max
+  const s = max === 0 ? 0 : delta / max
+  let h = 0
+  if (delta !== 0) {
+    if (max === rn) h = ((gn - bn) / delta) % 6
+    else if (max === gn) h = (bn - rn) / delta + 2
+    else h = (rn - gn) / delta + 4
+    h *= 60
+    if (h < 0) h += 360
+  }
+  return [h, s, v]
+}
+
+function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+  const c = v * s
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = v - c
+  let r = 0, g = 0, b = 0
+  if (h < 60) { r = c; g = x; b = 0 }
+  else if (h < 120) { r = x; g = c; b = 0 }
+  else if (h < 180) { r = 0; g = c; b = x }
+  else if (h < 240) { r = 0; g = x; b = c }
+  else if (h < 300) { r = x; g = 0; b = c }
+  else { r = c; g = 0; b = x }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)]
+}
+
+function isSkinToneFast(r: number, g: number, b: number): boolean {
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  return r > g && g > b * 0.85 && r - g >= 8 && max > 55 && max < 252 &&
+    (max - min) / max > 0.06 && (max - min) / max < 0.7 && b > 0 && r / b > 1.05 && r / b < 2.8
+}
+
+async function applySareeColorTransfer(
+  fluxOutputDataUrl: string,
+  productColor: PreciseColor,
+): Promise<string | null> {
+  try {
+    const sharpMod = await import('sharp')
+    const sharp = (sharpMod as any).default || sharpMod
+    const raw = fluxOutputDataUrl.includes(',') ? fluxOutputDataUrl.split(',').slice(1).join(',') : fluxOutputDataUrl
+    const buf = Buffer.from(raw, 'base64')
+
+    // Downscale large images for faster processing (max 768px wide)
+    const meta = await sharp(buf).metadata()
+    const origW = meta.width || 768
+    const origH = meta.height || 1024
+    const scale = origW > 768 ? 768 / origW : 1
+    const procW = Math.round(origW * scale)
+    const procH = Math.round(origH * scale)
+
+    const { data, info } = await sharp(buf)
+      .resize(procW, procH, { fit: 'fill' })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+
+    const w = info.width
+    const h = info.height
+    const [ph, ps] = rgbToHsv(productColor.rgb[0], productColor.rgb[1], productColor.rgb[2])
+
+    let recoloredCount = 0
+    for (let y = 0; y < h; y++) {
+      // Skip upper 22% (face/head area — never recolour)
+      if (y < h * 0.22) continue
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4
+        const r = data[idx], g = data[idx + 1], b = data[idx + 2], a = data[idx + 3]
+        if (a < 100) continue
+        // Skip skin-toned pixels (preserve arms, hands, chest skin)
+        if (isSkinToneFast(r, g, b)) continue
+        const max = Math.max(r, g, b), min = Math.min(r, g, b)
+        const lum = 0.299 * r + 0.587 * g + 0.114 * b
+        // Skip near-white (background) and near-black (very dark shadows)
+        if (lum > 235 || lum < 18) continue
+        // Skip very low-saturation pixels (grey/neutral — likely background)
+        const sat = max === 0 ? 0 : (max - min) / max
+        if (sat < 0.08) continue
+
+        // This pixel is likely fabric — recolour it to match product colour.
+        // Preserve original value (luminance/shadows), apply product hue+sat.
+        const [, , ov] = rgbToHsv(r, g, b)
+        const blendS = ps * 0.78 + sat * 0.22
+        const [nr, ng, nb] = hsvToRgb(ph, blendS, ov)
+        data[idx] = nr
+        data[idx + 1] = ng
+        data[idx + 2] = nb
+        recoloredCount++
+      }
+    }
+
+    console.log(`[flux-kontext] v39 colour transfer: recoloured ${recoloredCount} fabric pixels to ${productColor.name} ${productColor.hex}`)
+
+    const resultBuf = await sharp(data, {
+      raw: { width: w, height: h, channels: 4 },
+    })
+      .jpeg({ quality: 92, progressive: true })
+      .toBuffer()
+
+    return `data:image/jpeg;base64,${resultBuf.toString('base64')}`
+  } catch (err) {
+    console.log(`[flux-kontext] v39 colour transfer failed: ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
 async function buildEditPrompt(input: TryOnInput): Promise<string> {
   const name = input.productName || 'the product'
   const colors = input.clientProductColors || ''
@@ -236,7 +355,20 @@ async function buildEditPrompt(input: TryOnInput): Promise<string> {
   }
 
   if (slug.includes('watch') || n.includes('watch')) {
-    return `${identityRule} Show this person wearing the ${name} on their left wrist, watch face clearly visible. Photorealistic.`
+    // v39: Extract dominant colour and describe the watch in detail so FLUX
+    // generates a close match (dial colour + strap type from product metadata).
+    const precise = await extractDominantColor(input.productImageBase64)
+    const desc2 = (input.productDescription || '').toLowerCase()
+    let strapType = 'strap'
+    if (desc2.includes('leather') || n.includes('leather')) strapType = 'leather strap'
+    else if (desc2.includes('steel') || desc2.includes('metal') || desc2.includes('bracelet')) strapType = 'metal bracelet'
+    else if (desc2.includes('rubber') || desc2.includes('silicone')) strapType = 'rubber strap'
+    let dialDesc = 'classic'
+    if (desc2.includes('chronograph')) dialDesc = 'chronograph'
+    else if (desc2.includes('diver') || desc2.includes('dive')) dialDesc = 'diver'
+    else if (desc2.includes('minimalist') || desc2.includes('minimal')) dialDesc = 'minimalist'
+    const colorDesc = precise ? `${precise.name} (${precise.hex})` : (colors || 'silver')
+    return `${identityRule} Show this person wearing a ${colorDesc} watch with a ${dialDesc} dial and ${strapType} on their left wrist. The watch face is clearly visible, properly sized to the wrist, natural angle. Photorealistic, studio lighting, accurate watch colour.`
   }
 
   if (slug.includes('fragrance') || n.includes('parfum') || n.includes('cologne')) {
@@ -402,6 +534,30 @@ export async function callFluxKontextTryOn(
               const mime = dlRes.headers.get('content-type')?.split(';')[0] || 'image/png'
               const dataUrl = `data:${mime};base64,${buf.toString('base64')}`
               console.log(`[virtual-tryon] ✅ FLUX Kontext succeeded (${(buf.length / 1024).toFixed(1)}KB)`)
+
+              // v39: For sarees, apply post-FLUX colour transfer so the saree
+              // matches the product's actual colour (FLUX can't see the product
+              // image, so it rarely reproduces the exact colour from the prompt).
+              const isSareeRequest = (() => {
+                const s = (input.categorySlug || '').toLowerCase()
+                const nn = (input.productName || '').toLowerCase()
+                const dd = (input.productDescription || '').toLowerCase()
+                return s.includes('saree') || nn.includes('saree') || nn.includes('sari') ||
+                  dd.includes('saree') || dd.includes('sari') ||
+                  nn.includes('banarasi') || nn.includes('kanjivaram') || nn.includes('lehenga')
+              })()
+              if (isSareeRequest && input.productImageBase64) {
+                console.log('[virtual-tryon] v39: Saree detected — applying colour transfer')
+                const precise = await extractDominantColor(input.productImageBase64)
+                if (precise) {
+                  const transferred = await applySareeColorTransfer(dataUrl, precise)
+                  if (transferred) {
+                    return { success: true, imageUrl: transferred, strategy: 'flux-kontext-color-transfer' }
+                  }
+                  console.log('[virtual-tryon] v39: Colour transfer failed — returning original FLUX output')
+                }
+              }
+
               return { success: true, imageUrl: dataUrl, strategy: 'flux-kontext' }
             }
           } catch (parseErr) {

@@ -540,10 +540,9 @@ function calculatePlacement(
       break
     }
 
-    case 'bracelet':
-    case 'watch': {
+    case 'bracelet': {
       // Lower-right area (typical wrist position in selfie)
-      const w = clamp(canvasW * 0.22, 100, canvasW * 0.5)
+      const w = clamp(canvasW * 0.18, 90, canvasW * 0.4)
       const h = Math.round(w / Math.max(productAspect, 0.7))
       placements.push({
         x: Math.round(clamp(fcx + faceW * 0.3, 0, canvasW - w)),
@@ -551,6 +550,22 @@ function calculatePlacement(
         w: Math.round(w),
         h: Math.round(h),
         opacity: 0.95,
+      })
+      break
+    }
+
+    case 'watch': {
+      // v39: Improved watch placement — smaller (proportional to face/wrist),
+      // positioned at the natural wrist location. FLUX is now primary for
+      // watches; this composite is the fallback when FLUX is unavailable.
+      const w = clamp(faceW * 0.52, 70, canvasW * 0.22)
+      const h = Math.round(w / Math.max(productAspect, 0.8))
+      placements.push({
+        x: Math.round(clamp(fcx + faceW * 0.35, 0, canvasW - w)),
+        y: Math.round(clamp(chinY + faceH * 2.3, canvasH * 0.48, canvasH - h - 10)),
+        w: Math.round(w),
+        h: Math.round(h),
+        opacity: 0.92,
       })
       break
     }
