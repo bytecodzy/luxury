@@ -234,20 +234,32 @@ function isSkinToneFast(r: number, g: number, b: number): boolean {
 async function applySareeColorTransfer(
   fluxOutputDataUrl: string,
   productColor: PreciseColor,
+  hardDeadline: number,
 ): Promise<string | null> {
   try {
+    // v39.1: Time-bounded — if less than 6s remains before the hard deadline,
+    // skip colour transfer entirely and let the caller return the original
+    // FLUX output. This prevents Vercel 60s timeouts (500 errors).
+    const remaining = hardDeadline - Date.now()
+    if (remaining < 6000) {
+      console.log(`[flux-kontext] v39.1: Skipping colour transfer (only ${remaining}ms left)`)
+      return null
+    }
+
     const sharpMod = await import('sharp')
     const sharp = (sharpMod as any).default || sharpMod
     const raw = fluxOutputDataUrl.includes(',') ? fluxOutputDataUrl.split(',').slice(1).join(',') : fluxOutputDataUrl
     const buf = Buffer.from(raw, 'base64')
 
-    // Downscale large images for faster processing (max 768px wide)
+    // v39.1: Process at LOW resolution (max 384px wide) for speed.
+    // 384x512 = 197K pixels (4x fewer than 768x1024). Processing takes ~2-3s
+    // instead of 15-30s. The preview quality is perfectly acceptable for a
+    // try-on style preview.
     const meta = await sharp(buf).metadata()
     const origW = meta.width || 768
     const origH = meta.height || 1024
-    const scale = origW > 768 ? 768 / origW : 1
-    const procW = Math.round(origW * scale)
-    const procH = Math.round(origH * scale)
+    const procW = Math.min(origW, 384)
+    const procH = Math.round((procW / origW) * origH)
 
     const { data, info } = await sharp(buf)
       .resize(procW, procH, { fit: 'fill' })
@@ -259,47 +271,59 @@ async function applySareeColorTransfer(
     const h = info.height
     const [ph, ps] = rgbToHsv(productColor.rgb[0], productColor.rgb[1], productColor.rgb[2])
 
+    // v39.1: Optimized single-pass loop — compute HSV once per pixel,
+    // reuse for skin/fabric classification and recolouring.
     let recoloredCount = 0
-    for (let y = 0; y < h; y++) {
-      // Skip upper 22% (face/head area — never recolour)
-      if (y < h * 0.22) continue
+    const faceCutoffY = Math.floor(h * 0.22)
+    for (let y = faceCutoffY; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const idx = (y * w + x) * 4
-        const r = data[idx], g = data[idx + 1], b = data[idx + 2], a = data[idx + 3]
+        const a = data[idx + 3]
         if (a < 100) continue
-        // Skip skin-toned pixels (preserve arms, hands, chest skin)
-        if (isSkinToneFast(r, g, b)) continue
+        const r = data[idx], g = data[idx + 1], b = data[idx + 2]
         const max = Math.max(r, g, b), min = Math.min(r, g, b)
         const lum = 0.299 * r + 0.587 * g + 0.114 * b
         // Skip near-white (background) and near-black (very dark shadows)
         if (lum > 235 || lum < 18) continue
-        // Skip very low-saturation pixels (grey/neutral — likely background)
         const sat = max === 0 ? 0 : (max - min) / max
+        // Skip very low-saturation pixels (grey/neutral — likely background)
         if (sat < 0.08) continue
+        // Skip skin-toned pixels (preserve arms, hands, chest skin)
+        if (r > g && g > b * 0.85 && r - g >= 8 && max > 55 && max < 252 && sat > 0.06 && sat < 0.7 && b > 0 && r / b > 1.05 && r / b < 2.8) continue
 
         // This pixel is likely fabric — recolour it to match product colour.
         // Preserve original value (luminance/shadows), apply product hue+sat.
-        const [, , ov] = rgbToHsv(r, g, b)
+        const ov = max / 255
         const blendS = ps * 0.78 + sat * 0.22
-        const [nr, ng, nb] = hsvToRgb(ph, blendS, ov)
-        data[idx] = nr
-        data[idx + 1] = ng
-        data[idx + 2] = nb
+        const c = ov * blendS
+        const hh = ph / 60
+        const xx = c * (1 - Math.abs((hh % 2) - 1))
+        const m = ov - c
+        let nr = 0, ng = 0, nb = 0
+        if (hh < 1) { nr = c; ng = xx; nb = 0 }
+        else if (hh < 2) { nr = xx; ng = c; nb = 0 }
+        else if (hh < 3) { nr = 0; ng = c; nb = xx }
+        else if (hh < 4) { nr = 0; ng = xx; nb = c }
+        else if (hh < 5) { nr = xx; ng = 0; nb = c }
+        else { nr = c; ng = 0; nb = xx }
+        data[idx] = Math.round((nr + m) * 255)
+        data[idx + 1] = Math.round((ng + m) * 255)
+        data[idx + 2] = Math.round((nb + m) * 255)
         recoloredCount++
       }
     }
 
-    console.log(`[flux-kontext] v39 colour transfer: recoloured ${recoloredCount} fabric pixels to ${productColor.name} ${productColor.hex}`)
+    console.log(`[flux-kontext] v39.1 colour transfer: recoloured ${recoloredCount} fabric pixels to ${productColor.name} ${productColor.hex} (${w}x${h}, ${Date.now() - (hardDeadline - remaining)}ms start)`)
 
     const resultBuf = await sharp(data, {
       raw: { width: w, height: h, channels: 4 },
     })
-      .jpeg({ quality: 92, progressive: true })
+      .jpeg({ quality: 88, progressive: true })
       .toBuffer()
 
     return `data:image/jpeg;base64,${resultBuf.toString('base64')}`
   } catch (err) {
-    console.log(`[flux-kontext] v39 colour transfer failed: ${err instanceof Error ? err.message : String(err)}`)
+    console.log(`[flux-kontext] v39.1 colour transfer failed: ${err instanceof Error ? err.message : String(err)}`)
     return null
   }
 }
@@ -538,6 +562,8 @@ export async function callFluxKontextTryOn(
               // v39: For sarees, apply post-FLUX colour transfer so the saree
               // matches the product's actual colour (FLUX can't see the product
               // image, so it rarely reproduces the exact colour from the prompt).
+              // v39.1: Hard deadline = aiDeadline + 15s (up to 55s from start,
+              // leaving 5s buffer under Vercel's 60s limit).
               const isSareeRequest = (() => {
                 const s = (input.categorySlug || '').toLowerCase()
                 const nn = (input.productName || '').toLowerCase()
@@ -547,14 +573,15 @@ export async function callFluxKontextTryOn(
                   nn.includes('banarasi') || nn.includes('kanjivaram') || nn.includes('lehenga')
               })()
               if (isSareeRequest && input.productImageBase64) {
-                console.log('[virtual-tryon] v39: Saree detected — applying colour transfer')
+                console.log('[virtual-tryon] v39.1: Saree detected — applying colour transfer')
                 const precise = await extractDominantColor(input.productImageBase64)
                 if (precise) {
-                  const transferred = await applySareeColorTransfer(dataUrl, precise)
+                  const colorTransferDeadline = deadline + 15000
+                  const transferred = await applySareeColorTransfer(dataUrl, precise, colorTransferDeadline)
                   if (transferred) {
                     return { success: true, imageUrl: transferred, strategy: 'flux-kontext-color-transfer' }
                   }
-                  console.log('[virtual-tryon] v39: Colour transfer failed — returning original FLUX output')
+                  console.log('[virtual-tryon] v39.1: Colour transfer skipped/failed — returning original FLUX output')
                 }
               }
 
