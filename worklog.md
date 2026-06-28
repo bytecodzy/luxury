@@ -1562,3 +1562,28 @@ Stage Summary:
   - src/lib/virtual-tryon.ts (v33 — added isJewelryOrAccessory; Cloudflare garments-only; FLUX skipped for jewelry; updated comments)
   - src/app/api/try-on/route.ts (v33 — updated GET status message + engine labels)
 - **Deploy note**: User pushes to GitHub → Vercel auto-deploys. No tokens needed from me. After deploy, sarees will show correct colour (via FLUX + precise colour extraction) and jewelry will show the real product (via Image Composite).
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix jewelry try-on not draping properly on Vercel - product image just overlaying selfie
+
+Work Log:
+- Analyzed the virtual-tryon.ts strategy chain for jewelry: ZAI → Gemini → Cloudflare → FLUX → Image Composite → Showcase
+- Discovered ROOT CAUSE: ZAI image-edit strategy was blocked by `!isVercel` guard on line 1758, preventing it from running on Vercel
+- Without ZAI, and with Gemini likely failing/timing out, the system fell through to Image Composite which just overlays the product image
+- Confirmed ZAI API (internal-api.z.ai) IS accessible from public internet via curl test
+- Confirmed all ZAI env vars already exist on Vercel (ZAI_BASE_URL, ZAI_API_KEY, ZAI_CHAT_ID, ZAI_TOKEN, ZAI_USER_ID)
+- Fixed the code by removing `!isVercel` guard, making ZAI the PRIMARY strategy for ALL categories on Vercel too
+- Updated version from v39 to v41
+- Reduced ZAI_EDIT_TIMEOUT from 40s to 30s to ensure fallback strategies have time
+- Tested locally - ZAI image-edit strategy works correctly for jewelry (returns strategy: "zai-image-edit")
+- Deployed v41 to Vercel production
+- Confirmed Vercel status endpoint shows: "v41-ZAI-image-edit+Gemini+FLUX-Kontext+IDM-VTON+Showcase-Composite"
+
+Stage Summary:
+- ROOT CAUSE: `!isVercel` code guard blocked ZAI image-edit from running on Vercel
+- FIX: Removed the guard, ZAI image-edit now runs on Vercel as PRIMARY strategy
+- ZAI image-edit does proper AI-based draping (not just overlay) for jewelry
+- Deployed v41 to https://3boxes-luxury-v12.vercel.app
+- Local test confirmed: jewelry try-on uses strategy "zai-image-edit" ✅

@@ -117,7 +117,7 @@ export interface TryOnResult {
 const TOTAL_TIMEOUT_MS = 45_000 // v32: HARD CAP — leaves 15s buffer under Vercel's 60s limit, 10s under client's 55s timeout
 const SHOWCASE_RESERVE_MS = 5_000 // v32: ALWAYS reserve 5s for Showcase Composite (100% reliable fallback)
 const IDM_VTON_TIMEOUT_MS = 22_000 // v26: reduced from 35s — ensures Pollinations has ≥18s after IDM-VTON
-const ZAI_EDIT_TIMEOUT_MS = 40_000
+const ZAI_EDIT_TIMEOUT_MS = 30_000 // v41: reduced from 40s — ensures fallback strategies have time
 const POLLINATIONS_TIMEOUT_MS = 18_000 // reduced from 25s — prevents client timeout (55s)
 const UPLOAD_TIMEOUT_MS = 10_000
 
@@ -1170,8 +1170,10 @@ async function callGeminiTryOn(
   return { success: false, error: lastError }
 }
 
-// ── Strategy C: ZAI image-edit (edit-both) — LOCAL BONUS ───────────
-// Only attempted in the sandbox (ZAI's internal-api.z.ai is internal-only).
+// ── Strategy C: ZAI image-edit (edit-both) — PRIMARY FOR ALL ───────────
+// v41: NOW RUNS ON VERCEL TOO! internal-api.z.ai IS accessible from the
+// public internet (confirmed via curl). Requires ZAI_BASE_URL, ZAI_API_KEY,
+// ZAI_CHAT_ID, ZAI_TOKEN, ZAI_USER_ID env vars to be set.
 
 function buildEditPrompt(config: CategoryConfig, input: TryOnInput): string {
   const colors = extractColors(input.productName, input.productDescription, input.productTags)
@@ -1593,19 +1595,22 @@ export async function isTryOnServiceReady(): Promise<{
   const hasGeminiKey = !!getGeminiApiKey()
   const hasCF = isCloudflareReady()
   const hasHF = isFluxKontextReady()
+  const hasZAI = !!getZAIConfig()
   const engines: string[] = []
+  if (hasZAI) engines.push('ZAI-image-edit')
   if (hasGeminiKey) engines.push('Gemini')
   if (hasCF) engines.push('Cloudflare')
   if (hasHF) engines.push('FLUX-Kontext')
-  if (isVercel) engines.push('IDM-VTON', 'Showcase-Composite')
-  else engines.push('ZAI-image-edit')
+  engines.push('IDM-VTON', 'Showcase-Composite')
   const engineName = engines.length > 0 ? engines.join('+') : 'Showcase-Composite-only'
   return {
     ready: true,
-    engine: `v39-${engineName}`,
-    reason: isVercel
-      ? `v39: Sarees: FLUX Kontext + Colour Transfer. Jewelry: Image Composite (real product). Watches: FLUX Kontext. Garments: IDM-VTON. Showcase Composite is the 100% reliable ultimate fallback. Free forever.`
-      : 'v39: ZAI image-edit (edit-both) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
+    engine: `v41-${engineName}`,
+    reason: hasZAI
+      ? 'v41: ZAI image-edit (edit-both) — PRIMARY for ALL categories. Preserves face & renders exact product with AI-based draping. Works on Vercel too!'
+      : isVercel
+        ? `v41: Sarees: FLUX Kontext + Colour Transfer. Jewelry: Image Composite (real product) — SET ZAI env vars for AI draping! Watches: FLUX Kontext. Garments: IDM-VTON. Showcase Composite is the 100% reliable ultimate fallback.`
+        : 'v41: ZAI image-edit (edit-both) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
   }
 }
 
@@ -1623,7 +1628,8 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   const hasCF = isCloudflareReady()
   const hasHF = isFluxKontextReady()
 
-  console.log(`[virtual-tryon] v32 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasGeminiKey=${hasGeminiKey}, hasCF=${hasCF}, hasHF=${hasHF}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+  const zaiConfig = getZAIConfig()
+  console.log(`[virtual-tryon] v41 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasZAI=${!!zaiConfig}, hasGeminiKey=${hasGeminiKey}, hasCF=${hasCF}, hasHF=${hasHF}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
 
   if (!input.selfieData?.startsWith('data:image/')) {
     return {
@@ -1661,7 +1667,8 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   //    Garments: Gemini 20s → IDM-VTON 18s → Showcase 1s = 39s ✅
   //    (ALL well under the 55s client timeout & 60s Vercel limit)
   //
-  //  On VERCEL (production):
+  //  On VERCEL (production) — v41:
+  //    0. ZAI image-edit (if ZAI env vars set — NOW WORKS ON VERCEL! AI draping for jewelry)
   //    1. Gemini Nano Banana (if GEMINI_API_KEY set, 20s HARD timeout)
   //    2. Cloudflare SD 1.5 img2img (if CF_API_TOKEN set, 12s, NOT for sarees)
   //    3. FLUX.1-Kontext-dev (if HF_TOKEN set, 15s)
@@ -1672,8 +1679,8 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   //    5. ★ SHOWCASE COMPOSITE (ULTIMATE FALLBACK — 100% reliable, ALWAYS runs) ★
   //
   //  On LOCAL (sandbox):
-  //    1. ZAI image-edit (PRIMARY — handles ALL categories)
-  //    2. Gemini → Cloudflare → FLUX → Image Composite → IDM-VTON → Showcase
+  //    0. ZAI image-edit (PRIMARY — handles ALL categories)
+  //    1. Gemini → Cloudflare → FLUX → Image Composite → IDM-VTON → Showcase
   // ═══════════════════════════════════════════════════════════════════
 
   const catConfig = getCategoryConfig(
@@ -1754,10 +1761,15 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     }
   }
 
-  // ── On LOCAL: ZAI image-edit is PRIMARY (handles ALL categories) ──
-  if (!isVercel && Date.now() < aiDeadline - 15_000) {
+  // ── ZAI image-edit is PRIMARY (handles ALL categories) ──
+  // v41: NOW RUNS ON VERCEL TOO! internal-api.z.ai IS accessible from the
+  // public internet (confirmed via curl). The env vars ZAI_BASE_URL, ZAI_API_KEY,
+  // ZAI_CHAT_ID, ZAI_TOKEN, ZAI_USER_ID must be set on Vercel.
+  // This is the BEST strategy for jewelry — it accepts BOTH selfie + product
+  // images and does proper AI-based draping (not just overlay).
+  if (zaiConfig && !strategiesAttempted.includes('zai-image-edit') && Date.now() < aiDeadline - 15_000) {
     strategiesAttempted.push('zai-image-edit')
-    console.log('[virtual-tryon] LOCAL Strategy 1: ZAI image-edit (edit-both) — PRIMARY')
+    console.log(`[virtual-tryon] v41 Strategy 0: ZAI image-edit (edit-both) — PRIMARY (Vercel=${isVercel})`)
     const result = await callZAIImageEdit(input, totalDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
