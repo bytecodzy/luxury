@@ -42,9 +42,16 @@ const nextConfig: NextConfig = {
       'node_modules/.prisma/client/schema-engine-darwin-*',
       'node_modules/.prisma/client/schema-engine-windows-*',
       // ── Image/native binaries ──
-      'node_modules/@img/sharp-libvips*',
+      // v41: DO NOT exclude @img/sharp-libvips-linux-x64 — Vercel needs it!
+      // Only exclude darwin/win/musl variants that Vercel (linux gnu x64) doesn't need.
+      'node_modules/@img/sharp-libvips-darwin-*',
+      'node_modules/@img/sharp-libvips-win32-*',
+      'node_modules/@img/sharp-libvips-linuxmusl-*',
+      'node_modules/@img/sharp-libvips-linux-arm*',
       'node_modules/@img/sharp-darwin-*',
       'node_modules/@img/sharp-win32-*',
+      'node_modules/@img/sharp-linuxmusl-*',
+      'node_modules/@img/sharp-linux-arm*',
       // ── react-day-picker + date-fns (removed from deps) ──
       'node_modules/react-day-picker/**',
       'node_modules/date-fns/**',

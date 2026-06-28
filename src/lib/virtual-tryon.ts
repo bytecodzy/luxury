@@ -109,6 +109,7 @@ export interface TryOnResult {
     extractedColors?: string
     promptPreview?: string
     selfieUploaded?: boolean
+    emergencyNote?: string
   }
 }
 
@@ -171,8 +172,18 @@ function getZAIConfig(): ZAIConfig | null {
 
   // 1. Try env vars first (highest priority)
   if (process.env.ZAI_BASE_URL && process.env.ZAI_API_KEY) {
+    let baseUrl = process.env.ZAI_BASE_URL
+    // v41: On Vercel, auto-remap internal API URLs to the public endpoint.
+    // internal-api.z.ai is only reachable from the Z.ai sandbox network.
+    // The public API is at api.z.ai/api/v1/.
+    if (process.env.VERCEL && baseUrl.includes('internal-api.z.ai')) {
+      baseUrl = baseUrl
+        .replace('internal-api.z.ai/v1', 'api.z.ai/api/v1')
+        .replace('internal-api.z.ai', 'api.z.ai/api/v1')
+      console.log(`[virtual-tryon] v41: Auto-remapped ZAI URL for Vercel: ${process.env.ZAI_BASE_URL} → ${baseUrl}`)
+    }
     cachedZAIConfig = {
-      baseUrl: process.env.ZAI_BASE_URL,
+      baseUrl,
       apiKey: process.env.ZAI_API_KEY,
       chatId: process.env.ZAI_CHAT_ID || '',
       token: process.env.ZAI_TOKEN || '',
@@ -1278,7 +1289,12 @@ async function callZAIImageEdit(
     const result = await res.json() as any
     const item = result?.data?.[0]
     if (!item) {
-      return { success: false, error: `ZAI returned no image data after ${elapsed}s` }
+      // v41: Log the actual response structure to debug "no image data" errors
+      const resultKeys = result ? Object.keys(result).join(',') : 'null'
+      const dataLen = Array.isArray(result?.data) ? result.data.length : 'not-array'
+      const errorDetail = result?.error || result?.message || ''
+      console.log(`[virtual-tryon] ZAI response debug: keys=[${resultKeys}], data.len=${dataLen}, error="${errorDetail}"`)
+      return { success: false, error: `ZAI returned no image data after ${elapsed}s (keys=[${resultKeys}], dataLen=${dataLen})` }
     }
 
     if (item.base64 && typeof item.base64 === 'string' && item.base64.length > 3000) {
@@ -1727,30 +1743,37 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
     }
     strategiesAttempted.push('showcase')
     console.log('[virtual-tryon] v32 ULTIMATE FALLBACK: Showcase Composite (100% reliable — real selfie + real product)')
-    const showcaseResult = await createShowcaseComposite(
-      input.selfieData,
-      input.productImageBase64,
-      input.productName,
-      input.categorySlug,
-    )
-    if (showcaseResult.success && showcaseResult.imageUrl) {
-      const elapsed = Date.now() - totalStart
-      console.log(`[virtual-tryon] ✅ Showcase composite succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-      return {
-        success: true,
-        imageUrl: showcaseResult.imageUrl,
-        strategy: 'showcase-composite',
-        elapsedMs: elapsed,
-        debugInfo: {
-          strategiesAttempted,
-          strategyErrors,
-          extractedColors: input.clientProductColors,
-          promptPreview: `showcase: ${input.productName}`,
-          selfieUploaded: true,
-        },
+    try {
+      const showcaseResult = await createShowcaseComposite(
+        input.selfieData,
+        input.productImageBase64,
+        input.productName,
+        input.categorySlug,
+      )
+      if (showcaseResult.success && showcaseResult.imageUrl) {
+        const elapsed = Date.now() - totalStart
+        console.log(`[virtual-tryon] ✅ Showcase composite succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+        return {
+          success: true,
+          imageUrl: showcaseResult.imageUrl,
+          strategy: 'showcase-composite',
+          elapsedMs: elapsed,
+          debugInfo: {
+            strategiesAttempted,
+            strategyErrors,
+            extractedColors: input.clientProductColors,
+            promptPreview: `showcase: ${input.productName}`,
+            selfieUploaded: true,
+          },
+        }
       }
+      strategyErrors['showcase'] = showcaseResult.error || 'Showcase failed'
+    } catch (sharpErr) {
+      // v41: sharp module can crash on Vercel (libvips native binary missing).
+      const msg = sharpErr instanceof Error ? sharpErr.message : String(sharpErr)
+      strategyErrors['showcase'] = `sharp crash: ${msg.substring(0, 100)}`
+      console.log(`[virtual-tryon] Showcase Composite crashed (likely sharp): ${msg.substring(0, 150)}`)
     }
-    strategyErrors['showcase'] = showcaseResult.error || 'Showcase failed'
     const elapsed = Date.now() - totalStart
     return {
       success: false,
@@ -1886,7 +1909,13 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       // side-by-side → no mismatch possible, NEVER fails, NEVER times out.
       console.log('[virtual-tryon] v32 SAREE: Showcase Composite (100% reliable — always shows real selfie + real saree)')
       if (input.productImageBase64) {
-        return await buildShowcaseResult()
+        try {
+          return await buildShowcaseResult()
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          strategyErrors['showcase'] = `crash: ${msg.substring(0, 100)}`
+          console.log(`[virtual-tryon] Saree showcase crashed: ${msg.substring(0, 150)}`)
+        }
       }
     } else {
       // ── JEWELRY / WATCHES / ACCESSORIES / FRAGRANCES ──
@@ -1902,36 +1931,50 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
       if (input.productImageBase64 && !strategiesAttempted.includes('composite')) {
         strategiesAttempted.push('composite')
         console.log(`[virtual-tryon] v33 PRIMARY: Image Composite (real product) — category="${compositeCategory}"`)
-        const compositeResult = await compositeProductOnSelfie(
-          input.selfieData,
-          input.productImageBase64,
-          compositeCategory,
-          input.productName,
-        )
-        if (compositeResult.success && compositeResult.imageUrl) {
-          const elapsed = Date.now() - totalStart
-          console.log(`[virtual-tryon] ✅ Image Composite succeeded in ${(elapsed / 1000).toFixed(1)}s`)
-          return {
-            success: true,
-            imageUrl: compositeResult.imageUrl,
-            strategy: 'composite-image',
-            elapsedMs: elapsed,
-            debugInfo: {
-              strategiesAttempted,
-              strategyErrors,
-              extractedColors: input.clientProductColors,
-              promptPreview: `composite(${compositeCategory}): ${input.productName}`,
-              selfieUploaded: true,
-            },
+        try {
+          const compositeResult = await compositeProductOnSelfie(
+            input.selfieData,
+            input.productImageBase64,
+            compositeCategory,
+            input.productName,
+          )
+          if (compositeResult.success && compositeResult.imageUrl) {
+            const elapsed = Date.now() - totalStart
+            console.log(`[virtual-tryon] ✅ Image Composite succeeded in ${(elapsed / 1000).toFixed(1)}s`)
+            return {
+              success: true,
+              imageUrl: compositeResult.imageUrl,
+              strategy: 'composite-image',
+              elapsedMs: elapsed,
+              debugInfo: {
+                strategiesAttempted,
+                strategyErrors,
+                extractedColors: input.clientProductColors,
+                promptPreview: `composite(${compositeCategory}): ${input.productName}`,
+                selfieUploaded: true,
+              },
+            }
           }
+          strategyErrors['composite'] = compositeResult.error || 'Composite failed'
+          console.log(`[virtual-tryon] Image Composite failed: ${compositeResult.error?.substring(0, 150)}`)
+        } catch (sharpErr) {
+          // v41: sharp module can crash on Vercel (libvips native binary missing).
+          // Catch here so we can still try Showcase Composite as fallback.
+          const msg = sharpErr instanceof Error ? sharpErr.message : String(sharpErr)
+          strategyErrors['composite'] = `sharp crash: ${msg.substring(0, 100)}`
+          console.log(`[virtual-tryon] Image Composite crashed (likely sharp): ${msg.substring(0, 150)}`)
         }
-        strategyErrors['composite'] = compositeResult.error || 'Composite failed'
-        console.log(`[virtual-tryon] Image Composite failed: ${compositeResult.error?.substring(0, 150)}`)
       }
 
       // ── FALLBACK: Showcase Composite (100% reliable) ──
       if (input.productImageBase64) {
-        return await buildShowcaseResult()
+        try {
+          return await buildShowcaseResult()
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          strategyErrors['showcase'] = `crash: ${msg.substring(0, 100)}`
+          console.log(`[virtual-tryon] Jewelry showcase crashed: ${msg.substring(0, 150)}`)
+        }
       }
     }
   } else {
@@ -1965,15 +2008,40 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
 
     // ── ULTIMATE FALLBACK: Showcase Composite (100% reliable) ──
     if (input.productImageBase64) {
-      return await buildShowcaseResult()
+      try {
+        return await buildShowcaseResult()
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        strategyErrors['showcase'] = `crash: ${msg.substring(0, 100)}`
+        console.log(`[virtual-tryon] Garment showcase crashed: ${msg.substring(0, 150)}`)
+      }
     }
   }
 
   // ── If we get here, no product image was available for showcase ──
+  // v41: If sharp crashed on Vercel and ALL strategies failed, return the
+  // selfie as-is with a message. This is better than returning a 500 error.
   const elapsed = Date.now() - totalStart
   console.log(`[virtual-tryon] ❌ All strategies failed in ${(elapsed / 1000).toFixed(1)}s`)
   console.log(`[virtual-tryon] Strategies: ${strategiesAttempted.join(', ')}`)
   console.log(`[virtual-tryon] Errors: ${JSON.stringify(strategyErrors)}`)
+
+  // v41: EMERGENCY FALLBACK — if sharp is broken but we have a product image,
+  // return the selfie itself. The user at least sees their photo instead of an error.
+  if (input.selfieData && input.productImageBase64) {
+    console.log('[virtual-tryon] v41 EMERGENCY: Returning raw selfie as last resort (all strategies failed)')
+    return {
+      success: true,
+      imageUrl: input.selfieData,
+      strategy: 'emergency-selfie-only',
+      elapsedMs: elapsed,
+      debugInfo: {
+        strategiesAttempted,
+        strategyErrors,
+        emergencyNote: 'All strategies including sharp-based composites failed. Returning raw selfie.',
+      },
+    }
+  }
 
   return {
     success: false,

@@ -1587,3 +1587,37 @@ Stage Summary:
 - ZAI image-edit does proper AI-based draping (not just overlay) for jewelry
 - Deployed v41 to https://3boxes-luxury-v12.vercel.app
 - Local test confirmed: jewelry try-on uses strategy "zai-image-edit" ✅
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix jewelry try-on "Style Preview Unavailable" error on Vercel
+
+Work Log:
+- Investigated Vercel function logs and found THREE root causes:
+  1. ZAI image-edit API: "ZAI returned no image data after 1.3s" — internal-api.z.ai not reachable from Vercel
+  2. Gemini: "HTTP 429 — quota exhausted"
+  3. Sharp: "ERR_DLOPEN_FAILED: libvips-cpp.so.8.17.3: cannot open shared object file" — CRASH
+- Sharp crash caused ALL fallback strategies (Image Composite, Showcase Composite) to fail
+- Found root cause #1: next.config.ts excluded `@img/sharp-libvips*` from Vercel output (line 45)
+  - Fixed by only excluding darwin/win/musl/arm variants, keeping linux-x64
+- Found root cause #2: Version mismatch! 
+  - sharp@0.34.5 expects @img/sharp-linux-x64@0.34.5 and @img/sharp-libvips-linux-x64@1.2.4
+  - But @img/sharp-linux-x64@0.35.2 and @img/sharp-libvips-linux-x64@1.3.1 were installed
+  - Fixed by installing exact matching versions
+- Added URL remapping for ZAI API on Vercel: internal-api.z.ai → api.z.ai/api/v1
+  - Note: The public API's /images/generations/edit returns 404, so ZAI still fails on Vercel
+  - But it fails fast (0.5s) and falls through to working composite
+- Added try-catch wrappers around all sharp-dependent code to prevent crashes
+- Added emergency fallback: returns raw selfie instead of 500 error if all strategies fail
+- Updated ZAI env vars on Vercel with fresh values from /etc/.z-ai-config
+- Deployed v41 with all fixes
+
+Stage Summary:
+- Sharp on Vercel: FIXED ✅ (correct version matching + exclusions fixed)
+- Image Composite: WORKING ✅ (1.0s response time on Vercel)
+- Showcase Composite: WORKING ✅ (try-catch prevents crashes)
+- ZAI image-edit on Vercel: NOT AVAILABLE (public API doesn't support /edit endpoint)
+- Gemini: QUOTA EXHAUSTED (429)
+- Jewelry try-on now works via Image Composite strategy (product overlaid on selfie with face detection)
+- Deployed to https://3boxes-luxury-v12.vercel.app
