@@ -462,11 +462,17 @@ function add3BoxesWatermark(imageDataUrl: string, productName: string): Promise<
 }
 
 // ── Client-side Canvas Showcase Composite ─────────────────────────
-// v4.7: When the server API fails entirely (sharp crash, body size limit,
-// Vercel timeout, network error), we generate a polished side-by-side
-// showcase image entirely in the browser using HTML5 Canvas. This is the
-// 100% reliable fallback that NEVER fails — no native modules, no API calls,
-// just Canvas 2D operations that work in every modern browser.
+// v4.8: BULLETPROOF client-side fallback — NEVER fails, NEVER shows
+// "Style Preview Unavailable". When the server API fails (sharp crash,
+// body size limit, Vercel timeout, network error), we generate a polished
+// side-by-side showcase image entirely in the browser using HTML5 Canvas.
+//
+// KEY FIXES in v4.8:
+// 1. NO crossOrigin on data URLs — prevents tainted canvas SecurityError
+// 2. Product image failure → text placeholder (never rejects)
+// 3. Selfie image failure → text placeholder (never rejects)
+// 4. 10s timeout for image loading (never hangs forever)
+// 5. Always resolves — the user ALWAYS gets a visual result
 
 function generateClientShowcaseComposite(
   selfieDataUrl: string,
@@ -474,12 +480,12 @@ function generateClientShowcaseComposite(
   productName: string,
   categorySlug: string,
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    // Load both images in parallel
-    const selfieImg = document.createElement('img');
-    const productImg = document.createElement('img');
-    selfieImg.crossOrigin = 'anonymous';
-    productImg.crossOrigin = 'anonymous';
+  return new Promise((resolve) => {
+    // Hard timeout — never hang forever
+    const timeoutId = setTimeout(() => {
+      console.log('[try-on] Client showcase: timeout — generating text-only composite');
+      resolve(createTextOnlyComposite(productName, categorySlug));
+    }, 10_000);
 
     let selfieLoaded = false;
     let productLoaded = false;
@@ -488,10 +494,8 @@ function generateClientShowcaseComposite(
 
     function tryComposite() {
       if (!selfieLoaded || !productLoaded) return;
-      if (!selfieEl || !productEl) {
-        reject(new Error('Failed to load images'));
-        return;
-      }
+
+      clearTimeout(timeoutId);
 
       try {
         // Canvas dimensions — portrait orientation, fits well on mobile + desktop
@@ -511,7 +515,7 @@ function generateClientShowcaseComposite(
         canvas.height = canvasH;
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          reject(new Error('Canvas not available'));
+          resolve(createTextOnlyComposite(productName, categorySlug));
           return;
         }
 
@@ -542,7 +546,9 @@ function generateClientShowcaseComposite(
         ctx.lineTo(canvasW - panelPadX, headerH);
         ctx.stroke();
 
-        // 3. Left panel — selfie (contain-fit)
+        const panelAspect = (panelW - 20) / (panelH - 50);
+
+        // 3. Left panel — selfie
         const leftPanelX = panelPadX;
         const leftPanelY = panelAreaY + 15;
 
@@ -560,20 +566,31 @@ function generateClientShowcaseComposite(
         ctx.stroke();
         ctx.restore();
 
-        // Draw selfie (contain-fit, centered in panel)
-        const selfieAspect = selfieEl.naturalWidth / selfieEl.naturalHeight;
-        const panelAspect = (panelW - 20) / (panelH - 50);
-        let drawW: number, drawH: number;
-        if (selfieAspect > panelAspect) {
-          drawW = panelW - 20;
-          drawH = drawW / selfieAspect;
+        if (selfieEl) {
+          // Draw selfie (contain-fit, centered in panel)
+          const selfieAspect = selfieEl.naturalWidth / selfieEl.naturalHeight;
+          let drawW: number, drawH: number;
+          if (selfieAspect > panelAspect) {
+            drawW = panelW - 20;
+            drawH = drawW / selfieAspect;
+          } else {
+            drawH = panelH - 50;
+            drawW = drawH * selfieAspect;
+          }
+          const selfieDrawX = leftPanelX + (panelW - drawW) / 2;
+          const selfieDrawY = leftPanelY + 10;
+          ctx.drawImage(selfieEl, selfieDrawX, selfieDrawY, drawW, drawH);
         } else {
-          drawH = panelH - 50;
-          drawW = drawH * selfieAspect;
+          // Selfie failed to load — draw text placeholder
+          ctx.fillStyle = '#c9a961';
+          ctx.font = '400 48px Georgia, serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('📷', leftPanelX + panelW / 2, leftPanelY + panelH / 2 - 20);
+          ctx.fillStyle = '#a89a82';
+          ctx.font = '400 16px Arial, Helvetica, sans-serif';
+          ctx.fillText('Your Photo', leftPanelX + panelW / 2, leftPanelY + panelH / 2 + 30);
         }
-        const selfieDrawX = leftPanelX + (panelW - drawW) / 2;
-        const selfieDrawY = leftPanelY + 10;
-        ctx.drawImage(selfieEl, selfieDrawX, selfieDrawY, drawW, drawH);
 
         // "YOUR PHOTO" label
         ctx.fillStyle = '#8b7355';
@@ -582,7 +599,7 @@ function generateClientShowcaseComposite(
         ctx.textBaseline = 'middle';
         ctx.fillText('YOUR PHOTO', leftPanelX + panelW / 2, leftPanelY + panelH - 22);
 
-        // 4. Right panel — product (contain-fit)
+        // 4. Right panel — product
         const rightPanelX = canvasW - panelPadX - panelW;
         const rightPanelY = panelAreaY + 15;
 
@@ -600,19 +617,46 @@ function generateClientShowcaseComposite(
         ctx.stroke();
         ctx.restore();
 
-        // Draw product (contain-fit, centered in panel)
-        const prodAspect = productEl.naturalWidth / productEl.naturalHeight;
-        let prodDrawW: number, prodDrawH: number;
-        if (prodAspect > panelAspect) {
-          prodDrawW = panelW - 20;
-          prodDrawH = prodDrawW / prodAspect;
+        if (productEl) {
+          // Draw product (contain-fit, centered in panel)
+          const prodAspect = productEl.naturalWidth / productEl.naturalHeight;
+          let prodDrawW: number, prodDrawH: number;
+          if (prodAspect > panelAspect) {
+            prodDrawW = panelW - 20;
+            prodDrawH = prodDrawW / prodAspect;
+          } else {
+            prodDrawH = panelH - 50;
+            prodDrawW = prodDrawH * prodAspect;
+          }
+          const prodDrawX = rightPanelX + (panelW - prodDrawW) / 2;
+          const prodDrawY = rightPanelY + 10;
+          ctx.drawImage(productEl, prodDrawX, prodDrawY, prodDrawW, prodDrawH);
         } else {
-          prodDrawH = panelH - 50;
-          prodDrawW = prodDrawH * prodAspect;
+          // Product image failed to load — draw text placeholder
+          const displayName = (productName || 'SELECTED PRODUCT').substring(0, 20);
+          ctx.fillStyle = '#c9a961';
+          ctx.font = '400 48px Georgia, serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('👗', rightPanelX + panelW / 2, rightPanelY + panelH / 2 - 20);
+          ctx.fillStyle = '#8b7355';
+          ctx.font = '600 18px Arial, Helvetica, sans-serif';
+          // Word-wrap the product name
+          const words = displayName.split(' ');
+          let lineY = rightPanelY + panelH / 2 + 25;
+          let line = '';
+          for (const word of words) {
+            const testLine = line ? `${line} ${word}` : word;
+            if (ctx.measureText(testLine).width > panelW - 30) {
+              if (line) ctx.fillText(line, rightPanelX + panelW / 2, lineY);
+              line = word;
+              lineY += 22;
+            } else {
+              line = testLine;
+            }
+          }
+          if (line) ctx.fillText(line, rightPanelX + panelW / 2, lineY);
         }
-        const prodDrawX = rightPanelX + (panelW - prodDrawW) / 2;
-        const prodDrawY = rightPanelY + 10;
-        ctx.drawImage(productEl, prodDrawX, prodDrawY, prodDrawW, prodDrawH);
 
         // Product name label
         const displayName = (productName || 'SELECTED PRODUCT').substring(0, 25).toUpperCase();
@@ -664,39 +708,141 @@ function generateClientShowcaseComposite(
         ctx.font = '400 12px Georgia, "Times New Roman", serif';
         ctx.fillText('3BOXES Luxury \u2022 Virtual Style Preview', canvasW / 2, footerY + 50);
 
-        // Convert to data URL
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
+        // Convert to data URL — this can throw SecurityError if canvas is tainted
+        // (e.g., cross-origin image without CORS). Wrap in try/catch.
+        try {
+          resolve(canvas.toDataURL('image/jpeg', 0.92));
+        } catch (securityErr) {
+          console.log('[try-on] Canvas tainted (cross-origin image), generating text-only composite');
+          resolve(createTextOnlyComposite(productName, categorySlug));
+        }
       } catch (err) {
-        reject(err);
+        console.log('[try-on] Client showcase composite error:', err);
+        resolve(createTextOnlyComposite(productName, categorySlug));
       }
     }
 
+    // Load selfie image — data URLs don't need crossOrigin
+    const selfieImg = document.createElement('img');
+    if (!selfieDataUrl.startsWith('data:')) {
+      selfieImg.crossOrigin = 'anonymous';
+    }
     selfieImg.onload = () => {
       selfieLoaded = true;
       selfieEl = selfieImg;
       tryComposite();
     };
     selfieImg.onerror = () => {
-      // If selfie fails to load, we can't do anything
-      reject(new Error('Failed to load selfie image'));
+      // Selfie failed — still try composite with text placeholder
+      console.log('[try-on] Client showcase: selfie failed to load, using placeholder');
+      selfieLoaded = true;
+      selfieEl = null;
+      tryComposite();
     };
+    selfieImg.src = selfieDataUrl;
 
+    // Load product image — data URLs don't need crossOrigin
+    const productImg = document.createElement('img');
+    if (!productImageSrc.startsWith('data:')) {
+      productImg.crossOrigin = 'anonymous';
+    }
     productImg.onload = () => {
       productLoaded = true;
       productEl = productImg;
       tryComposite();
     };
     productImg.onerror = () => {
-      // If product image fails, use a placeholder
-      productLoaded = true;
-      productEl = null;
-      // Try composite anyway — we'll handle the null case
-      tryComposite();
+      // Product image failed — try again WITHOUT crossOrigin (same-origin URLs)
+      console.log('[try-on] Client showcase: product failed with crossOrigin, retrying without');
+      const retryImg = document.createElement('img');
+      // Don't set crossOrigin — allows same-origin images to load without CORS
+      retryImg.onload = () => {
+        productLoaded = true;
+        productEl = retryImg;
+        tryComposite();
+      };
+      retryImg.onerror = () => {
+        // Still failed — use text placeholder
+        console.log('[try-on] Client showcase: product image failed entirely, using text placeholder');
+        productLoaded = true;
+        productEl = null;
+        tryComposite();
+      };
+      retryImg.src = productImageSrc;
     };
-
-    selfieImg.src = selfieDataUrl;
     productImg.src = productImageSrc;
   });
+}
+
+/**
+ * Create a minimal text-only composite when image loading fails entirely.
+ * This ensures the user ALWAYS gets a visual result — never a dead-end error.
+ */
+function createTextOnlyComposite(productName: string, categorySlug: string): string {
+  const canvasW = 800;
+  const canvasH = 600;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    // Absolute last resort — return a tiny 1x1 pixel
+    return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  }
+
+  // Background
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, canvasH);
+  bgGrad.addColorStop(0, '#faf8f4');
+  bgGrad.addColorStop(1, '#ede6d8');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  // Header
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = 'bold 32px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('3BOXES', canvasW / 2, 60);
+
+  ctx.fillStyle = '#8b7355';
+  ctx.font = '500 16px Georgia, serif';
+  ctx.fillText('STYLE PREVIEW', canvasW / 2, 95);
+
+  // Gold line
+  ctx.strokeStyle = '#c9a961';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(60, 120);
+  ctx.lineTo(canvasW - 60, 120);
+  ctx.stroke();
+
+  // Product name
+  const displayName = (productName || 'Selected Product').substring(0, 30);
+  ctx.fillStyle = '#1a1a1a';
+  ctx.font = '600 24px Georgia, serif';
+  ctx.fillText(displayName, canvasW / 2, 200);
+
+  // Category
+  const displayCat = (categorySlug || '').replace(/-/g, ' ');
+  if (displayCat) {
+    ctx.fillStyle = '#8b7355';
+    ctx.font = '400 18px Georgia, serif';
+    ctx.fillText(displayCat, canvasW / 2, 240);
+  }
+
+  // Message
+  ctx.fillStyle = '#a89a82';
+  ctx.font = '400 16px Georgia, serif';
+  ctx.fillText('Your style preview is being prepared', canvasW / 2, 340);
+  ctx.fillText('Please try again for the full AI experience', canvasW / 2, 370);
+
+  // Footer
+  ctx.fillStyle = '#b8a886';
+  ctx.font = '400 12px Georgia, serif';
+  ctx.fillText('3BOXES Luxury \u2022 Virtual Style Preview', canvasW / 2, canvasH - 40);
+
+  return canvas.toDataURL('image/jpeg', 0.92);
 }
 
 // ── Progress Messages ───────────────────────────────────────────────
@@ -962,14 +1108,26 @@ export function TryOnDialog({
     abortRef.current = controller;
 
     // Pre-resolve product image to base64 (with timeout)
+    // v4.8: Increased timeout from 5s to 8s — product images can take longer
+    // on Vercel (CDN cold start). Also try multiple image sources.
     let productImageBase64: string | undefined;
     try {
       const imgToFetch = rawProductImage || productImage;
       if (imgToFetch) {
         productImageBase64 = await Promise.race([
           fetchImageAsBase64(imgToFetch),
-          new Promise<null>(r => setTimeout(() => r(null), 5000)),
+          new Promise<null>(r => setTimeout(() => r(null), 8000)),
         ]) || undefined;
+        // v4.8: If first source failed, try the other source
+        if (!productImageBase64) {
+          const fallbackFetch = rawProductImage ? productImage : rawProductImage;
+          if (fallbackFetch && fallbackFetch !== imgToFetch) {
+            productImageBase64 = await Promise.race([
+              fetchImageAsBase64(fallbackFetch),
+              new Promise<null>(r => setTimeout(() => r(null), 5000)),
+            ]) || undefined;
+          }
+        }
       }
     } catch {}
 
@@ -1092,37 +1250,33 @@ export function TryOnDialog({
         onBackgroundJob?.('result');
       } else {
         // FAILED — try client-side canvas showcase fallback before showing error
+        // v4.8: The canvas composite now ALWAYS resolves (never rejects), so
+        // the user ALWAYS gets a visual result — never a dead-end error.
         console.log(`[try-on] Server failed: ${data.error}. Trying client-side showcase fallback...`);
-        try {
-          const imgSrc = rawProductImage || productImage;
-          if (selfieData && imgSrc) {
-            setProgressText('Creating style preview...');
-            const showcaseUrl = await generateClientShowcaseComposite(
-              selfieData,
-              productImageBase64 || imgSrc,
-              productName,
-              categorySlug || '',
-            );
-            setProgressPercent(100);
-            setResultImage(showcaseUrl);
-            setResultStrategy('client-showcase-composite');
+        const imgSrc = rawProductImage || productImage;
+        if (selfieData) {
+          setProgressText('Creating style preview...');
+          const showcaseUrl = await generateClientShowcaseComposite(
+            selfieData,
+            productImageBase64 || imgSrc || '',
+            productName,
+            categorySlug || '',
+          );
+          setProgressPercent(100);
+          setResultImage(showcaseUrl);
+          setResultStrategy('client-showcase-composite');
 
-            // Add watermark
-            try {
-              const watermarked = await add3BoxesWatermark(showcaseUrl, productName);
-              setWatermarkedResult(watermarked);
-            } catch {
-              setWatermarkedResult(showcaseUrl);
-            }
-
-            setStep('result');
-            onBackgroundJob?.('result');
-          } else {
-            setStep('timeout');
-            setErrorMessage(data.error || GENERATE_TIMEOUT_MSG);
+          // Add watermark
+          try {
+            const watermarked = await add3BoxesWatermark(showcaseUrl, productName);
+            setWatermarkedResult(watermarked);
+          } catch {
+            setWatermarkedResult(showcaseUrl);
           }
-        } catch (canvasErr) {
-          console.log(`[try-on] Client showcase also failed:`, canvasErr);
+
+          setStep('result');
+          onBackgroundJob?.('result');
+        } else {
           setStep('timeout');
           setErrorMessage(data.error || GENERATE_TIMEOUT_MSG);
         }
@@ -1142,40 +1296,31 @@ export function TryOnDialog({
         return;
       }
 
-      // v4.7: Network error — try client-side canvas showcase fallback
+      // v4.8: Network error — try client-side canvas showcase fallback
+      // The canvas composite now ALWAYS resolves — never shows dead-end error.
       console.log(`[try-on] Network error: ${err instanceof Error ? err.message : String(err)}. Trying client-side showcase fallback...`);
-      try {
-        const imgSrc = rawProductImage || productImage;
-        if (selfieData && imgSrc) {
-          const showcaseUrl = await generateClientShowcaseComposite(
-            selfieData,
-            productImageBase64 || imgSrc,
-            productName,
-            categorySlug || '',
-          );
-          setProgressPercent(100);
-          setResultImage(showcaseUrl);
-          setResultStrategy('client-showcase-composite');
+      const imgSrc = rawProductImage || productImage;
+      if (selfieData) {
+        const showcaseUrl = await generateClientShowcaseComposite(
+          selfieData,
+          productImageBase64 || imgSrc || '',
+          productName,
+          categorySlug || '',
+        );
+        setProgressPercent(100);
+        setResultImage(showcaseUrl);
+        setResultStrategy('client-showcase-composite');
 
-          try {
-            const watermarked = await add3BoxesWatermark(showcaseUrl, productName);
-            setWatermarkedResult(watermarked);
-          } catch {
-            setWatermarkedResult(showcaseUrl);
-          }
-
-          setStep('result');
-          onBackgroundJob?.('result');
-        } else {
-          setStep('timeout');
-          setErrorMessage(
-            err instanceof Error && err.name === 'TimeoutError'
-              ? GENERATE_TIMEOUT_MSG
-              : 'Network error. Please check your connection and try again.'
-          );
+        try {
+          const watermarked = await add3BoxesWatermark(showcaseUrl, productName);
+          setWatermarkedResult(watermarked);
+        } catch {
+          setWatermarkedResult(showcaseUrl);
         }
-      } catch (canvasErr) {
-        console.log(`[try-on] Client showcase also failed:`, canvasErr);
+
+        setStep('result');
+        onBackgroundJob?.('result');
+      } else {
         setStep('timeout');
         setErrorMessage(
           err instanceof Error && err.name === 'TimeoutError'
