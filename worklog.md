@@ -1665,3 +1665,36 @@ Stage Summary:
   - src/app/api/try-on/route.ts (improved error handling + product image resolution)
   - src/lib/showcase-composite.ts (type fix)
   - src/lib/image-composite.ts (type fix)
+---
+Task ID: v4.8-fix
+Agent: Main Agent
+Task: Fix "Style Preview Unavailable" error for saree draping on Vercel
+
+Work Log:
+- Diagnosed root cause: sharp module crashes on Vercel (libvips native binary unavailable)
+- Old code returned HTTP 500 on server error → client couldn't fall back to canvas
+- Client-side canvas fallback had bugs: crossOrigin='anonymous' on data URLs caused SecurityError
+- Product image load failure caused promise rejection → dead-end error
+
+Key Fixes Applied (v4.8):
+1. generateClientShowcaseComposite() now NEVER rejects — always resolves
+2. NO crossOrigin on data URLs — prevents tainted canvas SecurityError
+3. Product image load failure → retry without crossOrigin → text placeholder
+4. Selfie load failure → text placeholder (never shows dead-end error)
+5. 10s timeout for image loading (never hangs forever)
+6. createTextOnlyComposite() as ultimate fallback
+7. Server returns 200 with success=false (not 500) — client can fall back
+8. Increased product image fetch timeout from 5s to 8s
+9. Fallback to alternate product image source if first fails
+10. Removed try/catch around canvas fallback — it now always resolves
+
+Files Changed:
+- src/components/try-on-dialog.tsx (258 insertions, 113 deletions)
+- src/app/api/try-on/route.ts (already had 200 fix from earlier unpushed commits)
+- src/lib/virtual-tryon.ts (already had sharp crash handling from earlier unpushed commits)
+
+Stage Summary:
+- Code fixes committed locally as v4.8
+- 8 commits total ready to push (7 previous + 1 new)
+- GitHub PAT expired — CANNOT PUSH until user provides new token
+- All changes verified locally (page loads, no lint errors)
