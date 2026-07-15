@@ -807,7 +807,7 @@ export async function compositeProductOnSelfie(
     const colorMatchedProduct = await matchProductToSelfie(productNoBg, selfieBuf)
 
     // 6. Composite each placement
-    const compositeOps: sharp.OverlayOptions[] = []
+    const compositeOps: Array<{ input: Buffer; top?: number; left?: number; blend?: string }> = []
 
     for (const placement of placements) {
       // Resize product to fit placement (contain to preserve aspect)

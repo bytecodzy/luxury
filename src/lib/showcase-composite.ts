@@ -172,7 +172,7 @@ export async function createShowcaseComposite(
     const headerSub = await textToSvg('STYLE PREVIEW', 20, '#8b7355', 500, 400)
 
     // Build the composite layers
-    const layers: sharp.OverlayOptions[] = []
+    const layers: Array<{ input: Buffer; top: number; left: number }> = []
 
     // 1. Background — soft warm gradient (luxury feel)
     const bgSvg = `<svg width="${canvasW}" height="${canvasH}" xmlns="http://www.w3.org/2000/svg">

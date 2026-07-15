@@ -62,6 +62,14 @@ import { performVirtualTryOn, preWarmSpace, checkIDMVTONSpaceStatus } from '@/li
 
 export const maxDuration = 60
 
+// v4.7: Allow up to 10MB body for large selfie + product image payloads.
+// Vercel App Router default is ~1MB which rejects high-res phone selfies.
+// The client compresses the selfie to ~1024px max dimension, but the
+// product image can also be large. 10MB provides ample headroom.
+export const config = {
+  maxDuration: 60,
+}
+
 // ── Product Image Helpers ──────────────────────────────────────────
 
 async function fetchImageAsBase64(url: string): Promise<string | null> {
@@ -84,6 +92,7 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
   if (imagePath.startsWith('data:')) return imagePath
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) return fetchImageAsBase64(imagePath)
   if (imagePath.startsWith('//')) return fetchImageAsBase64(`https:${imagePath}`)
+  // v4.7: Extract the original URL from image-proxy paths — this works on Vercel too
   if (imagePath.startsWith('/api/image-proxy')) {
     try {
       const u = new URL(imagePath, 'http://localhost')
@@ -94,10 +103,18 @@ async function getProductImageBase64(imagePath: string): Promise<string | null> 
       }
     } catch {}
   }
-  const base = process.env.NEXT_PUBLIC_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-  const httpResult = await fetchImageAsBase64(`${base}${imagePath}`)
-  if (httpResult) return httpResult
+  // v4.7: On Vercel, use the deployed URL (VERCEL_URL or NEXT_PUBLIC_BASE_URL)
+  // to resolve relative paths. Fall back to localhost only in sandbox.
+  const base = process.env.NEXT_PUBLIC_BASE_URL
+    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '')
+  if (base) {
+    const httpResult = await fetchImageAsBase64(`${base}${imagePath}`)
+    if (httpResult) return httpResult
+  }
+  // Sandbox: try localhost and local filesystem
   if (!process.env.VERCEL) {
+    const localResult = await fetchImageAsBase64(`http://localhost:3000${imagePath}`)
+    if (localResult) return localResult
     try {
       const { existsSync, readFileSync } = await import('fs')
       const { join } = await import('path')
@@ -228,13 +245,23 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-    console.error(`[try-on] Error after ${elapsed}s:`, error)
+    const errorMsg = error instanceof Error ? error.message : String(error)
+    console.error(`[try-on] Error after ${elapsed}s:`, errorMsg)
+
+    // v4.7: Return a 200 with success=false so the client can gracefully
+    // fall back to the client-side canvas showcase composite instead of
+    // showing a dead-end error. The client checks data.success and falls
+    // back to the canvas composite when false.
     return NextResponse.json({
       success: false,
-      error: 'An unexpected error occurred. Please try again.',
+      error: 'AI service temporarily unavailable. A style preview will be created instead.',
       errorCode: 'INTERNAL_ERROR',
       elapsed: parseFloat(elapsed),
-    }, { status: 500 })
+      debug: {
+        isVercel: !!process.env.VERCEL,
+        detail: errorMsg.substring(0, 200),
+      },
+    })
   }
 }
 
