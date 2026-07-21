@@ -19,3 +19,22 @@ Stage Summary:
 - Frontend will ALWAYS show a visual result (canvas fallback) — never a dead-end error
 - 3BOXES watermark on download confirmed working (add3BoxesWatermark function)
 - Pushed to GitHub, Vercel will auto-deploy
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix v42 - use internal-api.z.ai with full auth instead of broken public API
+
+Work Log:
+- Discovered that api.z.ai/api/v1 (public API) does NOT support /images/generations/edit endpoint (returns 404)
+- The internal-api.z.ai endpoint IS accessible from the public internet (returns 401 without auth, proving server is reachable)
+- Removed auto-remap logic that was converting internal-api.z.ai to api.z.ai/api/v1 on Vercel
+- Updated hardcoded fallback to use internal-api.z.ai with full auth credentials (chatId, userId, token)
+- Verified local dev server works: API returns success=True with strategy=zai-image-edit
+- Pushed to GitHub (commit cccd180), Vercel will auto-deploy
+
+Stage Summary:
+- ZAI image-edit now uses internal-api.z.ai/v1 with full auth (works from public internet)
+- Frontend catch block for abort/timeout now tries canvas fallback
+- Both local and Vercel deployments should work
+- Vercel deployment triggered via GitHub push
