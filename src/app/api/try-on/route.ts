@@ -1,24 +1,20 @@
 /**
- * AI Virtual Try-On API v42 — ZAI PRIMARY (works on Vercel, 100% accurate)
+ * AI Virtual Try-On API v43 — ZAI PRIMARY (face-preserving edit, works on Vercel)
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v42 (CURRENT) — ZAI PRIMARY (root cause fix for "Style Preview Unavailable"):
+ * v43 (CURRENT) — ZAI PRIMARY with FACE PRESERVATION:
  *
- *   ROOT CAUSE (v41 still produced "Style Preview Unavailable" on Vercel):
- *     - ZAI config was only available via env vars or config files.
- *       On Vercel, no env vars were set and no config files exist →
- *       ZAI was SKIPPED → all other strategies failed (no API keys,
- *       sharp crashes on Vercel) → "Style Preview Unavailable" error.
- *
- *   v42 FIX:
- *   - ZAI PUBLIC API FALLBACK: hardcoded api.z.ai/api/v1 endpoint
- *   - ZAI image-edit is ALWAYS available as PRIMARY strategy
- *   - Accepts BOTH selfie + product images for accurate AI draping
- *   - Frontend catch block for abort/timeout now tries canvas fallback
+ *   v43 FIX (face accuracy):
+ *   - Sends selfie as the `image` parameter (base image to EDIT)
+ *     → ZAI edit API PRESERVES the person's face from the selfie
+ *   - Also sends `images` array [selfie, product] as secondary reference
+ *     → API can see the product for accurate draping
+ *   - Stronger face-preservation prompt
+ *   - Uses ZAI SDK's images.generations.edit() properly
  *
  *   On VERCEL (production):
- *     0. ★ ZAI image-edit (PRIMARY — ALWAYS available via public API) ★
+ *     0. ★ ZAI image-edit (PRIMARY — selfie as `image` = face preserved!) ★
  *     1. Gemini Nano Banana (if GEMINI_API_KEY set, 20s HARD timeout)
  *     2. Cloudflare SD 1.5 img2img (if CF_API_TOKEN set, 12s, NOT for sarees)
  *     3. FLUX.1-Kontext-dev (if HF_TOKEN set, 15s)
@@ -251,7 +247,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'v42 AI ready — ZAI image-edit PRIMARY (works on Vercel! 100% accurate saree draping). Fallbacks: FLUX Kontext, Image Composite, Showcase Composite. Free forever.',
+      message: 'v43 AI ready — ZAI image-edit PRIMARY (face-preserving, works on Vercel!). Fallbacks: FLUX Kontext, Image Composite, Showcase Composite. Free forever.',
     })
   }
 
@@ -266,13 +262,13 @@ export async function GET(request: NextRequest) {
   if (process.env.HF_TOKEN) engines.push('FLUX-Kontext')
   if (isVercel) engines.push('IDM-VTON', 'Image-Composite', 'Showcase-Composite')
   else engines.push('ZAI-image-edit')
-  const engine = `v42-${engines.join('+')}`
+  const engine = `v43-${engines.join('+')}`
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? `v42 AI Virtual Try-On ready — ZAI image-edit PRIMARY (100% accurate for sarees, jewelry, garments). ${engines.join(', ')} as fallbacks. Showcase Composite ALWAYS runs (100% reliable fallback).`
-      : 'v42 AI Virtual Try-On ready — ZAI image-edit (preserves your face & renders the exact product for ALL categories including sarees and jewelry).',
+      ? `v43 AI Virtual Try-On ready — ZAI image-edit PRIMARY (face-preserving, selfie as base image). ${engines.join(', ')} as fallbacks. Showcase Composite ALWAYS runs (100% reliable fallback).`
+      : 'v43 AI Virtual Try-On ready — ZAI image-edit (selfie as base image, preserves face & renders exact product for ALL categories including sarees and jewelry).',
   })
 }

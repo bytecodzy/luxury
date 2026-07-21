@@ -1,22 +1,22 @@
 'use client';
 
 /**
- * TryOnDialog v4.8 — ZAI-Powered Virtual Try-On (works on Vercel, 100% accurate)
+ * TryOnDialog v4.9 — ZAI-Powered Virtual Try-On (face-preserving, works on Vercel)
  *
  * KEY PRINCIPLES:
- * 1. ZAI image-edit is the PRIMARY strategy — accepts BOTH selfie + product
- *    images and performs true AI-based virtual try-on with 100% accuracy.
+ * 1. ZAI image-edit is the PRIMARY strategy — uses selfie as `image` param
+ *    (the base image to EDIT) which PRESERVES the person's face identity.
  * 2. ZAI ALWAYS works on Vercel via the hardcoded public API fallback.
  * 3. PRESERVES THE USER — ZAI keeps the user's face, gender, skin tone, and
  *    body type from the selfie while draping the product accurately.
- * 4. RENDERS THE EXACT PRODUCT — the PRODUCT PHOTO is passed alongside the
- *    selfie, so the AI reproduces the exact colours, pattern, fabric, and
- *    design (no more "saree → glasses" or mismatched products).
+ * 4. RENDERS THE EXACT PRODUCT — the PRODUCT PHOTO is also sent as a
+ *    secondary reference in the `images` array, so the AI reproduces the
+ *    exact colours, pattern, fabric, and design.
  * 5. Instant selfie preview (show raw image IMMEDIATELY on upload)
  * 6. Disclaimer → auto-opens file picker (one-click flow)
  * 7. Hard 55-second client timeout with friendly retry message
  * 8. 3BOXES watermark on ALL generated/saved/downloaded images
- * 9. v4.8: ALWAYS shows a visual result — catch block for abort/timeout
+ * 9. v4.9: ALWAYS shows a visual result — catch block for abort/timeout
  *    now tries client-side canvas showcase composite before showing error.
  *    Users will NEVER see "Style Preview Unavailable" again.
  */

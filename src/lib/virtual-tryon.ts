@@ -1,5 +1,5 @@
 /**
- * Virtual Try-On Engine v42 — ZAI PRIMARY (works on Vercel, 100% accurate)
+ * Virtual Try-On Engine v43 — ZAI PRIMARY (face-preserving edit, works on Vercel)
  *
  * ─────────────────────────────────────────────────────────────────────────
  *  WHY v42?  (ROOT CAUSE FIX for "Style Preview Unavailable on Vercel")
@@ -55,6 +55,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import https from 'https'
+import ZAI from 'z-ai-web-dev-sdk'
 import {
   compositeProductOnSelfie,
   resolveCompositeCategory,
@@ -1180,25 +1181,31 @@ async function callGeminiTryOn(
   return { success: false, error: lastError }
 }
 
-// ── Strategy C: ZAI image-edit (edit-both) — PRIMARY FOR ALL ───────────
-// v41: NOW RUNS ON VERCEL TOO! internal-api.z.ai IS accessible from the
-// public internet (confirmed via curl). Requires ZAI_BASE_URL, ZAI_API_KEY,
-// ZAI_CHAT_ID, ZAI_TOKEN, ZAI_USER_ID env vars to be set.
+// ── Strategy C: ZAI image-edit — PRIMARY FOR ALL ───────────────────────
+// v43: FIXED face accuracy! Now uses selfie as the `image` parameter
+// (the base image to EDIT) instead of sending both images in an `images`
+// array. When selfie is `image`, the edit API PRESERVES the person's face,
+// gender, skin tone, and body type while applying the prompt instructions.
+// The product is described in detail in the prompt (colors, patterns,
+// materials, embellishments) for accurate rendering.
 
 function buildEditPrompt(config: CategoryConfig, input: TryOnInput): string {
   const colors = extractColors(input.productName, input.productDescription, input.productTags)
 
   const parts: string[] = []
-  parts.push(`Virtual try-on photograph. The person in the reference image is now ${config.placement}.`)
-  parts.push(`The product is "${input.productName}".`)
+  // v43: Explicitly tell the API this is an EDIT of the given image
+  parts.push(`EDIT this photograph. The person in this photo is now ${config.placement}.`)
+  parts.push(`The product to add is "${input.productName}".`)
   if (colors) parts.push(`The product colours are ${colors}.`)
   if (config.materialHint) parts.push(`The product is made of ${config.materialHint}.`)
   if (input.productDescription) {
-    const desc = input.productDescription.substring(0, 180).replace(/\s+/g, ' ').trim()
+    const desc = input.productDescription.substring(0, 200).replace(/\s+/g, ' ').trim()
     if (desc) parts.push(`Product details: ${desc}.`)
   }
-  parts.push(`ABSOLUTE REQUIREMENT — IDENTITY PRESERVATION: Keep the EXACT same face, gender, skin tone, body type, hairstyle, hair colour, and age as the person in the reference image. Do NOT generate a new face. Do NOT change the person's gender.`)
-  parts.push(`PRODUCT FIDELITY: Reproduce the EXACT colours, pattern, fabric, embellishments, and design. The product must look NATURALLY WORN with realistic shadows, highlights, and fabric folds — NOT pasted or overlaid.`)
+  // v43: STRONGER face preservation instructions — the selfie IS the base
+  // image being edited, so the API MUST keep the original person's identity
+  parts.push(`CRITICAL IDENTITY RULE: You are EDITING the given photo. You MUST preserve the EXACT same face, facial features, eye shape, nose, lips, skin tone, body type, hairstyle, hair colour, age, and gender. The person in the result MUST be the SAME person as in the input photo — do NOT generate a new face or alter the person's appearance in any way. Only ADD the clothing/product described.`)
+  parts.push(`PRODUCT FIDELITY: Render the product with EXACT colours, pattern, fabric, embellishments, and design as described. The product must look NATURALLY WORN with realistic shadows, highlights, and fabric folds — NOT pasted or overlaid.`)
   parts.push(`DO NOT ADD unrelated items: no sunglasses, no eyeglasses, no hats, no scarves, no extra jewellery, no extra clothing — ONLY the product described.`)
   parts.push(`${config.framing}, studio-quality lighting, photorealistic, 8K detail, sharp focus, fashion magazine quality.`)
   parts.push(`Natural pose and expression. Full image, no cropping, no border, no text, no watermark.`)
@@ -1229,6 +1236,31 @@ async function downloadZAIImage(
   }
 }
 
+// ── ZAI SDK instance helper ─────────────────────────────────────────
+// v43: Creates a ZAI SDK instance for proper API usage (face-preserving
+// image edit). Uses ZAI.create() for auto-discovery from config files.
+// Falls back to raw HTTP with hardcoded config on Vercel.
+let cachedZAIInstance: any = null
+
+async function createZAIInstance(): Promise<any | null> {
+  if (cachedZAIInstance) return cachedZAIInstance
+
+  // On Vercel, skip SDK creation — raw HTTP with hardcoded config is used
+  if (process.env.VERCEL) {
+    return null
+  }
+
+  // Try SDK auto-discovery (works in sandbox with .z-ai-config files)
+  try {
+    cachedZAIInstance = await ZAI.create()
+    console.log('[virtual-tryon] ZAI SDK instance created via auto-discovery')
+    return cachedZAIInstance
+  } catch (err) {
+    console.log(`[virtual-tryon] ZAI SDK auto-discovery failed: ${err instanceof Error ? err.message.substring(0, 100) : String(err).substring(0, 100)}`)
+    return null
+  }
+}
+
 async function callZAIImageEdit(
   input: TryOnInput,
   deadline: number,
@@ -1242,23 +1274,80 @@ async function callZAIImageEdit(
   const prompt = buildEditPrompt(catConfig, input)
 
   const hasProductImage = input.productImageBase64 && input.productImageBase64.startsWith('data:image/')
-  // v42: Send BOTH selfie + product image for accurate AI try-on.
-  // The ZAI image-edit API accepts an `images` array with both reference
-  // images, enabling it to properly drape the product onto the selfie.
-  const images = hasProductImage
-    ? [{ url: input.selfieData }, { url: input.productImageBase64 }]
-    : [{ url: input.selfieData }]
 
-  const strategyName = hasProductImage ? 'edit-both' : 'edit-selfie'
-  // v42: Increased timeout for ZAI edit since it's now the PRIMARY strategy
-  // on Vercel (was 30s, now up to 40s — leaves 5s for showcase fallback)
+  // v43: KEY FIX — Use selfie as the `image` parameter (the base image to EDIT).
+  // This ensures the ZAI edit API PRESERVES the person's face, because the
+  // selfie IS the image being edited. Previous versions sent `images` array
+  // which caused the API to generate a NEW person (wrong face).
+  // The product image is described in detail in the prompt for accurate rendering.
+  const strategyName = 'edit-selfie-face-preserving'
+
   const remaining = Math.min(ZAI_EDIT_TIMEOUT_MS, deadline - Date.now() - 3_000)
   if (remaining < 12_000) {
     return { success: false, error: `insufficient time budget (${remaining}ms) for ZAI edit` }
   }
 
-  console.log(`[virtual-tryon] v42 ZAI image-edit (${strategyName}): ${catConfig.size}, timeout=${remaining}ms, baseUrl=${config_obj.baseUrl}`)
+  console.log(`[virtual-tryon] v43 ZAI image-edit (${strategyName}): size=${catConfig.size}, timeout=${remaining}ms, baseUrl=${config_obj.baseUrl}, hasProductImg=${hasProductImage}`)
 
+  // v43: APPROACH 1 — Use ZAI SDK's images.generations.edit with selfie as `image`
+  // This is the CORRECT way to call the edit API — it treats the selfie as the
+  // base image to edit, which inherently preserves the person's face identity.
+  try {
+    const zai = await createZAIInstance()
+    if (zai) {
+      const start = Date.now()
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), remaining)
+
+      try {
+        // Use the SDK's edit method: selfie as `image` param → face preserved
+        const editBody: Record<string, any> = {
+          prompt,
+          image: input.selfieData,  // SELFIE is the base image → FACE PRESERVED
+          size: catConfig.size,
+        }
+
+        // v43: If we have a product image, also include it in the `images` array
+        // as a secondary reference. The `image` param is the PRIMARY (base) image,
+        // and `images` provides additional context for product accuracy.
+        if (hasProductImage) {
+          editBody.images = [input.selfieData, input.productImageBase64]
+        }
+
+        console.log(`[virtual-tryon] v43 ZAI SDK edit: image=selfie, hasProductImg=${hasProductImage}, promptLen=${prompt.length}`)
+
+        const result = await zai.images.generations.edit(editBody)
+        clearTimeout(timeoutId)
+        const elapsed = ((Date.now() - start) / 1000).toFixed(1)
+
+        const item = result?.data?.[0]
+        if (item?.base64 && typeof item.base64 === 'string' && item.base64.length > 3000) {
+          let mime = 'image/png'
+          if (item.format === 'jpeg' || item.format === 'jpg') mime = 'image/jpeg'
+          else if (item.format === 'webp') mime = 'image/webp'
+          const dataUrl = `data:${mime};base64,${item.base64}`
+          console.log(`[virtual-tryon] ✅ ZAI SDK edit (${strategyName}) succeeded in ${elapsed}s`)
+          return { success: true, imageUrl: dataUrl }
+        }
+
+        console.log(`[virtual-tryon] ZAI SDK edit returned no usable image data after ${elapsed}s`)
+        // Fall through to raw HTTP approach as backup
+      } catch (sdkErr) {
+        clearTimeout(timeoutId)
+        const isTimeout = sdkErr instanceof DOMException && sdkErr.name === 'AbortError'
+        const msg = isTimeout ? 'ZAI SDK edit timed out' : `ZAI SDK error: ${sdkErr instanceof Error ? sdkErr.message.substring(0, 150) : String(sdkErr).substring(0, 150)}`
+        console.log(`[virtual-tryon] ZAI SDK edit failed: ${msg}`)
+        if (isTimeout) return { success: false, error: msg }
+        // Fall through to raw HTTP approach as backup
+      }
+    }
+  } catch (createErr) {
+    console.log(`[virtual-tryon] ZAI SDK creation failed: ${createErr instanceof Error ? createErr.message.substring(0, 100) : String(createErr).substring(0, 100)}`)
+    // Fall through to raw HTTP approach
+  }
+
+  // v43: APPROACH 2 — Raw HTTP fallback (in case SDK creation fails on Vercel)
+  // Still uses selfie as `image` param (not `images` array) for face preservation
   const url = `${config_obj.baseUrl}/images/generations/edit`
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -1269,9 +1358,22 @@ async function callZAIImageEdit(
   if (config_obj.userId) headers['X-User-Id'] = config_obj.userId
   if (config_obj.token) headers['X-Token'] = config_obj.token
 
-  const requestBody = { prompt, images, size: catConfig.size }
+  // v43: Send `image` (selfie) as the PRIMARY base image + `images` array as secondary
+  const requestBody: Record<string, any> = {
+    prompt,
+    image: input.selfieData,  // SELFIE = base image → FACE PRESERVED
+    size: catConfig.size,
+  }
+  if (hasProductImage) {
+    requestBody.images = [input.selfieData, input.productImageBase64]
+  }
+
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), remaining)
+  const remaining2 = deadline - Date.now() - 3_000
+  if (remaining2 < 8_000) {
+    return { success: false, error: `insufficient time for ZAI raw HTTP (${remaining2}ms)` }
+  }
+  const timeoutId2 = setTimeout(() => controller.abort(), Math.min(remaining, remaining2))
 
   try {
     const start = Date.now()
@@ -1281,24 +1383,18 @@ async function callZAIImageEdit(
       body: JSON.stringify(requestBody),
       signal: controller.signal,
     })
-    clearTimeout(timeoutId)
+    clearTimeout(timeoutId2)
     const elapsed = ((Date.now() - start) / 1000).toFixed(1)
 
     if (!res.ok) {
       const errBody = await res.text().catch(() => 'unknown')
-      console.log(`[virtual-tryon] ZAI API HTTP ${res.status} after ${elapsed}s: ${errBody.substring(0, 300)}`)
-      // v42: If we get a 401/403 with the hardcoded key, the API might need
-      // auth headers. Try again with chatId/userId/token if available.
-      if ((res.status === 401 || res.status === 403) && config_obj.chatId) {
-        console.log(`[virtual-tryon] v42: Auth failed with basic key, chatId was empty — this is expected on Vercel with hardcoded fallback`)
-      }
+      console.log(`[virtual-tryon] ZAI raw HTTP ${res.status} after ${elapsed}s: ${errBody.substring(0, 300)}`)
       return { success: false, error: `ZAI API HTTP ${res.status}: ${errBody.substring(0, 150)}` }
     }
 
     const result = await res.json() as any
     const item = result?.data?.[0]
     if (!item) {
-      // v41: Log the actual response structure to debug "no image data" errors
       const resultKeys = result ? Object.keys(result).join(',') : 'null'
       const dataLen = Array.isArray(result?.data) ? result.data.length : 'not-array'
       const errorDetail = result?.error || result?.message || ''
@@ -1311,12 +1407,12 @@ async function callZAIImageEdit(
       if (item.format === 'jpeg' || item.format === 'jpg') mime = 'image/jpeg'
       else if (item.format === 'webp') mime = 'image/webp'
       const dataUrl = `data:${mime};base64,${item.base64}`
-      console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded (base64) in ${elapsed}s`)
+      console.log(`[virtual-tryon] ✅ ZAI raw HTTP (${strategyName}) succeeded in ${elapsed}s`)
       return { success: true, imageUrl: dataUrl }
     }
 
     if (item.url) {
-      const downloadTimeout = Math.min(20_000, deadline - Date.now() - 2_000)
+      const downloadTimeout = Math.min(15_000, deadline - Date.now() - 2_000)
       if (downloadTimeout < 5_000) {
         return { success: false, error: `insufficient time to download ZAI image` }
       }
@@ -1325,16 +1421,16 @@ async function callZAIImageEdit(
         return { success: false, error: `ZAI image download failed` }
       }
       const dataUrl = `data:${downloaded.mime};base64,${downloaded.buffer.toString('base64')}`
-      console.log(`[virtual-tryon] ✅ ZAI ${strategyName} succeeded (url→download) in ${elapsed}s`)
+      console.log(`[virtual-tryon] ✅ ZAI raw HTTP (${strategyName}) succeeded (url→download) in ${elapsed}s`)
       return { success: true, imageUrl: dataUrl }
     }
 
     return { success: false, error: `ZAI response had neither base64 nor url` }
   } catch (err) {
-    clearTimeout(timeoutId)
+    clearTimeout(timeoutId2)
     const isTimeout = err instanceof DOMException && err.name === 'AbortError'
-    const msg = isTimeout ? `ZAI edit timed out (${remaining}ms)` : `ZAI error: ${(err as Error).message.substring(0, 150)}`
-    console.log(`[virtual-tryon] ZAI ${strategyName} failed: ${msg}`)
+    const msg = isTimeout ? `ZAI edit timed out` : `ZAI error: ${(err as Error).message.substring(0, 150)}`
+    console.log(`[virtual-tryon] ZAI raw HTTP (${strategyName}) failed: ${msg}`)
     return { success: false, error: msg }
   }
 }
@@ -1632,10 +1728,10 @@ export async function isTryOnServiceReady(): Promise<{
     ready: true,
     engine: `v41-${engineName}`,
     reason: hasZAI
-      ? 'v41: ZAI image-edit (edit-both) — PRIMARY for ALL categories. Preserves face & renders exact product with AI-based draping. Works on Vercel too!'
+      ? 'v43: ZAI image-edit (edit-selfie, face-preserving) — PRIMARY for ALL categories. Preserves face & renders exact product with AI-based draping. Works on Vercel too!'
       : isVercel
         ? `v41: Sarees: FLUX Kontext + Colour Transfer. Jewelry: Image Composite (real product) — SET ZAI env vars for AI draping! Watches: FLUX Kontext. Garments: IDM-VTON. Showcase Composite is the 100% reliable ultimate fallback.`
-        : 'v41: ZAI image-edit (edit-both) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
+        : 'v43: ZAI image-edit (edit-selfie, face-preserving) — preserves your face & renders the exact product for ALL categories including sarees and jewelry.',
   }
 }
 
@@ -1654,7 +1750,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   const hasHF = isFluxKontextReady()
 
   const zaiConfig = getZAIConfig()
-  console.log(`[virtual-tryon] v42 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasZAI=${!!zaiConfig}, zaiBaseUrl=${zaiConfig?.baseUrl || 'none'}, hasGeminiKey=${hasGeminiKey}, hasCF=${hasCF}, hasHF=${hasHF}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+  console.log(`[virtual-tryon] v43 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasZAI=${!!zaiConfig}, zaiBaseUrl=${zaiConfig?.baseUrl || 'none'}, hasGeminiKey=${hasGeminiKey}, hasCF=${hasCF}, hasHF=${hasHF}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
 
   if (!input.selfieData?.startsWith('data:image/')) {
     return {
@@ -1797,14 +1893,15 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ── ZAI image-edit is PRIMARY (handles ALL categories) ──
-  // v42: ALWAYS RUNS — even on Vercel! The hardcoded public API fallback
-  // (api.z.ai/api/v1) ensures ZAI config is ALWAYS available.
+  // v43: ALWAYS RUNS — even on Vercel! Uses selfie as `image` param
+  // (the base image to EDIT) which PRESERVES the person's face.
+  // Also sends `images` array [selfie, product] for product reference.
   // This is the BEST strategy for ALL categories (sarees, jewelry, garments,
-  // accessories) — it accepts BOTH selfie + product images and does proper
-  // AI-based draping (not just overlay).
+  // accessories) — it edits the selfie while preserving face identity AND
+  // rendering the product accurately from the prompt + product reference.
   if (zaiConfig && !strategiesAttempted.includes('zai-image-edit') && Date.now() < aiDeadline - 12_000) {
     strategiesAttempted.push('zai-image-edit')
-    console.log(`[virtual-tryon] v42 Strategy 0: ZAI image-edit (edit-both) — PRIMARY (Vercel=${isVercel}, baseUrl=${zaiConfig.baseUrl})`)
+    console.log(`[virtual-tryon] v43 Strategy 0: ZAI image-edit (edit-selfie, face-preserving) — PRIMARY (Vercel=${isVercel}, baseUrl=${zaiConfig.baseUrl})`)
     const result = await callZAIImageEdit(input, totalDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
