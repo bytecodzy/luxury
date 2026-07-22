@@ -38,3 +38,41 @@ Stage Summary:
 - Frontend catch block for abort/timeout now tries canvas fallback
 - Both local and Vercel deployments should work
 - Vercel deployment triggered via GitHub push
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: v43 — Fix face accuracy in virtual try-on (selfie face not matching in AI output)
+
+Work Log:
+- User reported: "saree draping is perfect but the person face is not accurate as per the uploaded selfie"
+- Analyzed ZAI SDK (z-ai-web-dev-sdk) type definitions: images.generations.edit() takes image (singular) param, NOT images array
+- ROOT CAUSE: Previous code sent images: [selfie, product] array to the edit API, but the edit API expects image (singular) as the base image to EDIT. When selfie is image, the API preserves the face.
+- Refactored callZAIImageEdit() to send image: selfieData as PRIMARY base image + images: [selfieData, productImageBase64] as secondary reference
+- Added createZAIInstance() helper function (uses ZAI.create() for auto-discovery)
+- Updated buildEditPrompt() with stronger face-preservation prompt
+- Pushed to GitHub (commit cc4e6c3), Vercel auto-deployed
+
+Stage Summary:
+- ZAI image-edit now sends selfie as image param (face-preserving edit)
+- Vercel deployment verified: v43 AI Virtual Try-On ready
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Luxury homepage redesign — full-screen hero, premium sections, elegant styling
+
+Work Log:
+- Redesigned HeroSection: Full-viewport (92vh) immersive hero with cinematic Ken Burns zoom, floating golden particles, ornamental diamond divider, trust badges, scroll-down indicator, rounded CTA buttons with sweep animation
+- Redesigned page.tsx: Added LuxuryDivider ornamental section separators, LuxuryPromoBanner for AI Virtual Try-On, luxury spacing
+- Enhanced ProductGrid: Premium section headers with uppercase tracking, improved spacing
+- Enhanced CategoryGrid: Softer borders, rounded-xl icons, uppercase labels
+- Added CSS: luxury-card, luxury-sweep, luxury-fade-in, gold-pulse, golden scrollbar
+- Pushed to GitHub (commit 32c9e8e), Vercel auto-deployed and verified
+
+Stage Summary:
+- Full-screen immersive hero with cinematic animations
+- Luxury ornamental dividers between all sections
+- AI Virtual Try-On promo banner with live indicator
+- Premium typography and enhanced hover effects
+- Vercel deployment verified and live
