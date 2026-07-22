@@ -1,17 +1,16 @@
 /**
- * AI Virtual Try-On API v43 — ZAI PRIMARY (face-preserving edit, works on Vercel)
+ * AI Virtual Try-On API v46 — ZAI SDK DIRECT + Proxy (face-preserving, reliable on Vercel)
  *
  * Strategy (see src/lib/virtual-tryon.ts):
  *
- * v43 (CURRENT) — ZAI PRIMARY with FACE PRESERVATION:
+ * v46 (CURRENT) — ZAI SDK DIRECT + PROXY FALLBACK:
  *
- *   v43 FIX (face accuracy):
- *   - Sends selfie as the `image` parameter (base image to EDIT)
- *     → ZAI edit API PRESERVES the person's face from the selfie
- *   - Also sends `images` array [selfie, product] as secondary reference
- *     → API can see the product for accurate draping
- *   - Stronger face-preservation prompt
- *   - Uses ZAI SDK's images.generations.edit() properly
+ *   v46 FIX (proxy reliability):
+ *   - On Vercel, tries ZAI SDK directly FIRST (using ZAI_BASE_URL + ZAI_API_KEY env vars)
+ *   - Falls back to ai-proxy (ZAI_PROXY_URL) if SDK direct fails
+ *   - Previous v45 only used proxy on Vercel — but proxy keeps crashing
+ *   - v43 FIX still in effect: selfie as singular `image` param (face preserved)
+ *
  *
  *   On VERCEL (production):
  *     0. ★ ZAI image-edit (PRIMARY — selfie as `image` = face preserved!) ★
@@ -247,7 +246,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       available: true,
       spaceAwake: awake,
-      message: 'v43 AI ready — ZAI image-edit PRIMARY (face-preserving, works on Vercel!). Fallbacks: FLUX Kontext, Image Composite, Showcase Composite. Free forever.',
+      message: 'v46 AI ready — ZAI SDK DIRECT + proxy fallback (face-preserving, reliable on Vercel!). Fallbacks: FLUX Kontext, Image Composite, Showcase Composite. Free forever.',
     })
   }
 
@@ -262,13 +261,13 @@ export async function GET(request: NextRequest) {
   if (process.env.HF_TOKEN) engines.push('FLUX-Kontext')
   if (isVercel) engines.push('IDM-VTON', 'Image-Composite', 'Showcase-Composite')
   else engines.push('ZAI-image-edit')
-  const engine = `v43-${engines.join('+')}`
+  const engine = `v46-${engines.join('+')}`
   return NextResponse.json({
     available: true,
     spaceAwake: statusResult.awake,
     mode: engine,
     message: isVercel
-      ? `v43 AI Virtual Try-On ready — ZAI image-edit PRIMARY (face-preserving, selfie as base image). ${engines.join(', ')} as fallbacks. Showcase Composite ALWAYS runs (100% reliable fallback).`
-      : 'v43 AI Virtual Try-On ready — ZAI image-edit (selfie as base image, preserves face & renders exact product for ALL categories including sarees and jewelry).',
+      ? `v46 AI Virtual Try-On ready — ZAI SDK DIRECT + proxy fallback (face-preserving, selfie as base image). ${engines.join(', ')} as fallbacks. Showcase Composite ALWAYS runs (100% reliable fallback).`
+      : 'v46 AI Virtual Try-On ready — ZAI image-edit (selfie as base image, preserves face & renders exact product for ALL categories including sarees and jewelry).',
   })
 }

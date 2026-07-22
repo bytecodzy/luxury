@@ -1255,48 +1255,33 @@ async function callZAIImageEdit(
     return { success: false, error: `insufficient time budget (${remaining}ms) for ZAI edit` }
   }
 
-  console.log(`[virtual-tryon] v45 ZAI image-edit (${strategyName}): ${catConfig.size}, timeout=${remaining}ms, Vercel=${isVercel}, hasProxy=${!!proxyUrl}`)
+  console.log(`[virtual-tryon] v46 ZAI image-edit (${strategyName}): ${catConfig.size}, timeout=${remaining}ms, Vercel=${isVercel}, hasProxy=${!!proxyUrl}`)
 
   // ═══════════════════════════════════════════════════════════════════
-  //  v45: VERCEL → Route through ai-proxy via gateway
+  //  v46: Try ZAI SDK directly FIRST (works on Vercel with env vars)
+  //  Then try proxy (ZAI_PROXY_URL) as fallback.
   //
-  //  On Vercel, internal-api.z.ai resolves to PRIVATE IPs (172.25.x.x)
-  //  that are NOT reachable from Vercel's servers. The ai-proxy service
-  //  on port 3030 in the sandbox has DIRECT access to the ZAI API via
-  //  the .z-ai-config file. We route image-edit requests through the
-  //  gateway (ZAI_PROXY_URL + XTransformPort=3030) to reach the
-  //  ai-proxy's /api/image-edit endpoint, which uses the ZAI SDK
-  //  directly and returns the result synchronously.
+  //  Previous v45 ONLY used proxy on Vercel. But the ai-proxy mini-service
+  //  keeps crashing, and the Caddy gateway routing returns 502. Now we try
+  //  the ZAI SDK directly using environment variables (ZAI_BASE_URL,
+  //  ZAI_API_KEY, etc.) first, then fall back to the proxy if the direct
+  //  call fails (e.g., if internal-api.z.ai is unreachable from Vercel).
   //
-  //  The gateway URL format:
-  //    https://<hostname>.space-z.ai/api/image-edit?XTransformPort=3030
-  //  Plus 'Abc' header = hostname prefix (for .space-z.ai auth)
+  //  This gives us TWO chances to succeed before falling to showcase:
+  //    1. ZAI SDK direct (env vars) — works if API is reachable from Vercel
+  //    2. ZAI proxy (ZAI_PROXY_URL) — works if sandbox gateway is reachable
   // ═══════════════════════════════════════════════════════════════════
-  if (isVercel && proxyUrl) {
-    console.log(`[virtual-tryon] v45: Routing through ai-proxy at ${proxyUrl.substring(0, 50)}...`)
-    // v43 FIX: Pass selfie as singular `image` to the proxy
-    return await callAIProxyImageEdit(prompt, input.selfieData, catConfig.size, strategyName, proxyUrl, remaining)
-  }
 
-  // ═══════════════════════════════════════════════════════════════════
-  //  v45: SANDBOX → Use ZAI SDK directly
-  //
-  //  In the sandbox, we have DIRECT access to the ZAI API via the
-  //  .z-ai-config file. The ZAI SDK (z-ai-web-dev-sdk) handles auth,
-  //  URL routing, and image downloading automatically. This is more
-  //  reliable than raw HTTP calls because:
-  //  1. The SDK handles auth tokens, chat IDs, etc. automatically
-  //  2. The SDK downloads URL-based responses and converts to base64
-  //  3. The SDK handles error formatting consistently
-  // ═══════════════════════════════════════════════════════════════════
-  console.log(`[virtual-tryon] v45: Using ZAI SDK directly (sandbox mode)`)
-
+  // ── Step 1: Try ZAI SDK directly (works on both Vercel and sandbox) ──
   try {
     const zai = await createZAIFromLib()
     const start = Date.now()
 
+    console.log(`[virtual-tryon] v46: Trying ZAI SDK directly (Vercel=${isVercel})`)
+
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), remaining)
+    const sdkTimeout = Math.min(remaining, 25_000) // 25s for SDK, rest for proxy fallback
+    const timeoutId = setTimeout(() => controller.abort(), sdkTimeout)
 
     // Race the SDK call against the timeout
     // v43 FIX: Use `image` (singular) — selfie as base image for face preservation
@@ -1307,7 +1292,7 @@ async function callZAIImageEdit(
         size: catConfig.size,
       }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`ZAI edit timed out (${remaining}ms)`)), remaining)
+        setTimeout(() => reject(new Error(`ZAI SDK timed out (${sdkTimeout}ms)`)), sdkTimeout)
       ),
     ])
 
@@ -1327,27 +1312,43 @@ async function callZAIImageEdit(
     if (response?.data?.[0]?.url) {
       const downloadTimeout = Math.min(20_000, deadline - Date.now() - 2_000)
       if (downloadTimeout < 5_000) {
-        return { success: false, error: `insufficient time to download ZAI image` }
+        // Don't return failure yet — try proxy next
+        console.log(`[virtual-tryon] ZAI SDK returned URL but insufficient time to download, trying proxy...`)
+      } else {
+        const downloaded = await downloadZAIImage(response.data[0].url, downloadTimeout)
+        if (downloaded) {
+          const dataUrl = `data:${downloaded.mime};base64,${downloaded.buffer.toString('base64')}`
+          console.log(`[virtual-tryon] ✅ ZAI SDK ${strategyName} succeeded (url→download) in ${elapsed}s`)
+          return { success: true, imageUrl: dataUrl, strategy: `zai-sdk-${strategyName}` }
+        }
       }
-      const downloaded = await downloadZAIImage(response.data[0].url, downloadTimeout)
-      if (!downloaded) {
-        return { success: false, error: `ZAI image download failed` }
-      }
-      const dataUrl = `data:${downloaded.mime};base64,${downloaded.buffer.toString('base64')}`
-      console.log(`[virtual-tryon] ✅ ZAI SDK ${strategyName} succeeded (url→download) in ${elapsed}s`)
-      return { success: true, imageUrl: dataUrl, strategy: `zai-sdk-${strategyName}` }
     }
 
-    // No image data
+    // No image data from SDK
     const resultKeys = response ? Object.keys(response).join(',') : 'null'
     const dataLen = Array.isArray(response?.data) ? response.data.length : 'not-array'
-    console.log(`[virtual-tryon] ZAI SDK response debug: keys=[${resultKeys}], data.len=${dataLen}`)
-    return { success: false, error: `ZAI returned no image data after ${elapsed}s (keys=[${resultKeys}], dataLen=${dataLen})` }
-  } catch (err) {
-    const msg = (err as Error).message?.substring(0, 150) || 'Unknown ZAI error'
-    console.log(`[virtual-tryon] ZAI SDK ${strategyName} failed: ${msg}`)
-    return { success: false, error: msg }
+    console.log(`[virtual-tryon] ZAI SDK direct failed: no image data (keys=[${resultKeys}], dataLen=${dataLen})`)
+  } catch (sdkErr) {
+    const msg = (sdkErr as Error).message?.substring(0, 150) || 'Unknown ZAI SDK error'
+    console.log(`[virtual-tryon] ZAI SDK direct failed: ${msg}`)
   }
+
+  // ── Step 2: Try proxy (ZAI_PROXY_URL) if SDK direct failed ──
+  // v46: Only try proxy if we still have time left and the proxy URL is set
+  if (proxyUrl) {
+    const proxyRemaining = deadline - Date.now() - 3_000
+    if (proxyRemaining > 10_000) {
+      console.log(`[virtual-tryon] v46: SDK direct failed, trying proxy at ${proxyUrl.substring(0, 50)}... (remaining=${proxyRemaining}ms)`)
+      const proxyResult = await callAIProxyImageEdit(prompt, input.selfieData, catConfig.size, strategyName, proxyUrl, proxyRemaining)
+      if (proxyResult.success) return proxyResult
+      console.log(`[virtual-tryon] Proxy also failed: ${proxyResult.error?.substring(0, 100)}`)
+    } else {
+      console.log(`[virtual-tryon] v46: Not enough time for proxy fallback (${proxyRemaining}ms remaining)`)
+    }
+  }
+
+  // Both paths failed
+  return { success: false, error: `ZAI image-edit failed (both SDK and proxy paths)` }
 }
 
 // ── v45: Route image-edit through ai-proxy (for Vercel) ──────────
@@ -1753,7 +1754,7 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
 
   const zaiConfig = getZAIConfig()
   const hasProxyUrl = !!process.env.ZAI_PROXY_URL
-  console.log(`[virtual-tryon] v45 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasZAIConfig=${!!zaiConfig}, hasProxyUrl=${hasProxyUrl}, hasGeminiKey=${hasGeminiKey}, hasCF=${hasCF}, hasHF=${hasHF}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
+  console.log(`[virtual-tryon] v46 start: "${input.productName}" (${input.categorySlug}) — VERCEL=${isVercel}, hasZAIConfig=${!!zaiConfig}, hasProxyUrl=${hasProxyUrl}, hasGeminiKey=${hasGeminiKey}, hasCF=${hasCF}, hasHF=${hasHF}, hasSelfie=${!!input.selfieData}, hasProductImg=${!!input.productImageBase64}`)
 
   if (!input.selfieData?.startsWith('data:image/')) {
     return {
@@ -1893,15 +1894,17 @@ export async function performVirtualTryOn(input: TryOnInput): Promise<TryOnResul
   }
 
   // ── ZAI image-edit is PRIMARY (handles ALL categories) ──
-  // v45: On Vercel, routes through ai-proxy via gateway (ZAI_PROXY_URL).
-  // On sandbox, uses ZAI SDK directly (via .z-ai-config auto-discovery).
-  // This is the BEST strategy for ALL categories — it accepts BOTH selfie +
-  // product images and does proper AI-based draping (not just overlay).
-  const hasZAIAccess = isVercel ? !!process.env.ZAI_PROXY_URL : !!zaiConfig
+  // v46: On Vercel, tries ZAI SDK DIRECTLY first (using env vars), then proxy.
+  // Previously (v45), on Vercel ONLY the proxy path was available. But the
+  // ai-proxy mini-service keeps crashing, and the Caddy gateway routing is
+  // broken (502). Now we try DIRECT SDK calls first (ZAI_BASE_URL env vars),
+  // then fall back to the proxy (ZAI_PROXY_URL). This makes ZAI work even
+  // when the proxy is down.
+  const hasZAIAccess = isVercel ? (!!zaiConfig || hasProxyUrl) : !!zaiConfig
   if (hasZAIAccess && !strategiesAttempted.includes('zai-image-edit') && Date.now() < aiDeadline - 15_000) {
     strategiesAttempted.push('zai-image-edit')
-    const modeLabel = isVercel ? 'ai-proxy' : 'SDK-direct'
-    console.log(`[virtual-tryon] v45 Strategy 0: ZAI image-edit (${modeLabel}) — PRIMARY (Vercel=${isVercel})`)
+    const modeLabel = !!zaiConfig ? 'SDK-direct' : 'ai-proxy'
+    console.log(`[virtual-tryon] v46 Strategy 0: ZAI image-edit (${modeLabel}) — PRIMARY (Vercel=${isVercel}, hasConfig=${!!zaiConfig}, hasProxy=${hasProxyUrl})`)
     const result = await callZAIImageEdit(input, totalDeadline)
     if (result.success && result.imageUrl) {
       const elapsed = Date.now() - totalStart
