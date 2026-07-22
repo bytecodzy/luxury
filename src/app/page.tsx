@@ -5,8 +5,6 @@ import { QueryProvider } from '@/lib/query-provider';
 import { Header } from '@/components/header';
 import { Footer } from '@/components/footer';
 import { HeroSection } from '@/components/hero-section';
-import { CategoryGrid } from '@/components/category-grid';
-import { ProductGrid } from '@/components/product-grid';
 import { FeaturedProductsSection } from '@/components/featured-products-section';
 import { ProductDetail } from '@/components/product-detail';
 import { CartView } from '@/components/cart-view';
@@ -22,13 +20,10 @@ import { CorporateDashboard } from '@/components/corporate-dashboard';
 import { SecurityPolicy } from '@/components/security-policy';
 import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
-import { AppDownloadSection } from '@/components/app-download-section';
 import { AboutPortalSection } from '@/components/about-portal-section';
-import { HowItWorksSection } from '@/components/how-it-works-section';
 import { WhyChooseSection } from '@/components/why-choose-section';
 import { AppDownloadBanner } from '@/components/app-download-banner';
 import { FamilyPackSection } from '@/components/family-pack-section';
-import { StyleGallerySection } from '@/components/style-gallery-section';
 import { SocialConnectionsSection } from '@/components/social-connections-section';
 import { ThreeboxesCurateSection } from '@/components/threeboxes-curate-section';
 import { ToastContainer } from '@/hooks/use-toast-notification';
@@ -93,63 +88,9 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-// ── Luxury Section Divider (theme-aware) ──
-function LuxuryDivider() {
-  return (
-    <div className="flex items-center justify-center gap-4 py-2">
-      <div className="h-px flex-1 bg-gradient-to-r from-transparent to-amber-500/15" />
-      <div className="flex items-center gap-2">
-        <div className="h-1 w-1 rotate-45 luxury-accent-bg opacity-30" />
-        <div className="h-px w-8 luxury-accent-bg opacity-25" />
-        <div className="h-1.5 w-1.5 rotate-45 border luxury-accent-border luxury-glow-bg" style={{ opacity: 0.6 }} />
-        <div className="h-px w-8 luxury-accent-bg opacity-25" />
-        <div className="h-1 w-1 rotate-45 luxury-accent-bg opacity-30" />
-      </div>
-      <div className="h-px flex-1 bg-gradient-to-l from-transparent to-amber-500/15" />
-    </div>
-  );
-}
 
-// ── Luxury Promo Banner (theme-aware) ──
-function LuxuryPromoBanner() {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      transition={{ duration: 0.6 }}
-      className="relative overflow-hidden rounded-2xl border border-amber-500/15 bg-gradient-to-r from-amber-900/20 via-amber-800/10 to-amber-900/20 backdrop-blur-sm"
-    >
-      {/* Decorative shimmer line */}
-      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-400/30 to-transparent" />
-      
-      <div className="flex flex-col items-center gap-4 px-6 py-8 text-center sm:flex-row sm:text-left sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] luxury-accent-text" style={{ opacity: 0.7 }}>
-            AI-Powered Experience
-          </p>
-          <h3 className="mt-1 text-lg font-bold text-amber-100 sm:text-xl">
-            Virtual Try-On with AI Style Preview
-          </h3>
-          <p className="mt-1 max-w-md text-sm text-amber-200/45">
-            See how luxury looks on you before you buy. Upload a selfie and let our AI drape sarees, jewelry & more — with your face preserved.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 luxury-glow-bg px-4 py-2 text-xs font-medium luxury-accent-text">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Live on all products
-          </span>
-        </div>
-      </div>
 
-      {/* Bottom shimmer line */}
-      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-400/20 to-transparent" />
-    </motion.div>
-  );
-}
-
-// ── Home page sections — simplified: Hero, About, How It Works, Promo, Categories, Featured Products, Why Choose, Style Gallery, App Download ──
+// ── Home page sections — Olight-style minimal: Hero, Products, About, Why Choose ──
 
 function HomeSections() {
   return (
@@ -159,64 +100,28 @@ function HomeSections() {
         <HeroSection />
       </ErrorBoundary>
 
-      {/* Content below hero with luxury spacing */}
-      <div className="mt-8 space-y-2 sm:mt-12">
-        {/* 2. About Portal Section */}
-        <div id="about-portal-section">
-          <ErrorBoundary fallback={null}>
-            <AboutPortalSection />
-          </ErrorBoundary>
-        </div>
-
-        <LuxuryDivider />
-
-        {/* 3. How It Works Section */}
-        <ErrorBoundary fallback={null}>
-          <HowItWorksSection />
-        </ErrorBoundary>
-
-        <LuxuryDivider />
-
-        {/* 4. Promo Banner */}
-        <ErrorBoundary fallback={null}>
-          <LuxuryPromoBanner />
-        </ErrorBoundary>
-
-        <LuxuryDivider />
-
-        {/* 5. Category sub-navigation */}
-        <ErrorBoundary fallback={null}>
-          <CategoryGrid />
-        </ErrorBoundary>
-
-        <LuxuryDivider />
-
-        {/* 6. Featured Products — NEW showcase layout */}
+      {/* 2. Featured Products */}
+      <div className="py-12 sm:py-16">
         <div id="products-section">
           <ErrorBoundary fallback={null}>
             <FeaturedProductsSection />
           </ErrorBoundary>
         </div>
+      </div>
 
-        <LuxuryDivider />
+      {/* 3. About Portal Section */}
+      <div className="py-12 sm:py-16">
+        <div id="about-portal-section">
+          <ErrorBoundary fallback={null}>
+            <AboutPortalSection />
+          </ErrorBoundary>
+        </div>
+      </div>
 
-        {/* 7. Why Choose Us Section */}
+      {/* 4. Why Choose Us */}
+      <div className="py-12 sm:py-16">
         <ErrorBoundary fallback={null}>
           <WhyChooseSection />
-        </ErrorBoundary>
-
-        <LuxuryDivider />
-
-        {/* 8. AI Style Gallery */}
-        <ErrorBoundary fallback={null}>
-          <StyleGallerySection />
-        </ErrorBoundary>
-
-        <LuxuryDivider />
-
-        {/* 9. App Download Section */}
-        <ErrorBoundary fallback={null}>
-          <AppDownloadSection />
         </ErrorBoundary>
       </div>
     </>

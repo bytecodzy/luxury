@@ -1,20 +1,21 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Urbanist, Lora } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const urbanist = Urbanist({
+  variable: "--font-body",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const lora = Lora({
+  variable: "--font-heading",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
 export const viewport: Viewport = {
-  themeColor: "#d4a437",
+  themeColor: "#dbaf36",
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
@@ -70,11 +71,11 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="3 BOXES LUXURY" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-        <meta name="msapplication-TileColor" content="#d4a437" />
+        <meta name="msapplication-TileColor" content="#dbaf36" />
         <meta name="msapplication-TileImage" content="/icons/icon-512.png" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${urbanist.variable} ${lora.variable} antialiased`}
       >
         {children}
         <Toaster />

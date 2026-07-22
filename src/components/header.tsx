@@ -134,7 +134,7 @@ export function Header() {
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
 
   const themeColors: { id: ThemeColor; label: string; color: string }[] = [
-    { id: 'royal-gold', label: 'Royal Gold', color: '#d4a437' },
+    { id: 'royal-gold', label: 'Royal Gold', color: '#dbaf36' },
     { id: 'rose-elegance', label: 'Rose Elegance', color: '#e11d48' },
     { id: 'emerald-luxe', label: 'Emerald Luxe', color: '#059669' },
     { id: 'sapphire-classic', label: 'Sapphire Classic', color: '#2563eb' },
@@ -210,12 +210,12 @@ export function Header() {
                 className={`h-20 w-20 object-contain sm:h-24 sm:w-24 ${
                   appTheme === 'light'
                     ? 'contrast-110 brightness-95 saturate-130'
-                    : 'contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]'
+                    : 'contrast-130 brightness-110 saturate-120'
                 }`}
                 priority
               />
             </div>
-            <h1 className="gold-shimmer text-2xl font-bold tracking-widest sm:text-3xl hidden sm:block ml-1">
+            <h1 className="gold-shimmer text-2xl font-bold tracking-widest sm:text-3xl hidden sm:block ml-1" style={{ fontFamily: 'Urbanist, sans-serif' }}>
               3 BOXES LUXURY
             </h1>
           </button>
@@ -455,7 +455,7 @@ export function Header() {
                       className={`h-14 w-14 object-contain ${
                         appTheme === 'light'
                           ? 'contrast-110 brightness-95 saturate-130'
-                          : 'contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]'
+                          : 'contrast-130 brightness-110 saturate-120'
                       }`}
                     />
                   </div>
@@ -651,7 +651,7 @@ export function Header() {
       <div className={`border-t ${appTheme === 'light' ? 'border-amber-200/40 bg-white/95' : 'border-amber-900/20 bg-stone-950/90'}`}>
         <div className="container mx-auto px-4">
           {/* Desktop: horizontal row with hover/click dropdowns */}
-          <nav className="hidden md:flex items-center gap-0.5" aria-label="Category navigation">
+          <nav className="hidden md:flex items-center gap-0.5" aria-label="Category navigation" style={{ fontFamily: 'Urbanist, sans-serif' }}>
             {CATEGORY_NAV.map((cat) => {
               const Icon = cat.icon;
               const hasChildren = cat.children.length > 0;
@@ -689,6 +689,7 @@ export function Header() {
                         ? 'bg-amber-900/30 text-amber-300'
                         : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-300'
                     }`}
+                    style={{ fontFamily: 'Urbanist, sans-serif' }}
                   >
                     <Icon className="h-4 w-4" />
                     {cat.name}
@@ -726,6 +727,7 @@ export function Header() {
                         ? 'bg-amber-900/30 text-amber-300'
                         : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-300'
                     }`}
+                    style={{ fontFamily: 'Urbanist, sans-serif' }}
                   >
                     <Icon className="h-4 w-4" />
                     {cat.name}
@@ -770,7 +772,7 @@ export function Header() {
           </nav>
 
           {/* Mobile: horizontal scrollable row without dropdowns */}
-          <nav className="md:hidden flex items-center gap-1 overflow-x-auto py-2 scrollbar-thin" aria-label="Category navigation">
+          <nav className="md:hidden flex items-center gap-1 overflow-x-auto py-2 scrollbar-thin" aria-label="Category navigation" style={{ fontFamily: 'Urbanist, sans-serif' }}>
             {CATEGORY_NAV.map((cat) => {
               const Icon = cat.icon;
               const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
