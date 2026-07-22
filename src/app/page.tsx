@@ -7,6 +7,7 @@ import { Footer } from '@/components/footer';
 import { HeroSection } from '@/components/hero-section';
 import { CategoryGrid } from '@/components/category-grid';
 import { ProductGrid } from '@/components/product-grid';
+import { FeaturedProductsSection } from '@/components/featured-products-section';
 import { ProductDetail } from '@/components/product-detail';
 import { CartView } from '@/components/cart-view';
 import { CheckoutView } from '@/components/checkout-view';
@@ -148,7 +149,7 @@ function LuxuryPromoBanner() {
   );
 }
 
-// ── Home page sections (uses ErrorBoundary, so must be after it) ──
+// ── Home page sections — simplified: Hero, About, How It Works, Promo, Categories, Featured Products, Why Choose, Style Gallery, App Download ──
 
 function HomeSections() {
   return (
@@ -160,7 +161,7 @@ function HomeSections() {
 
       {/* Content below hero with luxury spacing */}
       <div className="mt-8 space-y-2 sm:mt-12">
-        {/* 2. About Portal Section (NEW) */}
+        {/* 2. About Portal Section */}
         <div id="about-portal-section">
           <ErrorBoundary fallback={null}>
             <AboutPortalSection />
@@ -169,14 +170,14 @@ function HomeSections() {
 
         <LuxuryDivider />
 
-        {/* 3. How It Works Section (NEW) */}
+        {/* 3. How It Works Section */}
         <ErrorBoundary fallback={null}>
           <HowItWorksSection />
         </ErrorBoundary>
 
         <LuxuryDivider />
 
-        {/* 4. Promo Banner (enhanced) */}
+        {/* 4. Promo Banner */}
         <ErrorBoundary fallback={null}>
           <LuxuryPromoBanner />
         </ErrorBoundary>
@@ -190,16 +191,16 @@ function HomeSections() {
 
         <LuxuryDivider />
 
-        {/* 6. Products */}
+        {/* 6. Featured Products — NEW showcase layout */}
         <div id="products-section">
           <ErrorBoundary fallback={null}>
-            <ProductGrid />
+            <FeaturedProductsSection />
           </ErrorBoundary>
         </div>
 
         <LuxuryDivider />
 
-        {/* 7. Why Choose Us Section (NEW) */}
+        {/* 7. Why Choose Us Section */}
         <ErrorBoundary fallback={null}>
           <WhyChooseSection />
         </ErrorBoundary>
@@ -213,39 +214,36 @@ function HomeSections() {
 
         <LuxuryDivider />
 
-        {/* 9. Family Pack Section */}
-        <div id="family-pack-section">
-          <ErrorBoundary fallback={null}>
-            <FamilyPackSection />
-          </ErrorBoundary>
-        </div>
-
-        <LuxuryDivider />
-
-        {/* 10. Social Connections Section */}
-        <div id="social-connections-section">
-          <ErrorBoundary fallback={null}>
-            <SocialConnectionsSection />
-          </ErrorBoundary>
-        </div>
-
-        <LuxuryDivider />
-        
-        {/* 11. 3BOXES Curate Section */}
-        <div id="3boxes-curate-section">
-          <ErrorBoundary fallback={null}>
-            <ThreeboxesCurateSection />
-          </ErrorBoundary>
-        </div>
-
-        <LuxuryDivider />
-
-        {/* 12. App Download Section (enhanced with Flutter) */}
+        {/* 9. App Download Section */}
         <ErrorBoundary fallback={null}>
           <AppDownloadSection />
         </ErrorBoundary>
       </div>
     </>
+  );
+}
+
+// ── Standalone page wrapper for sections moved off the home page ──
+
+function StandalonePageWrapper({ children, title, subtitle }: { children: React.ReactNode; title: string; subtitle: string }) {
+  const appTheme = useStore((s) => s.appTheme);
+  return (
+    <div className="py-8 sm:py-12">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="mb-8 text-center"
+      >
+        <h1 className={`text-3xl font-bold tracking-tight sm:text-4xl ${appTheme === 'light' ? 'text-stone-900' : 'text-amber-100'}`}>
+          {title}
+        </h1>
+        <p className={`mt-2 text-sm ${appTheme === 'light' ? 'text-stone-500/70' : 'text-amber-200/50'}`}>
+          {subtitle}
+        </p>
+      </motion.div>
+      {children}
+    </div>
   );
 }
 
@@ -300,6 +298,24 @@ function AppContent() {
         return <CorporateDashboard />;
       case 'security-policy':
         return <SecurityPolicy />;
+      case 'family-packs':
+        return (
+          <StandalonePageWrapper title="Family Gift Packs" subtitle="Pre-curated luxury gift bundles for every member of your family. Save up to 30%.">
+            <FamilyPackSection />
+          </StandalonePageWrapper>
+        );
+      case 'social-connections':
+        return (
+          <StandalonePageWrapper title="Social Connections" subtitle="Gift giving is better together. Connect with loved ones and make every celebration memorable.">
+            <SocialConnectionsSection />
+          </StandalonePageWrapper>
+        );
+      case '3boxes-curate':
+        return (
+          <StandalonePageWrapper title="3BOXES Curate" subtitle="Every piece handpicked by our expert curators. Explore collections that reflect the finest in luxury.">
+            <ThreeboxesCurateSection />
+          </StandalonePageWrapper>
+        );
       default:
         return <HomeSections />;
     }

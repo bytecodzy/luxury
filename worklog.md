@@ -19,7 +19,7 @@ Work Log:
 
 Stage Summary:
 - v46 code change: ZAI SDK direct + proxy fallback (no proxy-only dependency)
-- Vercel env vars updated with new token (REDACTED_TOKEN)
+- Vercel env vars updated with new token
 - Deployment LIVE: https://3boxes-luxury-v12.vercel.app/
 - Virtual try-on CONFIRMED WORKING — saree draped on selfie (not side-by-side)
 - Gemini strategy works when ZAI direct is unreachable from Vercel

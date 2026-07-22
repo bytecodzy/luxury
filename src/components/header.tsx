@@ -26,6 +26,7 @@ interface CategoryNavItem {
   icon: LucideIcon;
   children: CategoryChild[];
   scrollToId?: string; // If set, clicking scrolls to this section ID on the home page
+  viewId?: string; // If set, clicking navigates to this dedicated view page
 }
 
 const CATEGORY_NAV: CategoryNavItem[] = [
@@ -104,21 +105,21 @@ const CATEGORY_NAV: CategoryNavItem[] = [
     slug: 'family-packs',
     icon: Package,
     children: [],
-    scrollToId: 'family-pack-section',
+    viewId: 'family-packs',
   },
   {
     name: 'Social',
     slug: 'social-connections',
     icon: Users,
     children: [],
-    scrollToId: 'social-connections-section',
+    viewId: 'social-connections',
   },
   {
     name: 'Curate',
     slug: '3boxes-curate',
     icon: Crown,
     children: [],
-    scrollToId: '3boxes-curate-section',
+    viewId: '3boxes-curate',
   },
 ];
 
@@ -564,13 +565,8 @@ export function Header() {
                     <p className="px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest text-amber-400/50">Explore</p>
                     <button
                       onClick={() => {
-                        setView('home');
-                        setCategory(null);
+                        setView('family-packs');
                         setMobileMenuOpen(false);
-                        setTimeout(() => {
-                          const el = document.getElementById('family-pack-section');
-                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }, 100);
                       }}
                       className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
                     >
@@ -579,13 +575,8 @@ export function Header() {
                     </button>
                     <button
                       onClick={() => {
-                        setView('home');
-                        setCategory(null);
+                        setView('social-connections');
                         setMobileMenuOpen(false);
-                        setTimeout(() => {
-                          const el = document.getElementById('social-connections-section');
-                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }, 100);
                       }}
                       className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
                     >
@@ -594,13 +585,8 @@ export function Header() {
                     </button>
                     <button
                       onClick={() => {
-                        setView('home');
-                        setCategory(null);
+                        setView('3boxes-curate');
                         setMobileMenuOpen(false);
-                        setTimeout(() => {
-                          const el = document.getElementById('3boxes-curate-section');
-                          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }, 100);
                       }}
                       className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
                     >
@@ -671,9 +657,12 @@ export function Header() {
               const hasChildren = cat.children.length > 0;
               const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
 
-              // Helper: handle nav item click — either scroll to section or set category
+              // Helper: handle nav item click — navigate to view, scroll to section, or set category
               const handleNavClick = () => {
-                if (cat.scrollToId) {
+                if (cat.viewId) {
+                  // Navigate to dedicated view page (don't call setCategory — it forces view:'home')
+                  setView(cat.viewId as any);
+                } else if (cat.scrollToId) {
                   // Scroll to section on home page
                   setView('home');
                   setCategory(null);
@@ -703,9 +692,9 @@ export function Header() {
                   >
                     <Icon className="h-4 w-4" />
                     {cat.name}
-                    {cat.scrollToId && (
+                    {cat.viewId && (
                       <span className="ml-1 rounded bg-amber-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                        New
+                        Page
                       </span>
                     )}
                     {cat.slug === 'new-arrivals' && !cat.scrollToId && (
@@ -786,7 +775,9 @@ export function Header() {
               const Icon = cat.icon;
               const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
               const handleMobileNavClick = () => {
-                if (cat.scrollToId) {
+                if (cat.viewId) {
+                  setView(cat.viewId as any);
+                } else if (cat.scrollToId) {
                   setView('home');
                   setCategory(null);
                   setTimeout(() => {
