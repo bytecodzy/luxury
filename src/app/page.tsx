@@ -22,6 +22,9 @@ import { SecurityPolicy } from '@/components/security-policy';
 import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
 import { AppDownloadSection } from '@/components/app-download-section';
+import { AboutPortalSection } from '@/components/about-portal-section';
+import { HowItWorksSection } from '@/components/how-it-works-section';
+import { WhyChooseSection } from '@/components/why-choose-section';
 import { AppDownloadBanner } from '@/components/app-download-banner';
 import { FamilyPackSection } from '@/components/family-pack-section';
 import { StyleGallerySection } from '@/components/style-gallery-section';
@@ -89,30 +92,31 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-// ── Luxury Section Divider ──
+// ── Luxury Section Divider (theme-aware) ──
 function LuxuryDivider() {
   return (
     <div className="flex items-center justify-center gap-4 py-2">
       <div className="h-px flex-1 bg-gradient-to-r from-transparent to-amber-500/15" />
       <div className="flex items-center gap-2">
-        <div className="h-1 w-1 rotate-45 bg-amber-500/30" />
-        <div className="h-px w-8 bg-amber-500/25" />
-        <div className="h-1.5 w-1.5 rotate-45 border border-amber-500/40 bg-amber-500/20" />
-        <div className="h-px w-8 bg-amber-500/25" />
-        <div className="h-1 w-1 rotate-45 bg-amber-500/30" />
+        <div className="h-1 w-1 rotate-45 luxury-accent-bg opacity-30" />
+        <div className="h-px w-8 luxury-accent-bg opacity-25" />
+        <div className="h-1.5 w-1.5 rotate-45 border luxury-accent-border luxury-glow-bg" style={{ opacity: 0.6 }} />
+        <div className="h-px w-8 luxury-accent-bg opacity-25" />
+        <div className="h-1 w-1 rotate-45 luxury-accent-bg opacity-30" />
       </div>
       <div className="h-px flex-1 bg-gradient-to-l from-transparent to-amber-500/15" />
     </div>
   );
 }
 
-// ── Luxury Promo Banner ──
+// ── Luxury Promo Banner (theme-aware) ──
 function LuxuryPromoBanner() {
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay: 0.2 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      transition={{ duration: 0.6 }}
       className="relative overflow-hidden rounded-2xl border border-amber-500/15 bg-gradient-to-r from-amber-900/20 via-amber-800/10 to-amber-900/20 backdrop-blur-sm"
     >
       {/* Decorative shimmer line */}
@@ -120,7 +124,7 @@ function LuxuryPromoBanner() {
       
       <div className="flex flex-col items-center gap-4 px-6 py-8 text-center sm:flex-row sm:text-left sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-400/70">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] luxury-accent-text" style={{ opacity: 0.7 }}>
             AI-Powered Experience
           </p>
           <h3 className="mt-1 text-lg font-bold text-amber-100 sm:text-xl">
@@ -131,7 +135,7 @@ function LuxuryPromoBanner() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-300">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 luxury-glow-bg px-4 py-2 text-xs font-medium luxury-accent-text">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
             Live on all products
           </span>
@@ -149,28 +153,44 @@ function LuxuryPromoBanner() {
 function HomeSections() {
   return (
     <>
-      {/* Full-screen hero — no container wrapper needed */}
+      {/* 1. Full-screen hero */}
       <ErrorBoundary fallback={null}>
         <HeroSection />
       </ErrorBoundary>
 
       {/* Content below hero with luxury spacing */}
       <div className="mt-8 space-y-2 sm:mt-12">
-        {/* Promo Banner */}
+        {/* 2. About Portal Section (NEW) */}
+        <div id="about-portal-section">
+          <ErrorBoundary fallback={null}>
+            <AboutPortalSection />
+          </ErrorBoundary>
+        </div>
+
+        <LuxuryDivider />
+
+        {/* 3. How It Works Section (NEW) */}
+        <ErrorBoundary fallback={null}>
+          <HowItWorksSection />
+        </ErrorBoundary>
+
+        <LuxuryDivider />
+
+        {/* 4. Promo Banner (enhanced) */}
         <ErrorBoundary fallback={null}>
           <LuxuryPromoBanner />
         </ErrorBoundary>
 
         <LuxuryDivider />
 
-        {/* Category sub-navigation */}
+        {/* 5. Category sub-navigation */}
         <ErrorBoundary fallback={null}>
           <CategoryGrid />
         </ErrorBoundary>
 
         <LuxuryDivider />
 
-        {/* Products */}
+        {/* 6. Products */}
         <div id="products-section">
           <ErrorBoundary fallback={null}>
             <ProductGrid />
@@ -179,14 +199,21 @@ function HomeSections() {
 
         <LuxuryDivider />
 
-        {/* AI Style Gallery */}
+        {/* 7. Why Choose Us Section (NEW) */}
+        <ErrorBoundary fallback={null}>
+          <WhyChooseSection />
+        </ErrorBoundary>
+
+        <LuxuryDivider />
+
+        {/* 8. AI Style Gallery */}
         <ErrorBoundary fallback={null}>
           <StyleGallerySection />
         </ErrorBoundary>
 
         <LuxuryDivider />
 
-        {/* Family Pack Section */}
+        {/* 9. Family Pack Section */}
         <div id="family-pack-section">
           <ErrorBoundary fallback={null}>
             <FamilyPackSection />
@@ -195,7 +222,7 @@ function HomeSections() {
 
         <LuxuryDivider />
 
-        {/* Social Connections Section */}
+        {/* 10. Social Connections Section */}
         <div id="social-connections-section">
           <ErrorBoundary fallback={null}>
             <SocialConnectionsSection />
@@ -204,7 +231,7 @@ function HomeSections() {
 
         <LuxuryDivider />
         
-        {/* 3BOXES Curate Section */}
+        {/* 11. 3BOXES Curate Section */}
         <div id="3boxes-curate-section">
           <ErrorBoundary fallback={null}>
             <ThreeboxesCurateSection />
@@ -213,6 +240,7 @@ function HomeSections() {
 
         <LuxuryDivider />
 
+        {/* 12. App Download Section (enhanced with Flutter) */}
         <ErrorBoundary fallback={null}>
           <AppDownloadSection />
         </ErrorBoundary>
@@ -226,6 +254,7 @@ function HomeSections() {
 function AppContent() {
   const view = useStore((s) => s.view);
   const appTheme = useStore((s) => s.appTheme);
+  const appThemeColor = useStore((s) => s.appThemeColor);
 
   const renderView = () => {
     switch (view) {
@@ -262,6 +291,7 @@ function AppContent() {
     <div
       className={`min-h-screen flex flex-col ${appTheme === 'light' ? 'bg-[#fdf9f1]' : 'bg-stone-950'}`}
       data-theme={appTheme}
+      data-theme-color={appThemeColor}
     >
       <Header />
       <main className="flex-1">

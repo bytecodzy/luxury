@@ -2,6 +2,8 @@ import { create } from 'zustand'
 
 export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'corporate-dashboard' | 'wiki' | 'downloads' | 'security-policy' | 'shop' | 'contact' | 'about' | 'divisions' | 'careers' | 'press' | 'sustainability' | 'shipping' | 'faq' | 'size-guide' | 'track-order' | 'privacy-policy' | 'terms-of-service' | 'cookie-policy' | 'refund-policy'
 
+export type ThemeColor = 'royal-gold' | 'rose-elegance' | 'emerald-luxe' | 'sapphire-classic' | 'onyx-noir'
+
 export interface AuthUser {
   id: string
   email: string
@@ -99,7 +101,9 @@ interface AppState {
 
   // Theme
   appTheme: 'dark' | 'light'
+  appThemeColor: ThemeColor
   setAppTheme: (theme: 'dark' | 'light') => void
+  setAppThemeColor: (color: ThemeColor) => void
 
   setView: (view: View) => void
   selectProduct: (productId: string) => void
@@ -180,6 +184,17 @@ function loadThemeFromStorage(): 'dark' | 'light' {
   }
 }
 
+function loadThemeColorFromStorage(): ThemeColor {
+  if (typeof window === 'undefined') return 'royal-gold'
+  try {
+    const stored = localStorage.getItem('3boxes_theme_color') as ThemeColor | null
+    if (stored && ['royal-gold', 'rose-elegance', 'emerald-luxe', 'sapphire-classic', 'onyx-noir'].includes(stored)) return stored
+    return 'royal-gold'
+  } catch {
+    return 'royal-gold'
+  }
+}
+
 const initialAuth = loadAuthFromStorage()
 
 // Helper to ensure AuthUser always has userId alias
@@ -225,6 +240,7 @@ export const useStore = create<AppState>((set, get) => ({
 
   // Theme
   appTheme: typeof window !== 'undefined' ? loadThemeFromStorage() : 'dark',
+  appThemeColor: typeof window !== 'undefined' ? loadThemeColorFromStorage() : 'royal-gold',
 
   setView: (view) => set({ view }),
   selectProduct: (productId) => set({ selectedProductId: productId, view: 'product' }),
@@ -289,6 +305,14 @@ export const useStore = create<AppState>((set, get) => ({
       // ignore storage errors
     }
     set({ appTheme: theme })
+  },
+  setAppThemeColor: (color) => {
+    try {
+      localStorage.setItem('3boxes_theme_color', color)
+    } catch {
+      // ignore storage errors
+    }
+    set({ appThemeColor: color })
   },
   setLocale: (locale) => {
     try {

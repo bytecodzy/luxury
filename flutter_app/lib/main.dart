@@ -40,27 +40,32 @@ class ThreeBoxesLuxuryApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) => AppProvider()..initialize(),
-      child: MaterialApp(
-        title: AppConfig.appName,
-        debugShowCheckedModeBanner: false,
-        theme: _buildDarkTheme(),
-        home: const MainNavigation(),
-        routes: {
-          '/auth': (context) => const AuthScreen(),
-          '/product-detail': (context) => const ProductDetailScreen(),
-          '/checkout': (context) => const CheckoutScreen(),
-          '/orders': (context) => const OrdersScreen(),
-          '/gift-assistant': (context) => const GiftAssistantScreen(),
-          '/gift-builder': (context) => const GiftBuilderScreen(),
-          '/admin': (context) => const AdminDashboardScreen(),
-          '/corporate': (context) => const CorporateDashboardScreen(),
+      child: Consumer<AppProvider>(
+        builder: (context, provider, _) {
+          return MaterialApp(
+            title: AppConfig.appName,
+            debugShowCheckedModeBanner: false,
+            theme: _buildTheme(provider.themeColor),
+            home: const MainNavigation(),
+            routes: {
+              '/auth': (context) => const AuthScreen(),
+              '/product-detail': (context) => const ProductDetailScreen(),
+              '/checkout': (context) => const CheckoutScreen(),
+              '/orders': (context) => const OrdersScreen(),
+              '/gift-assistant': (context) => const GiftAssistantScreen(),
+              '/gift-builder': (context) => const GiftBuilderScreen(),
+              '/admin': (context) => const AdminDashboardScreen(),
+              '/corporate': (context) => const CorporateDashboardScreen(),
+            },
+          );
         },
       ),
     );
   }
 
-  ThemeData _buildDarkTheme() {
-    const gold = Color(AppConfig.primaryGold);
+  ThemeData _buildTheme(ThemeColorData themeColor) {
+    final accent = Color(themeColor.primary);
+    final accentLight = Color(themeColor.primaryLight);
     const darkBg = Color(AppConfig.darkBg);
     const cardBg = Color(AppConfig.cardBg);
 
@@ -71,54 +76,55 @@ class ThreeBoxesLuxuryApp extends StatelessWidget {
 
     return ThemeData(
       brightness: Brightness.dark,
-      primaryColor: gold,
+      primaryColor: accent,
       scaffoldBackgroundColor: darkBg,
-      colorScheme: const ColorScheme.dark(
-        primary: gold,
-        secondary: gold,
+      colorScheme: ColorScheme.dark(
+        primary: accent,
+        secondary: accent,
         surface: cardBg,
         error: Colors.redAccent,
         onPrimary: darkBg,
         onSecondary: darkBg,
         onSurface: Colors.white,
+        primaryContainer: accentLight,
       ),
       textTheme: textTheme,
       appBarTheme: AppBarTheme(
         backgroundColor: darkBg,
         elevation: 0,
         centerTitle: false,
-        iconTheme: const IconThemeData(color: gold),
+        iconTheme: IconThemeData(color: accent),
         titleTextStyle: GoogleFonts.poppins(
-          color: gold,
+          color: accent,
           fontSize: 20,
           fontWeight: FontWeight.w700,
           letterSpacing: 1.5,
         ),
       ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
         backgroundColor: cardBg,
-        selectedItemColor: gold,
-        unselectedItemColor: Color(0xFF78716C),
+        selectedItemColor: accent,
+        unselectedItemColor: const Color(0xFF78716C),
         type: BottomNavigationBarType.fixed,
         elevation: 8,
-        selectedLabelStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-        unselectedLabelStyle: TextStyle(fontSize: 10),
+        selectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: const TextStyle(fontSize: 10),
       ),
       cardTheme: CardThemeData(
         color: cardBg,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: gold,
+          backgroundColor: accent,
           foregroundColor: darkBg,
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
           ),
           textStyle: GoogleFonts.poppins(
             fontSize: 14,
@@ -126,7 +132,7 @@ class ThreeBoxesLuxuryApp extends StatelessWidget {
           ),
         ),
       ),
-      iconTheme: const IconThemeData(color: gold),
+      iconTheme: IconThemeData(color: accent),
       dividerTheme: const DividerThemeData(
         color: Color(0xFF44403C),
         thickness: 0.5,
@@ -136,6 +142,19 @@ class ThreeBoxesLuxuryApp extends StatelessWidget {
           TargetPlatform.android: CupertinoPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
         },
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(AppConfig.surfaceBg),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: accent.withOpacity(0.5), width: 1),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
     );
   }
@@ -154,6 +173,8 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
+    final accent = provider.accentColor;
+    final glowColor = provider.accentGlow;
 
     // Sync tab index with provider (e.g., when child screens call setTab)
     if (provider.currentTab != _currentIndex) {
@@ -180,7 +201,7 @@ class _MainNavigationState extends State<MainNavigation> {
           color: const Color(AppConfig.cardBg),
           border: Border(
             top: BorderSide(
-              color: const Color(AppConfig.primaryGold).withOpacity(0.15),
+              color: accent.withOpacity(0.15),
               width: 0.5,
             ),
           ),
@@ -191,7 +212,7 @@ class _MainNavigationState extends State<MainNavigation> {
               offset: const Offset(0, -2),
             ),
             BoxShadow(
-              color: const Color(AppConfig.primaryGold).withOpacity(0.08),
+              color: glowColor,
               blurRadius: 8,
               offset: const Offset(0, -1),
             ),
@@ -204,15 +225,26 @@ class _MainNavigationState extends State<MainNavigation> {
               setState(() => _currentIndex = index);
               provider.setTab(index);
             },
+            selectedItemColor: accent,
             items: [
-              const BottomNavigationBarItem(
-                icon: Icon(Icons.home_outlined),
-                activeIcon: Icon(Icons.home),
+              BottomNavigationBarItem(
+                icon: _NavIcon(
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home,
+                  isActive: _currentIndex == 0,
+                  accent: accent,
+                  glowColor: glowColor,
+                ),
                 label: 'Home',
               ),
-              const BottomNavigationBarItem(
-                icon: Icon(Icons.category_outlined),
-                activeIcon: Icon(Icons.category),
+              BottomNavigationBarItem(
+                icon: _NavIcon(
+                  icon: Icons.category_outlined,
+                  activeIcon: Icons.category,
+                  isActive: _currentIndex == 1,
+                  accent: accent,
+                  glowColor: glowColor,
+                ),
                 label: 'Categories',
               ),
               BottomNavigationBarItem(
@@ -220,29 +252,25 @@ class _MainNavigationState extends State<MainNavigation> {
                   showBadge: provider.cartCount > 0,
                   badgeContent: Text(
                     '${provider.cartCount}',
-                    style: const TextStyle(color: Colors.white, fontSize: 10),
-                  ),
-                  badgeStyle: const badges.BadgeStyle(
-                    badgeColor: Color(AppConfig.primaryGold),
-                    padding: EdgeInsets.all(4),
-                  ),
-                  child: const Icon(Icons.shopping_cart_outlined),
-                ),
-                activeIcon: badges.Badge(
-                  showBadge: provider.cartCount > 0,
-                  badgeContent: Text(
-                    '${provider.cartCount}',
-                    style: const TextStyle(
-                      color: Color(AppConfig.darkBg),
+                    style: TextStyle(
+                      color: _currentIndex == 2
+                          ? const Color(AppConfig.darkBg)
+                          : Colors.white,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  badgeStyle: const badges.BadgeStyle(
-                    badgeColor: Color(AppConfig.primaryGold),
-                    padding: EdgeInsets.all(4),
+                  badgeStyle: badges.BadgeStyle(
+                    badgeColor: accent,
+                    padding: const EdgeInsets.all(4),
                   ),
-                  child: const Icon(Icons.shopping_cart),
+                  child: _NavIcon(
+                    icon: Icons.shopping_cart_outlined,
+                    activeIcon: Icons.shopping_cart,
+                    isActive: _currentIndex == 2,
+                    accent: accent,
+                    glowColor: glowColor,
+                  ),
                 ),
                 label: 'Cart',
               ),
@@ -257,31 +285,69 @@ class _MainNavigationState extends State<MainNavigation> {
                     badgeColor: Colors.redAccent,
                     padding: EdgeInsets.all(4),
                   ),
-                  child: const Icon(Icons.favorite_outline),
-                ),
-                activeIcon: badges.Badge(
-                  showBadge: provider.wishlistIds.isNotEmpty,
-                  badgeContent: Text(
-                    '${provider.wishlistIds.length}',
-                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                  child: _NavIcon(
+                    icon: Icons.favorite_outline,
+                    activeIcon: Icons.favorite,
+                    isActive: _currentIndex == 3,
+                    accent: accent,
+                    glowColor: glowColor,
                   ),
-                  badgeStyle: const badges.BadgeStyle(
-                    badgeColor: Colors.redAccent,
-                    padding: EdgeInsets.all(4),
-                  ),
-                  child: const Icon(Icons.favorite),
                 ),
                 label: 'Wishlist',
               ),
               BottomNavigationBarItem(
-                icon: Icon(provider.isLoggedIn ? Icons.person_outline : Icons.login_outlined),
-                activeIcon: Icon(provider.isLoggedIn ? Icons.person : Icons.login),
+                icon: _NavIcon(
+                  icon: provider.isLoggedIn ? Icons.person_outline : Icons.login_outlined,
+                  activeIcon: provider.isLoggedIn ? Icons.person : Icons.login,
+                  isActive: _currentIndex == 4,
+                  accent: accent,
+                  glowColor: glowColor,
+                ),
                 label: provider.isLoggedIn ? 'Profile' : 'Sign In',
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Custom navigation icon with glow effect for active state
+class _NavIcon extends StatelessWidget {
+  final IconData icon;
+  final IconData activeIcon;
+  final bool isActive;
+  final Color accent;
+  final Color glowColor;
+
+  const _NavIcon({
+    required this.icon,
+    required this.activeIcon,
+    required this.isActive,
+    required this.accent,
+    required this.glowColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isActive) {
+      return Icon(icon, color: const Color(0xFF78716C));
+    }
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: glowColor,
+            blurRadius: 8,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Icon(activeIcon, color: accent, size: 22),
     );
   }
 }

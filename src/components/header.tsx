@@ -5,14 +5,15 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2, Sun, Moon, Users, Crown } from 'lucide-react';
-import { useState, useCallback, useEffect } from 'react';
+import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2, Sun, Moon, Users, Crown, Palette } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import { LocaleSwitcher, LocaleSwitcherMobile } from '@/components/locale-switcher';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { showToast } from '@/hooks/use-toast-notification';
 import type { LucideIcon } from 'lucide-react';
+import type { ThemeColor } from '@/lib/store';
 
 interface CategoryChild {
   name: string;
@@ -122,12 +123,35 @@ const CATEGORY_NAV: CategoryNavItem[] = [
 ];
 
 export function Header() {
-  const { searchQuery, setSearch, setView, cartItems, setCategory, selectedCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder, appTheme, setAppTheme } = useStore();
+  const { searchQuery, setSearch, setView, cartItems, setCategory, selectedCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder, appTheme, setAppTheme, appThemeColor, setAppThemeColor } = useStore();
   const { t } = useTranslation();
   const { canInstall, promptInstall } = usePWAInstall();
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [themeColorPickerOpen, setThemeColorPickerOpen] = useState(false);
+  const themeColorPickerRef = useRef<HTMLDivElement>(null);
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  const themeColors: { id: ThemeColor; label: string; color: string }[] = [
+    { id: 'royal-gold', label: 'Royal Gold', color: '#d4a437' },
+    { id: 'rose-elegance', label: 'Rose Elegance', color: '#e11d48' },
+    { id: 'emerald-luxe', label: 'Emerald Luxe', color: '#059669' },
+    { id: 'sapphire-classic', label: 'Sapphire Classic', color: '#2563eb' },
+    { id: 'onyx-noir', label: 'Onyx Noir', color: '#a3a3a3' },
+  ];
+
+  // Close theme color picker when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (themeColorPickerRef.current && !themeColorPickerRef.current.contains(e.target as Node)) {
+        setThemeColorPickerOpen(false);
+      }
+    }
+    if (themeColorPickerOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [themeColorPickerOpen]);
 
   const handleSearch = useCallback(
     (e: React.FormEvent) => {
@@ -246,6 +270,64 @@ export function Header() {
             >
               {appTheme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </Button>
+
+            {/* Theme Color Picker (Desktop) */}
+            <div className="relative hidden md:block" ref={themeColorPickerRef}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setThemeColorPickerOpen(!themeColorPickerOpen)}
+                className={`${appTheme === 'light' ? 'text-stone-600 hover:bg-amber-100/50 hover:text-amber-700' : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400'}`}
+                aria-label="Change theme color"
+              >
+                <Palette className="h-5 w-5" />
+              </Button>
+              <AnimatePresence>
+                {themeColorPickerOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute right-0 top-full mt-2 z-[100] rounded-xl border border-amber-500/20 bg-stone-950/95 backdrop-blur-xl p-3 shadow-2xl shadow-black/40"
+                    style={{ minWidth: '170px' }}
+                  >
+                    <p className="text-[10px] uppercase tracking-[0.15em] text-amber-400/60 mb-2 px-1">Theme Color</p>
+                    <div className="space-y-1">
+                      {themeColors.map((tc) => (
+                        <button
+                          key={tc.id}
+                          onClick={() => {
+                            setAppThemeColor(tc.id);
+                            setThemeColorPickerOpen(false);
+                          }}
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${
+                            appThemeColor === tc.id
+                              ? 'bg-amber-500/15 text-amber-200'
+                              : 'text-amber-200/60 hover:bg-amber-500/10 hover:text-amber-200/90'
+                          }`}
+                        >
+                          <span
+                            className="h-4 w-4 rounded-full border-2 flex-shrink-0 transition-shadow"
+                            style={{
+                              backgroundColor: tc.color,
+                              borderColor: appThemeColor === tc.id ? '#fff' : tc.color,
+                              boxShadow: appThemeColor === tc.id ? `0 0 8px ${tc.color}80` : 'none',
+                            }}
+                          />
+                          <span className="text-xs font-medium">{tc.label}</span>
+                          {appThemeColor === tc.id && (
+                            <svg className="ml-auto h-3.5 w-3.5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {/* Locale Switcher (Desktop) */}
             <LocaleSwitcher />
@@ -537,6 +619,33 @@ export function Header() {
 
                   {/* Mobile Locale Switcher */}
                   <LocaleSwitcherMobile />
+
+                  {/* Mobile Theme Color Picker */}
+                  <div className="my-3 border-t border-amber-900/20 pt-3">
+                    <p className="px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest text-amber-400/50">Theme Color</p>
+                    <div className="flex items-center gap-3 px-4">
+                      {themeColors.map((tc) => (
+                        <button
+                          key={tc.id}
+                          onClick={() => {
+                            setAppThemeColor(tc.id);
+                          }}
+                          className="flex flex-col items-center gap-1"
+                          aria-label={tc.label}
+                        >
+                          <span
+                            className="h-6 w-6 rounded-full border-2 transition-shadow"
+                            style={{
+                              backgroundColor: tc.color,
+                              borderColor: appThemeColor === tc.id ? '#fff' : tc.color,
+                              boxShadow: appThemeColor === tc.id ? `0 0 10px ${tc.color}80` : 'none',
+                            }}
+                          />
+                          <span className="text-[8px] text-amber-200/50 leading-tight">{tc.label.split(' ')[0]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </SheetContent>
             </Sheet>

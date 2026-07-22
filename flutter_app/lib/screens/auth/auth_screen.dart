@@ -123,14 +123,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    const gold = Color(AppConfig.primaryGold);
+    final provider = context.watch<AppProvider>();
+    final accent = provider.accentColor;
+    final glowColor = provider.accentGlow;
     const darkBg = Color(AppConfig.darkBg);
     const cardBg = Color(AppConfig.cardBg);
 
     return Scaffold(
       backgroundColor: darkBg,
       appBar: AppBar(
-        backgroundColor: darkBg,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: Container(
           margin: const EdgeInsets.only(left: 8, top: 4, bottom: 4),
@@ -139,7 +141,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             shape: BoxShape.circle,
           ),
           child: IconButton(
-            icon: const Icon(Icons.arrow_back, color: gold, size: 20),
+            icon: Icon(Icons.arrow_back, color: accent, size: 20),
             onPressed: () => Navigator.of(context).pop(),
           ),
         ),
@@ -148,27 +150,48 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
         padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
           children: [
-            // ── Branding ──
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+
+            // ── Logo with Glow ──
             Container(
-              width: 64,
-              height: 64,
+              width: 80,
+              height: 80,
               decoration: BoxDecoration(
-                color: gold.withOpacity(0.1),
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: gold.withOpacity(0.3),
-                  width: 1,
+                gradient: RadialGradient(
+                  colors: [
+                    accent.withOpacity(0.15),
+                    Colors.transparent,
+                  ],
+                  radius: 1.0,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: glowColor,
+                    blurRadius: 30,
+                    spreadRadius: 2,
+                  ),
+                ],
               ),
-              child: Icon(Icons.diamond, color: gold, size: 32),
+              child: Container(
+                margin: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: accent.withOpacity(0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Icon(Icons.diamond, color: accent, size: 36),
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             Text(
               AppConfig.appName,
               style: GoogleFonts.poppins(
-                color: gold,
-                fontSize: 22,
+                color: accent,
+                fontSize: 24,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 3,
               ),
@@ -177,29 +200,39 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             Text(
               AppConfig.appTagline,
               style: GoogleFonts.poppins(
-                color: Colors.white.withOpacity(0.4),
+                color: Colors.white.withOpacity(0.35),
                 fontSize: 12,
                 letterSpacing: 2,
               ),
             ),
             const SizedBox(height: 32),
 
-            // ── Tab Bar ──
+            // ── Glassmorphic Tab Bar ──
             Container(
               decoration: BoxDecoration(
-                color: cardBg,
-                borderRadius: BorderRadius.circular(12),
+                color: cardBg.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: gold.withOpacity(0.1),
+                  color: accent.withOpacity(0.12),
                   width: 0.5,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
               child: TabBar(
                 controller: _tabController,
                 onTap: (_) => _clearError(),
                 indicator: BoxDecoration(
-                  color: gold,
-                  borderRadius: BorderRadius.circular(10),
+                  color: accent,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(color: glowColor, blurRadius: 8),
+                  ],
                 ),
                 indicatorSize: TabBarIndicatorSize.tab,
                 indicatorPadding: const EdgeInsets.all(4),
@@ -225,19 +258,27 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             // ── Error Message ──
             if (_errorMessage != null) ...[
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: Colors.redAccent.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
+                  color: Colors.redAccent.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: Colors.redAccent.withOpacity(0.3),
+                    color: Colors.redAccent.withOpacity(0.2),
                     width: 0.5,
                   ),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
-                    const SizedBox(width: 10),
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         _errorMessage!,
@@ -256,12 +297,12 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
             // ── Tab Views ──
             SizedBox(
-              height: MediaQuery.of(context).size.height * 0.6,
+              height: MediaQuery.of(context).size.height * 0.58,
               child: TabBarView(
                 controller: _tabController,
                 children: [
-                  _buildLoginForm(),
-                  _buildRegisterForm(),
+                  _buildLoginForm(accent, provider.accentDarkColor, glowColor),
+                  _buildRegisterForm(accent, provider.accentDarkColor, glowColor),
                 ],
               ),
             ),
@@ -274,175 +315,183 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
   // ════════════════════════════════════════════════════════════════
   // Login Form
   // ════════════════════════════════════════════════════════════════
-  Widget _buildLoginForm() {
-    const gold = Color(AppConfig.primaryGold);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Email
-        _buildAuthField(
-          controller: _loginEmailController,
-          label: 'Email',
-          icon: Icons.email_outlined,
-          keyboardType: TextInputType.emailAddress,
-        ),
-        const SizedBox(height: 16),
-
-        // Password
-        _buildAuthField(
-          controller: _loginPasswordController,
-          label: 'Password',
-          icon: Icons.lock_outline,
-          obscure: _obscureLoginPassword,
-          suffixIcon: IconButton(
-            icon: Icon(
-              _obscureLoginPassword ? Icons.visibility_off : Icons.visibility,
-              color: gold.withOpacity(0.5),
-              size: 20,
-            ),
-            onPressed: () {
-              setState(() => _obscureLoginPassword = !_obscureLoginPassword);
-            },
+  Widget _buildLoginForm(Color accent, Color accentDark, Color glowColor) {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Email
+          _buildGlassField(
+            controller: _loginEmailController,
+            label: 'Email',
+            icon: Icons.email_outlined,
+            keyboardType: TextInputType.emailAddress,
+            accent: accent,
           ),
-        ),
-        const SizedBox(height: 8),
+          const SizedBox(height: 16),
 
-        // Forgot Password
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: () {
-              // TODO: Forgot password flow
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  backgroundColor: const Color(AppConfig.cardBg),
-                  content: const Text(
-                    'Password reset link sent to your email',
-                    style: TextStyle(color: Colors.white),
+          // Password
+          _buildGlassField(
+            controller: _loginPasswordController,
+            label: 'Password',
+            icon: Icons.lock_outline,
+            obscure: _obscureLoginPassword,
+            accent: accent,
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscureLoginPassword ? Icons.visibility_off : Icons.visibility,
+                color: accent.withOpacity(0.5),
+                size: 20,
+              ),
+              onPressed: () {
+                setState(() => _obscureLoginPassword = !_obscureLoginPassword);
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // Forgot Password
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: const Color(AppConfig.cardBg),
+                    content: const Text(
+                      'Password reset link sent to your email',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                );
+              },
+              child: Text(
+                'Forgot Password?',
+                style: GoogleFonts.poppins(
+                  color: accent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                 ),
-              );
-            },
-            child: Text(
-              'Forgot Password?',
-              style: GoogleFonts.poppins(
-                color: gold,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
-        // Sign In Button
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: _isLoading ? null : _handleLogin,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: gold,
-              disabledBackgroundColor: gold.withOpacity(0.3),
-              foregroundColor: const Color(AppConfig.darkBg),
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          // Sign In Button
+          Container(
+            width: double.infinity,
+            height: 54,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: LinearGradient(
+                colors: [accent, accentDark],
               ),
-              elevation: 0,
+              boxShadow: [BoxShadow(color: glowColor, blurRadius: 16)],
             ),
-            child: _isLoading
-                ? SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      color: const Color(AppConfig.darkBg),
-                      strokeWidth: 2,
+            child: ElevatedButton(
+              onPressed: _isLoading ? null : _handleLogin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                disabledBackgroundColor: accent.withOpacity(0.3),
+                foregroundColor: const Color(AppConfig.darkBg),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 0,
+              ),
+              child: _isLoading
+                  ? SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        color: const Color(AppConfig.darkBg),
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : Text(
+                      'Sign In',
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      ),
                     ),
-                  )
-                : Text(
-                    'Sign In',
-                    style: GoogleFonts.poppins(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
+            ),
           ),
-        ),
-        const SizedBox(height: 28),
+          const SizedBox(height: 28),
 
-        // Divider with text
-        _buildDividerWithText('or continue with'),
-        const SizedBox(height: 20),
+          // Divider
+          _buildDividerWithText('or continue with'),
+          const SizedBox(height: 20),
 
-        // Social login buttons
-        Row(
-          children: [
-            Expanded(
-              child: _socialButton(
-                icon: Icons.g_mobiledata,
-                label: 'Google',
-                onTap: () {
-                  // TODO: Google Sign-In
-                },
+          // Social login buttons
+          Row(
+            children: [
+              Expanded(
+                child: _socialButton(
+                  icon: Icons.g_mobiledata,
+                  label: 'Google',
+                  onTap: () {},
+                  accent: accent,
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _socialButton(
-                icon: Icons.apple,
-                label: 'Apple',
-                onTap: () {
-                  // TODO: Apple Sign-In
-                },
+              const SizedBox(width: 12),
+              Expanded(
+                child: _socialButton(
+                  icon: Icons.apple,
+                  label: 'Apple',
+                  onTap: () {},
+                  accent: accent,
+                ),
               ),
-            ),
-          ],
-        ),
-      ],
+            ],
+          ),
+        ],
+      ),
     );
   }
 
   // ════════════════════════════════════════════════════════════════
   // Register Form
   // ════════════════════════════════════════════════════════════════
-  Widget _buildRegisterForm() {
-    const gold = Color(AppConfig.primaryGold);
-
+  Widget _buildRegisterForm(Color accent, Color accentDark, Color glowColor) {
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Name
-          _buildAuthField(
+          _buildGlassField(
             controller: _registerNameController,
             label: 'Full Name',
             icon: Icons.person_outline,
+            accent: accent,
           ),
           const SizedBox(height: 16),
 
           // Email
-          _buildAuthField(
+          _buildGlassField(
             controller: _registerEmailController,
             label: 'Email',
             icon: Icons.email_outlined,
             keyboardType: TextInputType.emailAddress,
+            accent: accent,
           ),
           const SizedBox(height: 16),
 
           // Password
-          _buildAuthField(
+          _buildGlassField(
             controller: _registerPasswordController,
             label: 'Password',
             icon: Icons.lock_outline,
             obscure: _obscureRegisterPassword,
+            accent: accent,
             suffixIcon: IconButton(
               icon: Icon(
                 _obscureRegisterPassword ? Icons.visibility_off : Icons.visibility,
-                color: gold.withOpacity(0.5),
+                color: accent.withOpacity(0.5),
                 size: 20,
               ),
               onPressed: () {
@@ -453,15 +502,16 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           const SizedBox(height: 16),
 
           // Confirm Password
-          _buildAuthField(
+          _buildGlassField(
             controller: _registerConfirmController,
             label: 'Confirm Password',
             icon: Icons.lock_outline,
             obscure: _obscureRegisterConfirm,
+            accent: accent,
             suffixIcon: IconButton(
               icon: Icon(
                 _obscureRegisterConfirm ? Icons.visibility_off : Icons.visibility,
-                color: gold.withOpacity(0.5),
+                color: accent.withOpacity(0.5),
                 size: 20,
               ),
               onPressed: () {
@@ -472,17 +522,25 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
           const SizedBox(height: 24),
 
           // Create Account Button
-          SizedBox(
+          Container(
             width: double.infinity,
+            height: 54,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: LinearGradient(
+                colors: [accent, accentDark],
+              ),
+              boxShadow: [BoxShadow(color: glowColor, blurRadius: 16)],
+            ),
             child: ElevatedButton(
               onPressed: _isLoading ? null : _handleRegister,
               style: ElevatedButton.styleFrom(
-                backgroundColor: gold,
-                disabledBackgroundColor: gold.withOpacity(0.3),
+                backgroundColor: Colors.transparent,
+                disabledBackgroundColor: accent.withOpacity(0.3),
                 foregroundColor: const Color(AppConfig.darkBg),
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 elevation: 0,
               ),
@@ -522,54 +580,71 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     );
   }
 
-  // ── Auth Field Builder ──
-  Widget _buildAuthField({
+  // ── Glassmorphic Auth Field ──
+  Widget _buildGlassField({
     required TextEditingController controller,
     required String label,
     required IconData icon,
+    required Color accent,
     TextInputType? keyboardType,
     bool obscure = false,
     Widget? suffixIcon,
   }) {
-    const gold = Color(AppConfig.primaryGold);
-
-    return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      obscureText: obscure,
-      onChanged: (_) => _clearError(),
-      style: GoogleFonts.poppins(
-        color: Colors.white,
-        fontSize: 14,
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(AppConfig.cardBg).withOpacity(0.6),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: accent.withOpacity(0.08),
+          width: 0.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: GoogleFonts.poppins(
-          color: Colors.white.withOpacity(0.4),
-          fontSize: 13,
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        obscureText: obscure,
+        onChanged: (_) => _clearError(),
+        style: GoogleFonts.poppins(
+          color: Colors.white,
+          fontSize: 14,
         ),
-        prefixIcon: Icon(icon, color: gold.withOpacity(0.5), size: 20),
-        suffixIcon: suffixIcon,
-        filled: true,
-        fillColor: const Color(AppConfig.surfaceBg),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: GoogleFonts.poppins(
+            color: Colors.white.withOpacity(0.35),
+            fontSize: 13,
+          ),
+          prefixIcon: Container(
+            margin: const EdgeInsets.only(right: 8),
+            child: Icon(icon, color: accent.withOpacity(0.5), size: 20),
+          ),
+          suffixIcon: suffixIcon,
+          border: InputBorder.none,
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: accent.withOpacity(0.3), width: 1),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: gold.withOpacity(0.5), width: 1),
-        ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       ),
     );
   }
 
   // ── Divider with Text ──
   Widget _buildDividerWithText(String text) {
+    final accent = context.read<AppProvider>().accentColor;
     return Row(
       children: [
-        Expanded(child: Container(height: 0.5, color: const Color(0xFF44403C))),
+        Expanded(child: Container(height: 0.5, decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [Colors.transparent, const Color(0xFF44403C)]),
+        ))),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
@@ -580,7 +655,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             ),
           ),
         ),
-        Expanded(child: Container(height: 0.5, color: const Color(0xFF44403C))),
+        Expanded(child: Container(height: 0.5, decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [const Color(0xFF44403C), Colors.transparent]),
+        ))),
       ],
     );
   }
@@ -590,18 +667,17 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
     required IconData icon,
     required String label,
     required VoidCallback onTap,
+    required Color accent,
   }) {
-    const gold = Color(AppConfig.primaryGold);
-
     return OutlinedButton(
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
-        side: BorderSide(color: gold.withOpacity(0.2), width: 0.5),
+        side: BorderSide(color: accent.withOpacity(0.15), width: 0.5),
         padding: const EdgeInsets.symmetric(vertical: 14),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
         ),
-        backgroundColor: const Color(AppConfig.cardBg),
+        backgroundColor: const Color(AppConfig.cardBg).withOpacity(0.5),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,

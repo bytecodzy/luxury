@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
+import Image from 'next/image';
 
 const benefits = [
   {
@@ -62,9 +63,9 @@ export function AppDownloadSection() {
     <section id="app-download" className="relative overflow-hidden border-t border-amber-900/30 bg-gradient-to-b from-stone-950 via-stone-900/50 to-stone-950 py-16 sm:py-20 lg:py-24">
       {/* Background decorations */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-amber-500/5 blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 h-48 w-48 rounded-full bg-amber-700/5 blur-3xl" />
-        <div className="absolute left-1/2 top-1/2 h-96 w-96 -translate-x-1/2 -translate-y-1/2 rounded-full bg-amber-600/3 blur-3xl" />
+        <div className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full luxury-glow-bg blur-3xl" style={{ opacity: 0.3 }} />
+        <div className="absolute bottom-1/4 right-1/4 h-48 w-48 rounded-full luxury-glow-bg blur-3xl" style={{ opacity: 0.25 }} />
+        <div className="absolute left-1/2 top-1/2 h-96 w-96 -translate-x-1/2 -translate-y-1/2 rounded-full luxury-glow-bg blur-3xl" style={{ opacity: 0.15 }} />
       </div>
 
       <div className="relative container mx-auto px-4">
@@ -77,7 +78,7 @@ export function AppDownloadSection() {
             transition={{ duration: 0.6 }}
             className="mb-14 text-center"
           >
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-medium text-amber-400">
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-amber-500/25 bg-amber-500/[0.08] px-4 py-1.5 text-xs font-medium luxury-accent-text">
               <Smartphone className="h-3.5 w-3.5" />
               Available on iOS & Android
             </div>
@@ -86,7 +87,7 @@ export function AppDownloadSection() {
               <span className="luxury-text">3 BOXES LUXURY</span>
               <span className="text-amber-50"> App</span>
             </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-base text-amber-200/60 sm:text-lg">
+            <p className="mx-auto mt-4 max-w-2xl text-base text-amber-200/55 sm:text-lg">
               The ultimate luxury shopping experience — at your fingertips.
               Browse, gift, and shop the world&apos;s finest collections anytime, anywhere.
             </p>
@@ -102,66 +103,80 @@ export function AppDownloadSection() {
               transition={{ duration: 0.6, delay: 0.2 }}
               className="flex flex-col items-center"
             >
-              {/* Phone frame */}
+              {/* Phone frame with infographic image */}
               <div className="relative mx-auto w-64 sm:w-72">
-                <div className="overflow-hidden rounded-[2.5rem] border-2 border-amber-500/30 bg-stone-900 p-2 shadow-2xl shadow-amber-900/20">
+                <div className="overflow-hidden rounded-[2.5rem] border-2 border-amber-500/25 bg-stone-900 p-2 shadow-2xl shadow-black/30">
                   <div className="overflow-hidden rounded-[2rem] bg-stone-950">
-                    {/* Status bar */}
-                    <div className="flex items-center justify-between bg-stone-900 px-6 py-1.5">
-                      <span className="text-[10px] text-amber-200/50">9:41</span>
-                      <div className="flex gap-1">
-                        <div className="h-2 w-2 rounded-full bg-amber-400/50" />
-                        <div className="h-2 w-2 rounded-full bg-amber-400/50" />
-                        <div className="h-2 w-4 rounded-full bg-amber-400/50" />
-                      </div>
-                    </div>
-                    {/* App screen mockup */}
-                    <div className="flex flex-col items-center px-4 py-6">
-                      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/20 to-amber-700/10">
-                        <span className="text-lg font-bold text-amber-400">3B</span>
-                      </div>
-                      <div className="mb-1 text-sm font-bold text-amber-100">
-                        3 BOXES LUXURY
-                      </div>
-                      <div className="mb-4 text-[10px] text-amber-200/40">
-                        Curated Luxury Gifting
-                      </div>
-                      {/* Category pills */}
-                      <div className="mb-3 flex flex-wrap justify-center gap-1.5">
-                        {['Watches', 'Jewelry', 'Leather', 'Fragrances'].map(
-                          (cat) => (
-                            <span
-                              key={cat}
-                              className="rounded-full border border-amber-500/20 bg-amber-500/5 px-2.5 py-0.5 text-[9px] text-amber-300/70"
-                            >
-                              {cat}
-                            </span>
-                          )
-                        )}
-                      </div>
-                      {/* Product cards mockup */}
-                      <div className="grid w-full grid-cols-2 gap-2">
-                        {[1, 2, 3, 4].map((i) => (
-                          <div
-                            key={i}
-                            className="aspect-square rounded-lg border border-amber-500/10 bg-gradient-to-br from-stone-800 to-stone-900"
-                          >
-                            <div className="flex h-full items-center justify-center">
-                              <div className="h-8 w-8 rounded-full border border-amber-500/20 bg-amber-500/10" />
-                            </div>
+                    {/* Try the infographic image first, fall back to mockup */}
+                    <div className="relative aspect-[9/16] bg-gradient-to-br from-stone-900 to-stone-950">
+                      <Image
+                        src="/images/infographics/mobile-app-premium.png"
+                        alt="3 Boxes Luxury Mobile App"
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 768px) 256px, 288px"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                        }}
+                      />
+                      {/* Fallback mockup content (shown when image fails) */}
+                      <div className="absolute inset-0 flex flex-col items-center px-4 py-6">
+                        {/* Status bar */}
+                        <div className="flex items-center justify-between w-full bg-stone-900 px-6 py-1.5 mb-4 rounded-t-xl">
+                          <span className="text-[10px] text-amber-200/50">9:41</span>
+                          <div className="flex gap-1">
+                            <div className="h-2 w-2 rounded-full bg-amber-400/50" />
+                            <div className="h-2 w-2 rounded-full bg-amber-400/50" />
+                            <div className="h-2 w-4 rounded-full bg-amber-400/50" />
                           </div>
-                        ))}
-                      </div>
-                      {/* Bottom nav */}
-                      <div className="mt-4 flex w-full justify-around border-t border-amber-500/10 pt-2">
-                        {['🏠', '🔍', '🎁', '🛒', '👤'].map((emoji, i) => (
-                          <span
-                            key={i}
-                            className="text-xs opacity-60"
-                          >
-                            {emoji}
-                          </span>
-                        ))}
+                        </div>
+                        <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/20 to-amber-700/10">
+                          <span className="text-lg font-bold text-amber-400">3B</span>
+                        </div>
+                        <div className="mb-1 text-sm font-bold text-amber-100">
+                          3 BOXES LUXURY
+                        </div>
+                        <div className="mb-4 text-[10px] text-amber-200/40">
+                          Curated Luxury Gifting
+                        </div>
+                        {/* Category pills */}
+                        <div className="mb-3 flex flex-wrap justify-center gap-1.5">
+                          {['Watches', 'Jewelry', 'Leather', 'Fragrances'].map(
+                            (cat) => (
+                              <span
+                                key={cat}
+                                className="rounded-full border border-amber-500/20 bg-amber-500/5 px-2.5 py-0.5 text-[9px] text-amber-300/70"
+                              >
+                                {cat}
+                              </span>
+                            )
+                          )}
+                        </div>
+                        {/* Product cards mockup */}
+                        <div className="grid w-full grid-cols-2 gap-2">
+                          {[1, 2, 3, 4].map((i) => (
+                            <div
+                              key={i}
+                              className="aspect-square rounded-lg border border-amber-500/10 bg-gradient-to-br from-stone-800 to-stone-900"
+                            >
+                              <div className="flex h-full items-center justify-center">
+                                <div className="h-8 w-8 rounded-full border border-amber-500/20 bg-amber-500/10" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Bottom nav */}
+                        <div className="mt-4 flex w-full justify-around border-t border-amber-500/10 pt-2">
+                          {['🏠', '🔍', '🎁', '🛒', '👤'].map((emoji, i) => (
+                            <span
+                              key={i}
+                              className="text-xs opacity-60"
+                            >
+                              {emoji}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -169,20 +184,20 @@ export function AppDownloadSection() {
                 {/* Notch */}
                 <div className="absolute left-1/2 top-2 h-5 w-24 -translate-x-1/2 rounded-b-2xl bg-stone-900" />
                 {/* Glow effect */}
-                <div className="absolute -inset-4 -z-10 rounded-[3rem] bg-amber-500/5 blur-xl" />
+                <div className="absolute -inset-4 -z-10 rounded-[3rem] luxury-glow-bg blur-xl" style={{ opacity: 0.5 }} />
               </div>
 
               {/* Install buttons */}
-              <div className="mt-10 flex flex-col items-center gap-4 sm:flex-row">
+              <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
                 {/* PWA Install / Google Play button */}
                 {canInstall ? (
                   <motion.button
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={handleInstallClick}
-                    className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-600/20 px-6 py-3.5 shadow-lg shadow-amber-900/20 transition-colors hover:border-amber-500/50 hover:bg-amber-600/30"
+                    className="flex items-center gap-3 rounded-xl border border-amber-500/25 bg-amber-600/15 px-6 py-3.5 shadow-lg shadow-black/20 transition-colors hover:border-amber-500/40 hover:bg-amber-600/25"
                   >
-                    <Download className="h-6 w-6 text-amber-400" />
+                    <Download className="h-6 w-6 luxury-accent-text" />
                     <div className="text-left">
                       <div className="text-[10px] leading-tight text-amber-200/50">INSTALL APP</div>
                       <div className="text-sm font-semibold text-amber-100">Add to Home Screen</div>
@@ -203,7 +218,7 @@ export function AppDownloadSection() {
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={handleInstallClick}
-                    className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-stone-900 px-5 py-3 shadow-lg shadow-amber-900/10 transition-colors hover:border-amber-500/40 hover:bg-stone-800"
+                    className="flex items-center gap-3 rounded-xl border border-amber-500/15 bg-stone-900 px-5 py-3 shadow-lg shadow-black/10 transition-colors hover:border-amber-500/30 hover:bg-stone-800"
                   >
                     <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none">
                       <path d="M3.61 1.814L13.793 12 3.61 22.186a.996.996 0 01-.61-.92V2.734c0-.382.218-.726.558-.92h.052z" fill="#4285F4" />
@@ -223,7 +238,7 @@ export function AppDownloadSection() {
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={handleInstallClick}
-                  className="flex items-center gap-3 rounded-xl border border-amber-500/20 bg-stone-900 px-5 py-3 shadow-lg shadow-amber-900/10 transition-colors hover:border-amber-500/40 hover:bg-stone-800"
+                  className="flex items-center gap-3 rounded-xl border border-amber-500/15 bg-stone-900 px-5 py-3 shadow-lg shadow-black/10 transition-colors hover:border-amber-500/30 hover:bg-stone-800"
                 >
                   <svg viewBox="0 0 24 24" className="h-7 w-7" fill="currentColor" fillOpacity="0.9">
                     <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z" />
@@ -235,7 +250,39 @@ export function AppDownloadSection() {
                 </motion.button>
               </div>
 
-              <p className="mt-4 text-xs text-amber-200/40">
+              {/* Flutter App Download */}
+              <div className="mt-5 flex flex-col items-center gap-3 sm:flex-row">
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => window.open('/app/', '_blank')}
+                  className="flex items-center gap-3 rounded-xl border border-amber-500/15 bg-stone-900 px-5 py-3 shadow-lg shadow-black/10 transition-colors hover:border-amber-500/30 hover:bg-stone-800"
+                >
+                  <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none">
+                    <path d="M14.5 3.5L3 15l6 6 2-2 3.5-3.5L19 10l-4.5-6.5z" fill="#42A5F5" />
+                    <path d="M14.5 3.5L8 10l3.5 3.5L19 10l-4.5-6.5z" fill="#0277BD" />
+                    <path d="M8 10L3 15l6 6 2-2-3-9z" fill="#01579B" />
+                  </svg>
+                  <div className="text-left">
+                    <div className="text-[10px] leading-tight text-amber-200/50">FLUTTER APP</div>
+                    <div className="text-sm font-semibold text-amber-100">Download APK</div>
+                  </div>
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => window.open('/app/', '_blank')}
+                  className="flex items-center gap-3 rounded-xl border border-amber-500/15 bg-stone-900 px-5 py-3 shadow-lg shadow-black/10 transition-colors hover:border-amber-500/30 hover:bg-stone-800"
+                >
+                  <Smartphone className="h-7 w-7 luxury-accent-text opacity-70" />
+                  <div className="text-left">
+                    <div className="text-[10px] leading-tight text-amber-200/50">WEB APP</div>
+                    <div className="text-sm font-semibold text-amber-100">Flutter Web</div>
+                  </div>
+                </motion.button>
+              </div>
+
+              <p className="mt-4 text-xs text-amber-200/35">
                 Free install • Works on iOS 15+ & Android 10+
               </p>
             </motion.div>
@@ -260,17 +307,17 @@ export function AppDownloadSection() {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ delay: 0.4 + i * 0.08 }}
-                    className="group rounded-xl border border-amber-500/15 bg-amber-500/5 p-4 backdrop-blur-sm transition-colors hover:border-amber-500/30 hover:bg-amber-500/10"
+                    className="group rounded-xl border border-amber-500/10 bg-amber-500/[0.03] p-4 backdrop-blur-sm transition-colors hover:border-amber-500/25 hover:bg-amber-500/[0.06]"
                   >
                     <div className="mb-2 flex items-center gap-2">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10 transition-colors group-hover:bg-amber-500/20">
-                        <benefit.icon className="h-4 w-4 text-amber-400" />
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg luxury-glow-bg transition-colors group-hover:bg-amber-500/15">
+                        <benefit.icon className="h-4 w-4 luxury-accent-text" />
                       </div>
                       <h4 className="text-sm font-semibold text-amber-100">
                         {benefit.title}
                       </h4>
                     </div>
-                    <p className="text-xs leading-relaxed text-amber-200/50">
+                    <p className="text-xs leading-relaxed text-amber-200/45">
                       {benefit.desc}
                     </p>
                   </motion.div>
@@ -313,7 +360,7 @@ export function AppDownloadSection() {
                     Install App Now
                   </Button>
                 )}
-                <span className="flex items-center gap-1 text-xs text-amber-200/40">
+                <span className="flex items-center gap-1 text-xs text-amber-200/35">
                   <ChevronRight className="h-3 w-3" />
                   Available on all devices
                 </span>

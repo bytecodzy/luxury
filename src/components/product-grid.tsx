@@ -11,11 +11,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Skeleton } from '@/components/ui/skeleton';
-import { X, SlidersHorizontal } from 'lucide-react';
+import { X, SlidersHorizontal, ChevronLeft, ChevronRight, Diamond } from 'lucide-react';
 import { useState, useMemo } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface Product {
   id: string;
@@ -124,6 +123,35 @@ const PRICE_RANGE_OPTIONS = [
   { value: '500+', label: '$500+', min: 500, max: null },
 ];
 
+// Ornamental divider component
+function OrnamentalDivider() {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+      <Diamond className="h-3 w-3 text-amber-500/30" />
+      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+    </div>
+  );
+}
+
+// Shimmer skeleton component
+function ShimmerSkeleton() {
+  return (
+    <div className="overflow-hidden rounded-2xl" style={{
+      background: 'rgba(28, 25, 23, 0.5)',
+      backdropFilter: 'blur(16px)',
+      border: '1px solid rgba(212, 164, 55, 0.08)',
+    }}>
+      <div className="luxury-shimmer aspect-square" />
+      <div className="p-4 space-y-3">
+        <div className="luxury-shimmer h-2.5 w-16 rounded-full" />
+        <div className="luxury-shimmer h-4 w-3/4 rounded-full" />
+        <div className="luxury-shimmer h-5 w-20 rounded-full" />
+      </div>
+    </div>
+  );
+}
+
 export function ProductGrid() {
   const { searchQuery, selectedCategory, setCategory } = useStore();
   const { t } = useTranslation();
@@ -135,6 +163,8 @@ export function ProductGrid() {
   const [recipientFilter, setRecipientFilter] = useState<string>('all');
   const [relationshipFilter, setRelationshipFilter] = useState<string>('all');
   const [priceRangeFilter, setPriceRangeFilter] = useState<string>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 12;
 
   const priceRange = PRICE_RANGE_OPTIONS.find((o) => o.value === priceRangeFilter);
 
@@ -162,6 +192,14 @@ export function ProductGrid() {
   const rawProducts = data?.products;
   const products: Product[] = Array.isArray(rawProducts) ? rawProducts : [];
 
+  // Pagination — clamp current page to valid range
+  const totalPages = Math.ceil(products.length / itemsPerPage);
+  const safePage = Math.min(currentPage, Math.max(1, totalPages));
+  const paginatedProducts = products.slice(
+    (safePage - 1) * itemsPerPage,
+    safePage * itemsPerPage
+  );
+
   // Compute which platforms have products in current results
   const availablePlatforms = useMemo(() => {
     const prods = data?.products;
@@ -188,6 +226,8 @@ export function ProductGrid() {
 
   const hasActiveFilters = selectedCategory || searchQuery || sourceFilter !== 'all' || platformFilter !== 'all' || occasionFilter !== 'all' || recipientFilter !== 'all' || relationshipFilter !== 'all' || priceRangeFilter !== 'all';
 
+  const accentColor = `var(--luxury-accent, #d4a437)`;
+
   return (
     <section className="relative py-8">
       {/* Subtle background decoration */}
@@ -196,144 +236,249 @@ export function ProductGrid() {
       </div>
 
       <div className="relative">
-        {/* Header */}
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-400/50">
-              {searchQuery ? 'Search Results' : selectedCategory ? 'Curated For You' : 'Our Collection'}
-            </p>
-            <h2 className="mt-1 text-xl font-bold text-amber-100 sm:text-2xl">
-              {searchQuery
-                ? t('products.resultsFor', { query: searchQuery })
-                : selectedCategory
-                ? `${selectedCategory.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}`
-                : t('products.allProducts')}
-            </h2>
-            {!isLoading && (
-              <p className="mt-1 text-xs text-amber-200/35">
-                {data?.total ?? 0} {t('categories.items')}
+        {/* Elegant Section Header with Ornamental Dividers */}
+        <div className="mb-8">
+          <OrnamentalDivider />
+          <div className="mt-4 mb-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: accentColor, opacity: 0.7 }}>
+                {searchQuery ? 'Search Results' : selectedCategory ? 'Curated For You' : 'Our Collection'}
               </p>
-            )}
-          </div>
+              <h2 className="mt-1.5 text-2xl font-bold text-amber-100 sm:text-3xl" style={{ letterSpacing: '-0.01em' }}>
+                {searchQuery
+                  ? t('products.resultsFor', { query: searchQuery })
+                  : selectedCategory
+                  ? `${selectedCategory.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase())}`
+                  : t('products.allProducts')}
+              </h2>
+              {!isLoading && (
+                <p className="mt-1 text-xs text-amber-200/30 font-medium">
+                  {data?.total ?? 0} {t('categories.items')}
+                </p>
+              )}
+            </div>
 
-          <div className="flex items-center gap-2">
-            {/* Clear button */}
-            {hasActiveFilters && (
+            <div className="flex items-center gap-2">
+              {/* Clear button */}
+              {hasActiveFilters && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 h-8 text-xs rounded-lg backdrop-blur-sm"
+                >
+                  <X className="mr-1 h-3 w-3" />
+                  {t('common.clear')}
+                </Button>
+              )}
+
               <Button
                 variant="outline"
                 size="sm"
-                onClick={clearFilters}
-                className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 h-8 text-xs"
+                onClick={() => setShowFilters(!showFilters)}
+                className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 sm:hidden h-8 rounded-lg backdrop-blur-sm"
               >
-                <X className="mr-1 h-3 w-3" />
-                {t('common.clear')}
+                <SlidersHorizontal className="h-3.5 w-3.5" />
               </Button>
-            )}
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowFilters(!showFilters)}
-              className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 sm:hidden h-8"
+              {/* Sort — elegant styling */}
+              <Select value={sort} onValueChange={setSort}>
+                <SelectTrigger className="w-[150px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-8 rounded-lg backdrop-blur-sm">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                  <SelectItem value="featured">Featured</SelectItem>
+                  <SelectItem value="newest">Newest</SelectItem>
+                  <SelectItem value="price-asc">Price: Low to High</SelectItem>
+                  <SelectItem value="price-desc">Price: High to Low</SelectItem>
+                  <SelectItem value="rating">Top Rated</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Panel — Slide-out with luxury styling */}
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
+              className="overflow-hidden mb-6"
             >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-            </Button>
+              <div
+                className="rounded-2xl p-5 space-y-4"
+                style={{
+                  background: 'rgba(28, 25, 23, 0.6)',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid rgba(212, 164, 55, 0.08)',
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: accentColor }}>
+                    Filters
+                  </h3>
+                  <button
+                    onClick={() => setShowFilters(false)}
+                    className="text-amber-200/30 hover:text-amber-200/60 transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
 
-            {/* Sort */}
-            <Select value={sort} onValueChange={setSort}>
-              <SelectTrigger className="w-[140px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-8">
-                <SelectValue placeholder="Sort by" />
-              </SelectTrigger>
-              <SelectContent className="border-amber-900/30 bg-stone-900">
-                <SelectItem value="featured">Featured</SelectItem>
-                <SelectItem value="newest">Newest</SelectItem>
-                <SelectItem value="price-asc">Price: Low to High</SelectItem>
-                <SelectItem value="price-desc">Price: High to Low</SelectItem>
-                <SelectItem value="rating">Top Rated</SelectItem>
-              </SelectContent>
-            </Select>
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Source Filter */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Source</span>
+                    <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                      <SelectTrigger className="w-[130px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                        <SelectValue placeholder="All Sources" />
+                      </SelectTrigger>
+                      <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                        <SelectItem value="all">All Products</SelectItem>
+                        <SelectItem value="own">Our Collection</SelectItem>
+                        <SelectItem value="external">External Platforms</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Occasion Filter */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Occasion</span>
+                    <Select value={occasionFilter} onValueChange={setOccasionFilter}>
+                      <SelectTrigger className="w-[130px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                        <SelectValue placeholder="All" />
+                      </SelectTrigger>
+                      <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                        <SelectItem value="all">All Occasions</SelectItem>
+                        {OCCASION_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Recipient Filter */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">For</span>
+                    <Select value={recipientFilter} onValueChange={setRecipientFilter}>
+                      <SelectTrigger className="w-[110px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                        <SelectValue placeholder="All" />
+                      </SelectTrigger>
+                      <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                        <SelectItem value="all">All</SelectItem>
+                        {RECIPIENT_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Price Range Filter */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Price</span>
+                    <Select value={priceRangeFilter} onValueChange={setPriceRangeFilter}>
+                      <SelectTrigger className="w-[120px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                        <SelectValue placeholder="Any" />
+                      </SelectTrigger>
+                      <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                        <SelectItem value="all">Any Price</SelectItem>
+                        {PRICE_RANGE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Compact Filters Row (when panel closed) */}
+        {!showFilters && (
+          <div className="mb-6 flex flex-wrap items-center gap-2">
+            {/* Source Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Source</span>
+              <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                <SelectTrigger className="w-[120px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                  <SelectValue placeholder="All Sources" />
+                </SelectTrigger>
+                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                  <SelectItem value="all">All Products</SelectItem>
+                  <SelectItem value="own">Our Collection</SelectItem>
+                  <SelectItem value="external">External Platforms</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Occasion Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Occasion</span>
+              <Select value={occasionFilter} onValueChange={setOccasionFilter}>
+                <SelectTrigger className="w-[120px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                  <SelectItem value="all">All Occasions</SelectItem>
+                  {OCCASION_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Recipient Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">For</span>
+              <Select value={recipientFilter} onValueChange={setRecipientFilter}>
+                <SelectTrigger className="w-[100px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                  <SelectValue placeholder="All" />
+                </SelectTrigger>
+                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                  <SelectItem value="all">All</SelectItem>
+                  {RECIPIENT_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Price Range Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Price</span>
+              <Select value={priceRangeFilter} onValueChange={setPriceRangeFilter}>
+                <SelectTrigger className="w-[110px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                  <SelectValue placeholder="Any" />
+                </SelectTrigger>
+                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                  <SelectItem value="all">Any Price</SelectItem>
+                  {PRICE_RANGE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Compact Filters Row */}
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          {/* Source Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider">Source</span>
-            <Select value={sourceFilter} onValueChange={setSourceFilter}>
-              <SelectTrigger className="w-[120px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-7">
-                <SelectValue placeholder="All Sources" />
-              </SelectTrigger>
-              <SelectContent className="border-amber-900/30 bg-stone-900">
-                <SelectItem value="all">All Products</SelectItem>
-                <SelectItem value="own">Our Collection</SelectItem>
-                <SelectItem value="external">External Platforms</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Occasion Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider">Occasion</span>
-            <Select value={occasionFilter} onValueChange={setOccasionFilter}>
-              <SelectTrigger className="w-[120px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-7">
-                <SelectValue placeholder="All" />
-              </SelectTrigger>
-              <SelectContent className="border-amber-900/30 bg-stone-900">
-                <SelectItem value="all">All Occasions</SelectItem>
-                {OCCASION_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Recipient Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider">For</span>
-            <Select value={recipientFilter} onValueChange={setRecipientFilter}>
-              <SelectTrigger className="w-[100px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-7">
-                <SelectValue placeholder="All" />
-              </SelectTrigger>
-              <SelectContent className="border-amber-900/30 bg-stone-900">
-                <SelectItem value="all">All</SelectItem>
-                {RECIPIENT_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Price Range Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider">Price</span>
-            <Select value={priceRangeFilter} onValueChange={setPriceRangeFilter}>
-              <SelectTrigger className="w-[110px] border-amber-900/30 bg-stone-900/50 text-amber-200/70 text-xs h-7">
-                <SelectValue placeholder="Any" />
-              </SelectTrigger>
-              <SelectContent className="border-amber-900/30 bg-stone-900">
-                <SelectItem value="all">Any Price</SelectItem>
-                {PRICE_RANGE_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* Platform Filter Chips */}
+        {/* Platform Filter Chips — refined look */}
         {availablePlatforms.length > 0 && (
-          <div className="mb-5 flex flex-wrap items-center gap-2">
-            <span className="text-[10px] text-amber-200/40 uppercase tracking-wider mr-1">Platform</span>
+          <div className="mb-6 flex flex-wrap items-center gap-2">
+            <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium mr-1">Platform</span>
             <button
               onClick={() => setPlatformFilter('all')}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all duration-300 ${
                 platformFilter === 'all'
-                  ? 'border-amber-500/50 bg-amber-600/20 text-amber-300'
-                  : 'border-amber-900/20 bg-stone-900/40 text-amber-200/50 hover:border-amber-600/30 hover:text-amber-200/70'
+                  ? 'border-amber-500/50 bg-amber-600/15 text-amber-300 shadow-sm'
+                  : 'border-amber-900/15 bg-stone-900/30 text-amber-200/40 hover:border-amber-600/25 hover:text-amber-200/60'
               }`}
+              style={platformFilter === 'all' ? { boxShadow: `0 0 8px rgba(212, 164, 55, 0.1)` } : {}}
             >
-              <span className="h-2 w-2 rounded-full bg-amber-400" />
+              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accentColor }} />
               All
             </button>
             {availablePlatforms.map((p) => {
@@ -343,13 +488,14 @@ export function ProductGrid() {
                 <button
                   key={slug}
                   onClick={() => setPlatformFilter(isActive ? 'all' : slug)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all duration-300 ${
                     isActive
                       ? PLATFORM_CHIP_ACTIVE_BG[slug] || 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
-                      : 'border-amber-900/20 bg-stone-900/40 text-amber-200/50 hover:border-amber-600/30 hover:text-amber-200/70'
+                      : 'border-amber-900/15 bg-stone-900/30 text-amber-200/40 hover:border-amber-600/25 hover:text-amber-200/60'
                   }`}
+                  style={isActive ? { boxShadow: `0 0 8px rgba(212, 164, 55, 0.1)` } : {}}
                 >
-                  <span className={`h-2 w-2 rounded-full ${PLATFORM_DOT_COLORS[slug] || 'bg-emerald-500'}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT_COLORS[slug] || 'bg-emerald-500'}`} />
                   {p.label}
                 </button>
               );
@@ -361,31 +507,37 @@ export function ProductGrid() {
         {isLoading ? (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="overflow-hidden rounded-xl border border-amber-900/10 bg-stone-900/30">
-                <Skeleton className="aspect-square bg-stone-800/40" />
-                <div className="p-4 space-y-2">
-                  <Skeleton className="h-3 w-16 bg-stone-800/40" />
-                  <Skeleton className="h-4 w-3/4 bg-stone-800/40" />
-                  <Skeleton className="h-5 w-20 bg-stone-800/40" />
-                </div>
-              </div>
+              <ShimmerSkeleton key={i} />
             ))}
           </div>
         ) : products.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <span className="text-4xl">🔍</span>
-            <h3 className="mt-4 text-lg font-semibold text-amber-100">{t('products.noProductsFound')}</h3>
-            <p className="mt-2 text-sm text-amber-200/40">
+          /* Empty state with elegant design */
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col items-center justify-center py-20 text-center"
+          >
+            <div
+              className="mb-6 flex h-20 w-20 items-center justify-center rounded-full"
+              style={{
+                background: 'rgba(212, 164, 55, 0.08)',
+                border: '1px solid rgba(212, 164, 55, 0.15)',
+              }}
+            >
+              <Diamond className="h-8 w-8" style={{ color: accentColor, opacity: 0.5 }} />
+            </div>
+            <h3 className="text-lg font-semibold text-amber-100">{t('products.noProductsFound')}</h3>
+            <p className="mt-2 text-sm text-amber-200/30 max-w-sm">
               {t('products.tryAdjusting')}
             </p>
             <Button
               onClick={clearFilters}
-              variant="outline"
-              className="mt-4 border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400"
+              className="mt-6 text-stone-950 font-semibold rounded-lg luxury-sweep"
+              style={{ background: accentColor }}
             >
               {t('products.viewAllProducts')}
             </Button>
-          </div>
+          </motion.div>
         ) : (
           <motion.div
             initial={{ opacity: 0 }}
@@ -393,11 +545,51 @@ export function ProductGrid() {
             transition={{ duration: 0.4 }}
             className="grid grid-cols-2 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
           >
-            {products.map((product) => (
-              <ProductCard key={product.id} product={product} />
+            {paginatedProducts.map((product, i) => (
+              <ProductCard key={product.id} product={product} index={i} />
             ))}
           </motion.div>
         )}
+
+        {/* Pagination — luxury style */}
+        {totalPages > 1 && (
+          <div className="mt-8 flex items-center justify-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-900/20 bg-stone-900/40 text-amber-200/40 transition-all hover:border-amber-600/30 hover:text-amber-200/70 disabled:opacity-30 disabled:cursor-not-allowed backdrop-blur-sm"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            {Array.from({ length: totalPages }).map((_, i) => (
+              <button
+                key={i}
+                onClick={() => setCurrentPage(i + 1)}
+                className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-all duration-300 ${
+                  currentPage === i + 1
+                    ? 'text-stone-950 shadow-lg'
+                    : 'border border-amber-900/20 bg-stone-900/40 text-amber-200/40 hover:border-amber-600/30 hover:text-amber-200/70'
+                }`}
+                style={currentPage === i + 1 ? {
+                  background: accentColor,
+                  boxShadow: `0 2px 12px rgba(212, 164, 55, 0.2)`,
+                } : {}}
+              >
+                {i + 1}
+              </button>
+            ))}
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-900/20 bg-stone-900/40 text-amber-200/40 transition-all hover:border-amber-600/30 hover:text-amber-200/70 disabled:opacity-30 disabled:cursor-not-allowed backdrop-blur-sm"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+
+        {/* Bottom ornamental divider */}
+        {products.length > 0 && <div className="mt-8"><OrnamentalDivider /></div>}
       </div>
     </section>
   );

@@ -21,6 +21,7 @@ import {
   Building2,
   LayoutGrid,
   Ribbon,
+  ChevronRight,
   type LucideIcon,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -89,24 +90,64 @@ const subcategoryIcons: Record<string, LucideIcon> = {
 
 // ─── Accent colors for categories ───
 
-const categoryAccentBg: Record<string, string> = {
-  couple: 'bg-rose-500/10 border-rose-500/30 hover:bg-rose-500/20 hover:border-rose-500/50',
-  men: 'bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20 hover:border-amber-500/50',
-  women: 'bg-pink-500/10 border-pink-500/30 hover:bg-pink-500/20 hover:border-pink-500/50',
-  kids: 'bg-cyan-500/10 border-cyan-500/30 hover:bg-cyan-500/20 hover:border-cyan-500/50',
-  home: 'bg-orange-500/10 border-orange-500/30 hover:bg-orange-500/20 hover:border-orange-500/50',
-  office: 'bg-yellow-500/10 border-yellow-500/30 hover:bg-yellow-500/20 hover:border-yellow-500/50',
-  'new-arrivals': 'bg-amber-400/10 border-amber-400/30 hover:bg-amber-400/20 hover:border-amber-400/50',
+const categoryAccentColors: Record<string, { bg: string; border: string; icon: string; hoverBg: string; glow: string }> = {
+  couple: {
+    bg: 'rgba(244, 63, 94, 0.08)',
+    border: 'rgba(244, 63, 94, 0.2)',
+    icon: '#fb7185',
+    hoverBg: 'rgba(244, 63, 94, 0.15)',
+    glow: 'rgba(244, 63, 94, 0.15)',
+  },
+  men: {
+    bg: 'rgba(212, 164, 55, 0.08)',
+    border: 'rgba(212, 164, 55, 0.2)',
+    icon: '#d4a437',
+    hoverBg: 'rgba(212, 164, 55, 0.15)',
+    glow: 'rgba(212, 164, 55, 0.15)',
+  },
+  women: {
+    bg: 'rgba(236, 72, 153, 0.08)',
+    border: 'rgba(236, 72, 153, 0.2)',
+    icon: '#f472b6',
+    hoverBg: 'rgba(236, 72, 153, 0.15)',
+    glow: 'rgba(236, 72, 153, 0.15)',
+  },
+  kids: {
+    bg: 'rgba(6, 182, 212, 0.08)',
+    border: 'rgba(6, 182, 212, 0.2)',
+    icon: '#22d3ee',
+    hoverBg: 'rgba(6, 182, 212, 0.15)',
+    glow: 'rgba(6, 182, 212, 0.15)',
+  },
+  home: {
+    bg: 'rgba(249, 115, 22, 0.08)',
+    border: 'rgba(249, 115, 22, 0.2)',
+    icon: '#fb923c',
+    hoverBg: 'rgba(249, 115, 22, 0.15)',
+    glow: 'rgba(249, 115, 22, 0.15)',
+  },
+  office: {
+    bg: 'rgba(234, 179, 8, 0.08)',
+    border: 'rgba(234, 179, 8, 0.2)',
+    icon: '#facc15',
+    hoverBg: 'rgba(234, 179, 8, 0.15)',
+    glow: 'rgba(234, 179, 8, 0.15)',
+  },
+  'new-arrivals': {
+    bg: 'rgba(212, 164, 55, 0.1)',
+    border: 'rgba(212, 164, 55, 0.25)',
+    icon: '#f5e6a3',
+    hoverBg: 'rgba(212, 164, 55, 0.2)',
+    glow: 'rgba(212, 164, 55, 0.2)',
+  },
 };
 
-const categoryAccentIcon: Record<string, string> = {
-  couple: 'text-rose-400',
-  men: 'text-amber-400',
-  women: 'text-pink-400',
-  kids: 'text-cyan-400',
-  home: 'text-orange-400',
-  office: 'text-yellow-400',
-  'new-arrivals': 'text-amber-300',
+const defaultAccent = {
+  bg: 'rgba(212, 164, 55, 0.08)',
+  border: 'rgba(212, 164, 55, 0.2)',
+  icon: '#d4a437',
+  hoverBg: 'rgba(212, 164, 55, 0.15)',
+  glow: 'rgba(212, 164, 55, 0.15)',
 };
 
 // ─── Component ───
@@ -143,8 +184,7 @@ export function CategoryGrid() {
   }
 
   const ParentIcon = parentCategoryIcons[activeParent.slug] || Gem;
-  const accentBg = categoryAccentBg[activeParent.slug] || 'bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20 hover:border-amber-500/50';
-  const accentIcon = categoryAccentIcon[activeParent.slug] || 'text-amber-400';
+  const accent = categoryAccentColors[activeParent.slug] || defaultAccent;
 
   return (
     <section className="py-4">
@@ -154,76 +194,135 @@ export function CategoryGrid() {
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
-          transition={{ duration: 0.3, ease: 'easeOut' }}
-          className="overflow-hidden rounded-2xl border border-amber-500/15 bg-gradient-to-r from-stone-950/90 via-stone-900/60 to-stone-950/90 backdrop-blur-sm"
+          transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
+          className="overflow-hidden rounded-2xl"
+          style={{
+            background: 'rgba(28, 25, 23, 0.5)',
+            backdropFilter: 'blur(16px) saturate(1.2)',
+            WebkitBackdropFilter: 'blur(16px) saturate(1.2)',
+            border: '1px solid rgba(212, 164, 55, 0.08)',
+          }}
         >
-          {/* Header row with parent category */}
-          <div className="flex items-center gap-3 border-b border-amber-500/10 px-5 py-3.5">
-            <div className={`flex h-9 w-9 items-center justify-center rounded-xl border ${accentBg}`}>
-              <ParentIcon className={`h-4.5 w-4.5 ${accentIcon}`} strokeWidth={1.5} />
+          {/* Header row with parent category card */}
+          <div className="p-5">
+            <div className="flex items-center gap-4">
+              {/* Category Icon Circle */}
+              <motion.div
+                whileHover={{ scale: 1.08 }}
+                transition={{ duration: 0.2 }}
+                className="relative flex h-14 w-14 items-center justify-center rounded-2xl shrink-0"
+                style={{
+                  background: accent.bg,
+                  border: `1.5px solid ${accent.border}`,
+                }}
+              >
+                <ParentIcon className="h-6 w-6" style={{ color: accent.icon }} strokeWidth={1.5} />
+                {/* Glow effect */}
+                <div
+                  className="absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+                  style={{ boxShadow: `0 0 20px ${accent.glow}, 0 0 40px ${accent.glow}` }}
+                />
+              </motion.div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-amber-100 truncate">
+                  {activeParent.name}
+                </h3>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <p className="text-[10px] text-amber-200/30 uppercase tracking-[0.2em] font-medium">
+                    Browse subcategories
+                  </p>
+                  <span
+                    className="rounded-full px-2 py-0.5 text-[9px] font-bold"
+                    style={{ background: accent.bg, color: accent.icon, border: `1px solid ${accent.border}` }}
+                  >
+                    {activeParent.productCount} items
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setCategory(null)}
+                className="text-[10px] text-amber-200/25 hover:text-amber-200/50 transition-colors uppercase tracking-[0.15em] font-medium shrink-0"
+              >
+                Clear
+              </button>
             </div>
-            <div className="flex-1">
-              <h3 className="text-sm font-bold text-amber-100">
-                {activeParent.name}
-              </h3>
-              <p className="text-[10px] text-amber-200/35 uppercase tracking-wider">
-                Browse subcategories
-              </p>
-            </div>
-            <button
-              onClick={() => setCategory(null)}
-              className="text-[10px] text-amber-200/35 hover:text-amber-200/60 transition-colors uppercase tracking-wider"
-            >
-              Clear
-            </button>
           </div>
 
-          {/* Subcategory chips */}
-          <div className="flex flex-wrap items-center gap-2 px-5 py-3">
-            {/* "All" chip */}
-            <button
-              onClick={() => setCategory(activeParent.slug)}
-              className={`
-                inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5
-                text-xs font-medium transition-all duration-200
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
-                ${selectedCategory === activeParent.slug
-                  ? 'border-amber-500/50 bg-amber-500/15 text-amber-200 shadow-sm shadow-amber-500/10'
-                  : 'border-stone-700/50 bg-stone-900/50 text-amber-200/50 hover:border-amber-600/30 hover:bg-stone-900/80 hover:text-amber-200/80'
-                }
-              `}
-            >
-              <LayoutGrid className="h-3 w-3" />
-              All {activeParent.name}
-            </button>
+          {/* Subcategory cards — horizontal scroll on mobile, wrap on desktop */}
+          <div className="px-5 pb-5">
+            {/* Subcategory cards grid */}
+            <div className="flex gap-2.5 overflow-x-auto pb-2 md:flex-wrap scrollbar-thin">
+              {/* "All" card */}
+              <motion.button
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.2 }}
+                onClick={() => setCategory(activeParent.slug)}
+                className="group relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium transition-all duration-300 shrink-0"
+                style={{
+                  background: selectedCategory === activeParent.slug ? accent.hoverBg : 'rgba(28, 25, 23, 0.3)',
+                  border: `1.5px solid ${selectedCategory === activeParent.slug ? accent.border : 'rgba(212, 164, 55, 0.06)'}`,
+                  color: selectedCategory === activeParent.slug ? accent.icon : 'rgba(212, 164, 55, 0.4)',
+                  boxShadow: selectedCategory === activeParent.slug ? `0 0 12px ${accent.glow}` : 'none',
+                }}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+                All {activeParent.name}
+              </motion.button>
 
-            {/* Individual subcategory chips */}
-            {subcategories.map((sub, i) => {
-              const SubIcon = subcategoryIcons[sub.slug] || Gem;
-              const isActive = selectedCategory === sub.slug;
+              {/* Individual subcategory cards */}
+              {subcategories.map((sub, i) => {
+                const SubIcon = subcategoryIcons[sub.slug] || Gem;
+                const isActive = selectedCategory === sub.slug;
 
-              return (
-                <motion.button
-                  key={sub.id}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: i * 0.04, duration: 0.15 }}
-                  onClick={() => setCategory(sub.slug)}
-                  className={`
-                    inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5
-                    text-xs font-medium transition-all duration-200
-                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50
-                    ${isActive
-                      ? 'border-amber-500/50 bg-amber-500/15 text-amber-200 shadow-sm shadow-amber-500/10'
-                      : 'border-stone-700/50 bg-stone-900/50 text-amber-200/50 hover:border-amber-600/30 hover:bg-stone-900/80 hover:text-amber-200/80'
-                    }
-                  `}
-                >
-                  <SubIcon className="h-3 w-3" />
-                  {sub.name}
-                </motion.button>
-              );
-            })}
+                return (
+                  <motion.button
+                    key={sub.id}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: i * 0.04, duration: 0.2 }}
+                    onClick={() => setCategory(sub.slug)}
+                    className="group relative flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-medium transition-all duration-300 shrink-0"
+                    style={{
+                      background: isActive ? accent.hoverBg : 'rgba(28, 25, 23, 0.3)',
+                      border: `1.5px solid ${isActive ? accent.border : 'rgba(212, 164, 55, 0.06)'}`,
+                      color: isActive ? accent.icon : 'rgba(212, 164, 55, 0.4)',
+                      boxShadow: isActive ? `0 0 12px ${accent.glow}` : 'none',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.background = accent.bg;
+                        e.currentTarget.style.borderColor = accent.border;
+                        e.currentTarget.style.color = accent.icon;
+                        e.currentTarget.style.boxShadow = `0 0 12px ${accent.glow}`;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.background = 'rgba(28, 25, 23, 0.3)';
+                        e.currentTarget.style.borderColor = 'rgba(212, 164, 55, 0.06)';
+                        e.currentTarget.style.color = 'rgba(212, 164, 55, 0.4)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }
+                    }}
+                  >
+                    <SubIcon className="h-3.5 w-3.5" />
+                    {sub.name}
+                    {sub.productCount > 0 && (
+                      <span
+                        className="rounded-full px-1.5 py-0.5 text-[8px] font-bold"
+                        style={{
+                          background: isActive ? `${accent.icon}20` : 'rgba(212, 164, 55, 0.06)',
+                          color: isActive ? accent.icon : 'rgba(212, 164, 55, 0.3)',
+                        }}
+                      >
+                        {sub.productCount}
+                      </span>
+                    )}
+                  </motion.button>
+                );
+              })}
+            </div>
           </div>
         </motion.div>
       </AnimatePresence>

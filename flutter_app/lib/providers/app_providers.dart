@@ -16,6 +16,45 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // Theme Color
+  // ════════════════════════════════════════════════════════════════
+  String _themeColorKey = 'royal-gold';
+  String get themeColorKey => _themeColorKey;
+  ThemeColorData get themeColor => AppConfig.themeColors[_themeColorKey] ?? AppConfig.themeColors['royal-gold']!;
+
+  void setThemeColor(String key) {
+    if (AppConfig.themeColors.containsKey(key) && key != _themeColorKey) {
+      _themeColorKey = key;
+      notifyListeners();
+      _persistThemeColor(key);
+    }
+  }
+
+  Future<void> _persistThemeColor(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('theme_color', key);
+    } catch (_) {}
+  }
+
+  Future<void> _restoreThemeColor() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('theme_color');
+      if (saved != null && AppConfig.themeColors.containsKey(saved)) {
+        _themeColorKey = saved;
+      }
+    } catch (_) {}
+  }
+
+  // Convenience color getters
+  Color get accentColor => Color(themeColor.primary);
+  Color get accentLightColor => Color(themeColor.primaryLight);
+  Color get accentDarkColor => Color(themeColor.primaryDark);
+  Color get accentGlow => Color(themeColor.glow);
+  Color get accentGlowStrong => Color(themeColor.glowStrong);
+
   // Auth
   User? _user;
   User? get user => _user;
@@ -71,6 +110,9 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
     
     try {
+      // Restore theme color first
+      await _restoreThemeColor();
+
       // Restore auth token from SharedPreferences before making API calls
       final prefs = await SharedPreferences.getInstance();
       final savedToken = prefs.getString('auth_token');
