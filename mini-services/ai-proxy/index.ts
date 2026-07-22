@@ -259,13 +259,14 @@ async function vlmAnalyze(zai: any, prompt: string, imageUrl: string, timeoutMs 
 
 // ─── Safe image generation wrappers ────────────────────────────────
 
-async function safeImageEdit(zai: any, params: { prompt: string; images: { url: string }[]; size: ImageSize }): Promise<string | null> {
+async function safeImageEdit(zai: any, params: { prompt: string; image: string; size: ImageSize }): Promise<string | null> {
   try {
+    // v43 FIX: Use `image` (singular) — selfie as base image for face preservation
     const response = await zai.images.generations.edit({
       prompt: params.prompt,
-      images: params.images,
+      image: params.image,
       size: params.size,
-    } as any)
+    })
 
     if (response?.data?.[0]?.base64) {
       return `data:image/png;base64,${response.data[0].base64}`
@@ -555,22 +556,28 @@ const server = createServer(async (req, res) => {
         return
       }
 
-      const { prompt, images, size } = body
-      if (!prompt || !images || !Array.isArray(images) || images.length === 0) {
+      // v43 FIX: Accept `image` (singular) parameter — selfie as base image
+      // Also accept legacy `images` array for backward compatibility, but
+      // always use the selfie (first image) as the singular `image` parameter.
+      const { prompt, image, images, size } = body
+      // Determine the selfie image: either `image` (singular) or first in `images` array
+      const selfieImage = image || (images && Array.isArray(images) && images.length > 0 ? images[0].url : null)
+      if (!prompt || !selfieImage) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ success: false, error: 'prompt and images are required' }))
+        res.end(JSON.stringify({ success: false, error: 'prompt and image are required' }))
         return
       }
 
-      console.log(`[ai-proxy] image-edit: prompt="${prompt.substring(0, 80)}...", images=${images.length}, size=${size || 'default'}`)
+      console.log(`[ai-proxy] image-edit: prompt="${prompt.substring(0, 80)}...", hasImage=${!!selfieImage}, size=${size || 'default'}`)
 
       try {
         const zai = createZAIClient()
+        // v43 FIX: Use `image` (singular) — selfie as base image for face preservation
         const response = await zai.images.generations.edit({
           prompt,
-          images,
+          image: selfieImage,
           size: size || '768x1344',
-        } as any)
+        })
 
         if (response?.data?.[0]?.base64) {
           const mime = response.data[0].format === 'jpeg' || response.data[0].format === 'jpg'

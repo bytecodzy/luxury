@@ -1184,14 +1184,19 @@ async function callGeminiTryOn(
 
 function buildEditPrompt(config: CategoryConfig, input: TryOnInput): string {
   const colors = extractColors(input.productName, input.productDescription, input.productTags)
+  const clientColors = input.clientProductColors || ''
 
   const parts: string[] = []
   parts.push(`Virtual try-on photograph. The person in the reference image is now ${config.placement}.`)
   parts.push(`The product is "${input.productName}".`)
-  if (colors) parts.push(`The product colours are ${colors}.`)
+  // Use both extracted colors and client-provided colors for maximum fidelity
+  const allColors = clientColors || colors
+  if (allColors) parts.push(`The product colours are ${allColors}.`)
+  if (colors && clientColors && colors !== clientColors) parts.push(`Colours also include: ${colors}.`)
   if (config.materialHint) parts.push(`The product is made of ${config.materialHint}.`)
+  if (config.garmentDescription) parts.push(config.garmentDescription)
   if (input.productDescription) {
-    const desc = input.productDescription.substring(0, 180).replace(/\s+/g, ' ').trim()
+    const desc = input.productDescription.substring(0, 250).replace(/\s+/g, ' ').trim()
     if (desc) parts.push(`Product details: ${desc}.`)
   }
   parts.push(`ABSOLUTE REQUIREMENT — IDENTITY PRESERVATION: Keep the EXACT same face, gender, skin tone, body type, hairstyle, hair colour, and age as the person in the reference image. Do NOT generate a new face. Do NOT change the person's gender.`)
@@ -1235,12 +1240,16 @@ async function callZAIImageEdit(
   const catConfig = getCategoryConfig(input.categorySlug, input.productName)
   const prompt = buildEditPrompt(catConfig, input)
 
-  const hasProductImage = input.productImageBase64 && input.productImageBase64.startsWith('data:image/')
-  const images = hasProductImage
-    ? [{ url: input.selfieData }, { url: input.productImageBase64 }]
-    : [{ url: input.selfieData }]
-
-  const strategyName = hasProductImage ? 'edit-both' : 'edit-selfie'
+  // v43 FIX: Use SINGULAR `image` parameter (the user's selfie as the base image).
+  // The ZAI SDK's CreateImageEditBody interface expects `image?: string` (singular),
+  // NOT `images: [...]` (plural array). Previous code sent `images` with `as any`
+  // bypassing type checking — the SDK ignored the unrecognized parameter and
+  // generated from prompt only, producing a DIFFERENT person instead of
+  // preserving the selfie's face. By passing the selfie as `image`, the AI
+  // preserves the user's face, gender, skin tone, and body type, while
+  // rendering the product from the prompt description (product name, colors,
+  // description, material — all in buildEditPrompt).
+  const strategyName = 'edit-selfie-preserving'
   const remaining = Math.min(ZAI_EDIT_TIMEOUT_MS, deadline - Date.now() - 3_000)
   if (remaining < 15_000) {
     return { success: false, error: `insufficient time budget (${remaining}ms) for ZAI edit` }
@@ -1265,7 +1274,8 @@ async function callZAIImageEdit(
   // ═══════════════════════════════════════════════════════════════════
   if (isVercel && proxyUrl) {
     console.log(`[virtual-tryon] v45: Routing through ai-proxy at ${proxyUrl.substring(0, 50)}...`)
-    return await callAIProxyImageEdit(prompt, images, catConfig.size, strategyName, proxyUrl, remaining)
+    // v43 FIX: Pass selfie as singular `image` to the proxy
+    return await callAIProxyImageEdit(prompt, input.selfieData, catConfig.size, strategyName, proxyUrl, remaining)
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -1289,12 +1299,13 @@ async function callZAIImageEdit(
     const timeoutId = setTimeout(() => controller.abort(), remaining)
 
     // Race the SDK call against the timeout
+    // v43 FIX: Use `image` (singular) — selfie as base image for face preservation
     const response = await Promise.race([
       zai.images.generations.edit({
         prompt,
-        images,
+        image: input.selfieData,
         size: catConfig.size,
-      } as any),
+      }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error(`ZAI edit timed out (${remaining}ms)`)), remaining)
       ),
@@ -1375,7 +1386,7 @@ function getProxyHeaders(proxyUrl: string): Record<string, string> {
 
 async function callAIProxyImageEdit(
   prompt: string,
-  images: { url: string }[],
+  image: string,  // v43 FIX: singular `image` (selfie data URL) instead of `images` array
   size: ImageSize,
   strategyName: string,
   proxyUrl: string,
@@ -1383,7 +1394,8 @@ async function callAIProxyImageEdit(
 ): Promise<{ success: boolean; imageUrl?: string; error?: string; strategy?: string }> {
   const url = buildProxyUrl(proxyUrl, '/api/image-edit')
   const headers = getProxyHeaders(proxyUrl)
-  const requestBody = { prompt, images, size }
+  // v43 FIX: Send `image` (singular selfie) instead of `images` (array)
+  const requestBody = { prompt, image, size }
 
   console.log(`[virtual-tryon] v45: Calling ai-proxy image-edit at ${url.substring(0, 80)}...`)
 
