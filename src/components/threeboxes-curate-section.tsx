@@ -128,15 +128,15 @@ const CURATED_COLLECTIONS: CuratedCollection[] = [
 ];
 
 export function ThreeboxesCurateSection() {
-  const { setView, setCategory } = useStore();
+  const { setView, setCategory, appTheme } = useStore();
 
   return (
-    <section className="relative overflow-hidden border-t border-amber-900/20 bg-gradient-to-b from-stone-950 via-stone-900/30 to-stone-950 py-12 sm:py-16">
+    <section className={`relative overflow-hidden border-t ${appTheme === 'light' ? 'border-amber-200/40 bg-gradient-to-b from-white via-amber-50/20 to-white' : 'border-amber-900/20 bg-gradient-to-b from-stone-950 via-stone-900/30 to-stone-950'} py-12 sm:py-16`}>
       {/* Background decorations */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-1/3 top-1/3 h-64 w-64 rounded-full bg-amber-500/5 blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/3 h-48 w-48 rounded-full bg-rose-500/5 blur-3xl" />
-        <div className="absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent via-amber-500/15 to-transparent" />
+        <div className={`absolute left-1/3 top-1/3 h-64 w-64 rounded-full ${appTheme === 'light' ? 'bg-amber-400/10' : 'bg-amber-500/5'} blur-3xl`} />
+        <div className={`absolute bottom-1/4 right-1/3 h-48 w-48 rounded-full ${appTheme === 'light' ? 'bg-rose-400/10' : 'bg-rose-500/5'} blur-3xl`} />
+        <div className={`absolute left-0 top-0 h-px w-full bg-gradient-to-r from-transparent ${appTheme === 'light' ? 'via-amber-400/20' : 'via-amber-500/15'} to-transparent`} />
       </div>
 
       <div className="relative container mx-auto px-4">
@@ -148,15 +148,15 @@ export function ThreeboxesCurateSection() {
           transition={{ duration: 0.6 }}
           className="mb-10 text-center"
         >
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-medium text-amber-400">
+          <div className={`mb-3 inline-flex items-center gap-2 rounded-full border ${appTheme === 'light' ? 'border-amber-300/30 bg-amber-100/50 text-amber-700' : 'border-amber-500/30 bg-amber-500/10 text-amber-400'} px-4 py-1.5 text-xs font-medium`}>
             <Crown className="h-3.5 w-3.5" />
             Expertly Curated by 3BOXES
           </div>
           <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">
             <span className="luxury-text">3BOXES </span>
-            <span className="text-amber-50">Curate</span>
+            <span className={`${appTheme === 'light' ? 'text-stone-800' : 'text-amber-50'}`}>Curate</span>
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-sm text-amber-200/60 sm:text-base">
+          <p className={`mx-auto mt-3 max-w-xl text-sm ${appTheme === 'light' ? 'text-stone-600/70' : 'text-amber-200/60'} sm:text-base`}>
             Every piece is handpicked by our expert curators. Explore collections that reflect the finest in luxury, taste, and craftsmanship.
           </p>
         </motion.div>
@@ -172,19 +172,19 @@ export function ThreeboxesCurateSection() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: i * 0.08, duration: 0.5 }}
-                className={`group relative overflow-hidden rounded-2xl border bg-gradient-to-br ${collection.accentFrom} ${collection.accentTo} to-stone-950/90 p-5 backdrop-blur-sm transition-all duration-300 hover:shadow-lg hover:shadow-amber-900/10 ${collection.accentBorder}`}
+                className={`group relative overflow-hidden rounded-2xl border ${appTheme === 'light' ? 'bg-white/90 hover:bg-amber-100/20 hover:shadow-amber-400/5' : (`bg-gradient-to-br ${collection.accentFrom} ${collection.accentTo} to-stone-950/90 hover:shadow-lg hover:shadow-amber-900/10`)} p-5 backdrop-blur-sm transition-all duration-300 ${collection.accentBorder}`}
               >
                 {/* Decorative corner accent */}
-                <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-amber-500/5 blur-2xl transition-all group-hover:bg-amber-500/10" />
+                <div className={`pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full ${appTheme === 'light' ? 'bg-amber-300/10 group-hover:bg-amber-300/20' : 'bg-amber-500/5 group-hover:bg-amber-500/10'} blur-2xl transition-all`} />
 
                 {/* Top row */}
                 <div className="mb-4 flex items-start justify-between">
                   <div className={`flex h-11 w-11 items-center justify-center rounded-xl border ${collection.accentBg} ${collection.accentBorder}`}>
                     <Icon className={`h-5 w-5 ${collection.accentColor}`} strokeWidth={1.5} />
                   </div>
-                  <div className="flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/5 px-2.5 py-1">
-                    <Eye className="h-3 w-3 text-amber-400/60" />
-                    <span className="text-[10px] font-medium text-amber-200/50">{collection.items} items</span>
+                  <div className={`flex items-center gap-1 rounded-full border ${appTheme === 'light' ? 'border-amber-300/30 bg-amber-100/50' : 'border-amber-500/20 bg-amber-500/5'} px-2.5 py-1`}>
+                    <Eye className={`h-3 w-3 ${appTheme === 'light' ? 'text-amber-600/60' : 'text-amber-400/60'}`} />
+                    <span className={`text-[10px] font-medium ${appTheme === 'light' ? 'text-stone-600/70' : 'text-amber-200/50'}`}>{collection.items} items</span>
                   </div>
                 </div>
 
@@ -194,10 +194,10 @@ export function ThreeboxesCurateSection() {
                     {collection.subtitle}
                   </span>
                 </div>
-                <h3 className="mb-2 text-lg font-bold text-amber-100">{collection.title}</h3>
+                <h3 className={`mb-2 text-lg font-bold ${appTheme === 'light' ? 'text-stone-900' : 'text-amber-100'}`}>{collection.title}</h3>
 
                 {/* Description */}
-                <p className="mb-4 text-xs leading-relaxed text-amber-200/50">{collection.description}</p>
+                <p className={`mb-4 text-xs leading-relaxed ${appTheme === 'light' ? 'text-stone-500/60' : 'text-amber-200/50'}`}>{collection.description}</p>
 
                 {/* Curator info */}
                 <div className="mb-4 flex items-center gap-2">
@@ -205,8 +205,8 @@ export function ThreeboxesCurateSection() {
                     <BadgeCheck className={`h-3.5 w-3.5 ${collection.accentColor}`} />
                   </div>
                   <div>
-                    <p className="text-[11px] font-semibold text-amber-100">{collection.curator}</p>
-                    <p className="text-[10px] text-amber-200/40">{collection.curatorTitle}</p>
+                    <p className={`text-[11px] font-semibold ${appTheme === 'light' ? 'text-stone-800' : 'text-amber-100'}`}>{collection.curator}</p>
+                    <p className={`text-[10px] ${appTheme === 'light' ? 'text-stone-500/60' : 'text-amber-200/40'}`}>{collection.curatorTitle}</p>
                   </div>
                 </div>
 
@@ -217,7 +217,7 @@ export function ThreeboxesCurateSection() {
                     setView('home');
                   }}
                   variant="outline"
-                  className={`w-full gap-2 border-amber-500/30 bg-amber-600/10 text-amber-200 hover:bg-amber-600/20 hover:text-amber-100 hover:border-amber-500/50 transition-all duration-300`}
+                  className={`w-full gap-2 ${appTheme === 'light' ? 'border-amber-300/40 bg-amber-100/50 text-amber-700 hover:bg-amber-200/60 hover:text-amber-800 hover:border-amber-400/50' : 'border-amber-500/30 bg-amber-600/10 text-amber-200 hover:bg-amber-600/20 hover:text-amber-100 hover:border-amber-500/50'} transition-all duration-300`}
                 >
                   <Sparkles className="h-3.5 w-3.5" />
                   Explore Collection
@@ -234,18 +234,18 @@ export function ThreeboxesCurateSection() {
           whileInView={{ opacity: 1 }}
           viewport={{ once: true }}
           transition={{ delay: 0.6 }}
-          className="mt-10 flex flex-wrap items-center justify-center gap-6 text-xs text-amber-200/40"
+          className={`mt-10 flex flex-wrap items-center justify-center gap-6 text-xs ${appTheme === 'light' ? 'text-stone-500/60' : 'text-amber-200/40'}`}
         >
           <span className="flex items-center gap-1.5">
-            <Star className="h-3.5 w-3.5 text-amber-400" />
+            <Star className={`h-3.5 w-3.5 ${appTheme === 'light' ? 'text-amber-600' : 'text-amber-400'}`} />
             6 Expert Curators
           </span>
           <span className="flex items-center gap-1.5">
-            <Eye className="h-3.5 w-3.5 text-amber-400" />
+            <Eye className={`h-3.5 w-3.5 ${appTheme === 'light' ? 'text-amber-600' : 'text-amber-400'}`} />
             270+ Handpicked Items
           </span>
           <span className="flex items-center gap-1.5">
-            <BadgeCheck className="h-3.5 w-3.5 text-amber-400" />
+            <BadgeCheck className={`h-3.5 w-3.5 ${appTheme === 'light' ? 'text-amber-600' : 'text-amber-400'}`} />
             Quality Guaranteed
           </span>
         </motion.div>

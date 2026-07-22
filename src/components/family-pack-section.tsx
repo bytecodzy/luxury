@@ -86,7 +86,7 @@ const FAMILY_PACKS: FamilyPack[] = [
 ];
 
 export function FamilyPackSection() {
-  const { toggleGiftBuilder } = useStore();
+  const { toggleGiftBuilder, appTheme } = useStore();
 
   return (
     <section className="py-12 sm:py-16">
@@ -98,15 +98,15 @@ export function FamilyPackSection() {
         transition={{ duration: 0.6 }}
         className="mb-10 text-center"
       >
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs font-medium text-amber-400">
+        <div className={`mb-3 inline-flex items-center gap-2 rounded-full border ${appTheme === 'light' ? 'border-amber-300/30 bg-amber-100/50 text-amber-700' : 'border-amber-500/30 bg-amber-500/10 text-amber-400'} px-4 py-1.5 text-xs font-medium`}>
           <Package className="h-3.5 w-3.5" />
           Curated for Every Family
         </div>
         <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">
-          <span className="text-amber-50">Family </span>
+          <span className={`${appTheme === 'light' ? 'text-stone-800' : 'text-amber-50'}`}>Family </span>
           <span className="luxury-text">Gift Packs</span>
         </h2>
-        <p className="mx-auto mt-3 max-w-xl text-sm text-amber-200/60 sm:text-base">
+        <p className={`mx-auto mt-3 max-w-xl text-sm ${appTheme === 'light' ? 'text-stone-600/70' : 'text-amber-200/60'} sm:text-base`}>
           Pre-curated luxury gift bundles for every member of your family. Save up to 30% with our exclusive packs.
         </p>
       </motion.div>
@@ -122,7 +122,7 @@ export function FamilyPackSection() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: i * 0.1, duration: 0.5 }}
-              className={`group relative overflow-hidden rounded-2xl border bg-gradient-to-b from-stone-900/80 to-stone-950/90 p-5 backdrop-blur-sm transition-all duration-300 hover:shadow-lg hover:shadow-amber-900/10 ${pack.accentBorder}`}
+              className={`group relative overflow-hidden rounded-2xl border ${appTheme === 'light' ? 'bg-white/90 hover:bg-amber-100/20 hover:shadow-amber-400/5' : 'bg-gradient-to-b from-stone-900/80 to-stone-950/90 hover:shadow-lg hover:shadow-amber-900/10'} p-5 backdrop-blur-sm transition-all duration-300 ${pack.accentBorder}`}
             >
               {/* Badge */}
               <div className="absolute right-3 top-3">
@@ -138,25 +138,25 @@ export function FamilyPackSection() {
               </div>
 
               {/* Name */}
-              <h3 className="mb-2 text-lg font-bold text-amber-100">{pack.name}</h3>
+              <h3 className={`mb-2 text-lg font-bold ${appTheme === 'light' ? 'text-stone-900' : 'text-amber-100'}`}>{pack.name}</h3>
 
               {/* Description */}
-              <p className="mb-4 text-xs leading-relaxed text-amber-200/50">{pack.description}</p>
+              <p className={`mb-4 text-xs leading-relaxed ${appTheme === 'light' ? 'text-stone-500/60' : 'text-amber-200/50'}`}>{pack.description}</p>
 
               {/* Items list */}
               <div className="mb-4 space-y-1.5">
                 {pack.items.map((item, idx) => (
                   <div key={idx} className="flex items-center gap-2 text-xs">
                     <Sparkles className={`h-3 w-3 ${pack.accentColor} opacity-60`} />
-                    <span className="text-amber-200/60">{item}</span>
+                    <span className={`${appTheme === 'light' ? 'text-stone-600/70' : 'text-amber-200/60'}`}>{item}</span>
                   </div>
                 ))}
               </div>
 
               {/* Price */}
               <div className="mb-4 flex items-baseline gap-2">
-                <span className="text-xl font-bold text-amber-100">{pack.price}</span>
-                <span className="text-sm text-amber-200/40 line-through">{pack.originalPrice}</span>
+                <span className={`text-xl font-bold ${appTheme === 'light' ? 'text-stone-900' : 'text-amber-100'}`}>{pack.price}</span>
+                <span className={`text-sm ${appTheme === 'light' ? 'text-stone-400/40' : 'text-amber-200/40'} line-through`}>{pack.originalPrice}</span>
                 <span className={`text-xs font-semibold ${pack.accentColor}`}>Save 30%</span>
               </div>
 
@@ -182,8 +182,8 @@ export function FamilyPackSection() {
         transition={{ delay: 0.5 }}
         className="mt-8 text-center"
       >
-        <p className="text-xs text-amber-200/40">
-          <Crown className="mr-1 inline-block h-3.5 w-3.5 text-amber-400" />
+        <p className={`text-xs ${appTheme === 'light' ? 'text-stone-400/40' : 'text-amber-200/40'}`}>
+          <Crown className={`mr-1 inline-block h-3.5 w-3.5 ${appTheme === 'light' ? 'text-amber-600' : 'text-amber-400'}`} />
           All packs include free gift wrapping & premium packaging
         </p>
       </motion.div>

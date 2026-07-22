@@ -81,14 +81,14 @@ const OCCASIONS = [
 ];
 
 export function SocialConnectionsSection() {
-  const { toggleGiftBuilder } = useStore();
+  const { toggleGiftBuilder, appTheme } = useStore();
 
   return (
-    <section className="relative overflow-hidden border-t border-amber-900/20 py-12 sm:py-16">
+    <section className={`relative overflow-hidden border-t ${appTheme === 'light' ? 'border-amber-200/40 bg-gradient-to-b from-white via-amber-50/20 to-white' : 'border-amber-900/20'} py-12 sm:py-16`}>
       {/* Background decorations */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-1/4 top-1/4 h-48 w-48 rounded-full bg-rose-500/5 blur-3xl" />
-        <div className="absolute bottom-1/3 right-1/4 h-48 w-48 rounded-full bg-amber-500/5 blur-3xl" />
+        <div className={`absolute left-1/4 top-1/4 h-48 w-48 rounded-full ${appTheme === 'light' ? 'bg-rose-400/10' : 'bg-rose-500/5'} blur-3xl`} />
+        <div className={`absolute bottom-1/3 right-1/4 h-48 w-48 rounded-full ${appTheme === 'light' ? 'bg-amber-400/10' : 'bg-amber-500/5'} blur-3xl`} />
       </div>
 
       <div className="relative container mx-auto px-4">
@@ -100,15 +100,15 @@ export function SocialConnectionsSection() {
           transition={{ duration: 0.6 }}
           className="mb-10 text-center"
         >
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-rose-500/30 bg-rose-500/10 px-4 py-1.5 text-xs font-medium text-rose-400">
+          <div className={`mb-3 inline-flex items-center gap-2 rounded-full border ${appTheme === 'light' ? 'border-rose-400/40 bg-rose-100/50 text-rose-600' : 'border-rose-500/30 bg-rose-500/10 text-rose-400'} px-4 py-1.5 text-xs font-medium`}>
             <Users className="h-3.5 w-3.5" />
             Gift Together, Celebrate Together
           </div>
           <h2 className="mt-3 text-2xl font-bold tracking-tight sm:text-3xl lg:text-4xl">
-            <span className="text-amber-50">Social </span>
+            <span className={`${appTheme === 'light' ? 'text-stone-800' : 'text-amber-50'}`}>Social </span>
             <span className="luxury-text">Connections</span>
           </h2>
-          <p className="mx-auto mt-3 max-w-xl text-sm text-amber-200/60 sm:text-base">
+          <p className={`mx-auto mt-3 max-w-xl text-sm ${appTheme === 'light' ? 'text-stone-600/70' : 'text-amber-200/60'} sm:text-base`}>
             Gift giving is better together. Connect with your loved ones and make every celebration memorable.
           </p>
         </motion.div>
@@ -124,7 +124,7 @@ export function SocialConnectionsSection() {
           {OCCASIONS.map((occ) => (
             <div
               key={occ.label}
-              className="flex items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/5 px-4 py-2 text-sm text-amber-200/70 transition-all hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-100"
+              className={`flex items-center gap-2 rounded-full border ${appTheme === 'light' ? 'border-amber-300/30 bg-amber-100/50 text-stone-700 hover:border-amber-400/40 hover:bg-amber-200/60 hover:text-stone-900' : 'border-amber-500/20 bg-amber-500/5 text-amber-200/70 hover:border-amber-500/40 hover:bg-amber-500/10 hover:text-amber-100'} px-4 py-2 text-sm transition-all`}
             >
               <span>{occ.emoji}</span>
               <span className="font-medium">{occ.label}</span>
@@ -143,15 +143,15 @@ export function SocialConnectionsSection() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: i * 0.08, duration: 0.5 }}
-                className="group rounded-2xl border border-amber-900/20 bg-gradient-to-b from-stone-900/60 to-stone-950/80 p-5 backdrop-blur-sm transition-all duration-300 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-900/10"
+                className={`group rounded-2xl border ${appTheme === 'light' ? 'border-amber-200/40 bg-white/90 hover:border-amber-300/30 hover:shadow-amber-400/5' : 'border-amber-900/20 bg-gradient-to-b from-stone-900/60 to-stone-950/80 hover:border-amber-500/30 hover:shadow-lg hover:shadow-amber-900/10'} p-5 backdrop-blur-sm transition-all duration-300`}
               >
                 <div className="mb-3 flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl border border-amber-500/20 ${feature.accentBg}`}>
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl border ${appTheme === 'light' ? 'border-amber-200/40' : 'border-amber-500/20'} ${feature.accentBg}`}>
                     <Icon className={`h-5 w-5 ${feature.accentColor}`} strokeWidth={1.5} />
                   </div>
-                  <h3 className="text-base font-bold text-amber-100">{feature.title}</h3>
+                  <h3 className={`text-base font-bold ${appTheme === 'light' ? 'text-stone-900' : 'text-amber-100'}`}>{feature.title}</h3>
                 </div>
-                <p className="text-xs leading-relaxed text-amber-200/50">{feature.description}</p>
+                <p className={`text-xs leading-relaxed ${appTheme === 'light' ? 'text-stone-500/60' : 'text-amber-200/50'}`}>{feature.description}</p>
               </motion.div>
             );
           })}
@@ -175,7 +175,7 @@ export function SocialConnectionsSection() {
           </Button>
           <Button
             variant="outline"
-            className="gap-2 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-100"
+            className={`gap-2 ${appTheme === 'light' ? 'border-amber-300/40 bg-amber-100/50 text-amber-700 hover:bg-amber-200/60 hover:text-amber-800' : 'border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-100'}`}
           >
             <Send className="h-4 w-4" />
             Invite Friends
@@ -190,8 +190,8 @@ export function SocialConnectionsSection() {
           transition={{ delay: 0.6 }}
           className="mt-6 text-center"
         >
-          <p className="text-xs text-amber-200/40">
-            <Crown className="mr-1 inline-block h-3.5 w-3.5 text-amber-400" />
+          <p className={`text-xs ${appTheme === 'light' ? 'text-stone-400/40' : 'text-amber-200/40'}`}>
+            <Crown className={`mr-1 inline-block h-3.5 w-3.5 ${appTheme === 'light' ? 'text-amber-600' : 'text-amber-400'}`} />
             Trusted by 50,000+ families across India
           </p>
         </motion.div>

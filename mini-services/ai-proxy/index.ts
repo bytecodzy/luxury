@@ -533,6 +533,92 @@ const server = createServer(async (req, res) => {
       return
     }
 
+    // ── POST /api/image-edit ────────────────────────────────────────
+    // Synchronous image-edit endpoint for Vercel proxy calls.
+    // Uses ZAI SDK directly and returns the result immediately (no polling).
+    // This is the key endpoint that makes virtual try-on work on Vercel.
+    if (path === '/api/image-edit' && req.method === 'POST') {
+      if (!ZAI_CONFIG) {
+        res.writeHead(503, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: 'AI service not configured' }))
+        return
+      }
+
+      let body: any
+      try {
+        const chunks: Buffer[] = []
+        for await (const chunk of req) chunks.push(chunk)
+        body = JSON.parse(Buffer.concat(chunks).toString())
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: 'Invalid request body' }))
+        return
+      }
+
+      const { prompt, images, size } = body
+      if (!prompt || !images || !Array.isArray(images) || images.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: 'prompt and images are required' }))
+        return
+      }
+
+      console.log(`[ai-proxy] image-edit: prompt="${prompt.substring(0, 80)}...", images=${images.length}, size=${size || 'default'}`)
+
+      try {
+        const zai = createZAIClient()
+        const response = await zai.images.generations.edit({
+          prompt,
+          images,
+          size: size || '768x1344',
+        } as any)
+
+        if (response?.data?.[0]?.base64) {
+          const mime = response.data[0].format === 'jpeg' || response.data[0].format === 'jpg'
+            ? 'image/jpeg'
+            : response.data[0].format === 'webp' ? 'image/webp' : 'image/png'
+          const dataUrl = `data:${mime};base64,${response.data[0].base64}`
+          console.log(`[ai-proxy] image-edit: ✅ Success (base64, ${response.data[0].base64.length} chars)`)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, imageUrl: dataUrl, strategy: 'zai-image-edit-proxy' }))
+          return
+        }
+
+        // If URL is returned instead of base64, download it
+        if (response?.data?.[0]?.url) {
+          const imageUrl = response.data[0].url
+          console.log(`[ai-proxy] image-edit: Downloading from URL: ${imageUrl.substring(0, 80)}...`)
+          try {
+            const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) })
+            if (imgRes.ok) {
+              const imgBuf = Buffer.from(await imgRes.arrayBuffer())
+              if (imgBuf.length > 3000) {
+                const ct = imgRes.headers.get('content-type') || 'image/png'
+                const mime = ct.split(';')[0].trim().startsWith('image/') ? ct.split(';')[0].trim() : 'image/png'
+                const dataUrl = `data:${mime};base64,${imgBuf.toString('base64')}`
+                console.log(`[ai-proxy] image-edit: ✅ Success (url→download, ${imgBuf.length} bytes)`)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: true, imageUrl: dataUrl, strategy: 'zai-image-edit-proxy' }))
+                return
+              }
+            }
+          } catch (dlErr) {
+            console.log(`[ai-proxy] image-edit: URL download failed: ${(dlErr as Error).message?.substring(0, 100)}`)
+          }
+        }
+
+        console.log(`[ai-proxy] image-edit: ❌ No image data returned`)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: 'No image data returned from AI service' }))
+        return
+      } catch (editErr) {
+        const msg = (editErr as Error).message?.substring(0, 200) || 'Unknown error'
+        console.error(`[ai-proxy] image-edit: ❌ Error: ${msg}`)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: msg }))
+        return
+      }
+    }
+
     // POST /api/try-on
     if (path === '/api/try-on' && req.method === 'POST') {
       if (!ZAI_CONFIG) {

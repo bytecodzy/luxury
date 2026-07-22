@@ -190,21 +190,12 @@ export async function isProxyReachable(proxyUrl: string): Promise<boolean> {
 }
 
 /**
- * Remap an internal ZAI API URL to the public endpoint.
- * internal-api.z.ai resolves to private IPs (172.25.x.x) that are
- * unreachable from Vercel. The public API is at api.z.ai/api/v1/.
+ * REMOVED v45: getPublicZAIUrl() — this function remapped internal-api.z.ai
+ * to api.z.ai/api/v1, but the public API has different auth/format and
+ * doesn't work for image editing. On Vercel, we now route through the
+ * ai-proxy service (ZAI_PROXY_URL) instead of making direct API calls.
+ * The internal-api.z.ai is only accessible from the sandbox network.
  */
-export function getPublicZAIUrl(baseUrl: string): string {
-  if (baseUrl.includes('internal-api.z.ai')) {
-    // Replace internal-api.z.ai/v1 with api.z.ai/api/v1
-    const remapped = baseUrl
-      .replace('internal-api.z.ai/v1', 'api.z.ai/api/v1')
-      .replace('internal-api.z.ai', 'api.z.ai/api/v1')
-    console.log(`[ZAI] Auto-remapping internal URL for Vercel: ${baseUrl} → ${remapped}`)
-    return remapped
-  }
-  return baseUrl
-}
 
 /**
  * Get the ZAI config from environment variables or file.
@@ -212,16 +203,20 @@ export function getPublicZAIUrl(baseUrl: string): string {
  * 1. ZAI_BASE_URL + ZAI_API_KEY env vars (works on Vercel and locally)
  * 2. .z-ai-config files (sandbox/local development)
  *
- * On Vercel: automatically remaps internal-api.z.ai to the public api.z.ai endpoint.
+ * On Vercel: env vars are used only by the ai-proxy service (not directly).
+ * The ZAI_PROXY_URL routes requests through the ai-proxy.
  */
 export function getZAIConfig(): { baseUrl: string; apiKey: string; chatId?: string; token?: string; userId?: string } | null {
   const envBaseUrl = process.env.ZAI_BASE_URL
   const envApiKey = process.env.ZAI_API_KEY
   if (envBaseUrl && envApiKey) {
-    // On Vercel, auto-remap internal API URLs to the public endpoint
-    const resolvedBaseUrl = process.env.VERCEL ? getPublicZAIUrl(envBaseUrl) : envBaseUrl
+    // v45: No URL remapping on Vercel — internal-api.z.ai is NOT reachable
+    // from Vercel (private IPs), and api.z.ai/api/v1 has incompatible auth.
+    // On Vercel, we use ZAI_PROXY_URL to route through the ai-proxy instead.
+    // The ZAI_BASE_URL env var is still needed for the ZAI SDK in the ai-proxy,
+    // but direct calls from Vercel are NOT made anymore.
     return {
-      baseUrl: resolvedBaseUrl,
+      baseUrl: envBaseUrl,
       apiKey: envApiKey,
       chatId: process.env.ZAI_CHAT_ID || undefined,
       token: process.env.ZAI_TOKEN || undefined,
