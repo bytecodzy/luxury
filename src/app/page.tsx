@@ -78,7 +78,7 @@ class ErrorBoundary extends React.Component<
           </p>
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
-            className="rounded-md bg-amber-600 px-5 py-2 text-sm font-medium text-stone-950 hover:bg-amber-500 transition-colors"
+            className="rounded-full bg-amber-600 px-6 py-2 text-sm font-medium text-stone-950 hover:bg-amber-500 transition-colors"
           >
             Try again
           </button>
@@ -89,50 +89,134 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+// ── Luxury Section Divider ──
+function LuxuryDivider() {
+  return (
+    <div className="flex items-center justify-center gap-4 py-2">
+      <div className="h-px flex-1 bg-gradient-to-r from-transparent to-amber-500/15" />
+      <div className="flex items-center gap-2">
+        <div className="h-1 w-1 rotate-45 bg-amber-500/30" />
+        <div className="h-px w-8 bg-amber-500/25" />
+        <div className="h-1.5 w-1.5 rotate-45 border border-amber-500/40 bg-amber-500/20" />
+        <div className="h-px w-8 bg-amber-500/25" />
+        <div className="h-1 w-1 rotate-45 bg-amber-500/30" />
+      </div>
+      <div className="h-px flex-1 bg-gradient-to-l from-transparent to-amber-500/15" />
+    </div>
+  );
+}
+
+// ── Luxury Promo Banner ──
+function LuxuryPromoBanner() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, delay: 0.2 }}
+      className="relative overflow-hidden rounded-2xl border border-amber-500/15 bg-gradient-to-r from-amber-900/20 via-amber-800/10 to-amber-900/20 backdrop-blur-sm"
+    >
+      {/* Decorative shimmer line */}
+      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-400/30 to-transparent" />
+      
+      <div className="flex flex-col items-center gap-4 px-6 py-8 text-center sm:flex-row sm:text-left sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-400/70">
+            AI-Powered Experience
+          </p>
+          <h3 className="mt-1 text-lg font-bold text-amber-100 sm:text-xl">
+            Virtual Try-On with AI Style Preview
+          </h3>
+          <p className="mt-1 max-w-md text-sm text-amber-200/45">
+            See how luxury looks on you before you buy. Upload a selfie and let our AI drape sarees, jewelry & more — with your face preserved.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Live on all products
+          </span>
+        </div>
+      </div>
+
+      {/* Bottom shimmer line */}
+      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-amber-400/20 to-transparent" />
+    </motion.div>
+  );
+}
+
 // ── Home page sections (uses ErrorBoundary, so must be after it) ──
 
 function HomeSections() {
   return (
     <>
+      {/* Full-screen hero — no container wrapper needed */}
       <ErrorBoundary fallback={null}>
         <HeroSection />
       </ErrorBoundary>
-      <ErrorBoundary fallback={null}>
-        <CategoryGrid />
-      </ErrorBoundary>
-      <ErrorBoundary fallback={null}>
-        <ProductGrid />
-      </ErrorBoundary>
 
-      {/* AI Style Gallery */}
-      <ErrorBoundary fallback={null}>
-        <StyleGallerySection />
-      </ErrorBoundary>
-
-      {/* Family Pack Section */}
-      <div id="family-pack-section">
+      {/* Content below hero with luxury spacing */}
+      <div className="mt-8 space-y-2 sm:mt-12">
+        {/* Promo Banner */}
         <ErrorBoundary fallback={null}>
-          <FamilyPackSection />
+          <LuxuryPromoBanner />
+        </ErrorBoundary>
+
+        <LuxuryDivider />
+
+        {/* Category sub-navigation */}
+        <ErrorBoundary fallback={null}>
+          <CategoryGrid />
+        </ErrorBoundary>
+
+        <LuxuryDivider />
+
+        {/* Products */}
+        <div id="products-section">
+          <ErrorBoundary fallback={null}>
+            <ProductGrid />
+          </ErrorBoundary>
+        </div>
+
+        <LuxuryDivider />
+
+        {/* AI Style Gallery */}
+        <ErrorBoundary fallback={null}>
+          <StyleGallerySection />
+        </ErrorBoundary>
+
+        <LuxuryDivider />
+
+        {/* Family Pack Section */}
+        <div id="family-pack-section">
+          <ErrorBoundary fallback={null}>
+            <FamilyPackSection />
+          </ErrorBoundary>
+        </div>
+
+        <LuxuryDivider />
+
+        {/* Social Connections Section */}
+        <div id="social-connections-section">
+          <ErrorBoundary fallback={null}>
+            <SocialConnectionsSection />
+          </ErrorBoundary>
+        </div>
+
+        <LuxuryDivider />
+        
+        {/* 3BOXES Curate Section */}
+        <div id="3boxes-curate-section">
+          <ErrorBoundary fallback={null}>
+            <ThreeboxesCurateSection />
+          </ErrorBoundary>
+        </div>
+
+        <LuxuryDivider />
+
+        <ErrorBoundary fallback={null}>
+          <AppDownloadSection />
         </ErrorBoundary>
       </div>
-
-      {/* Social Connections Section */}
-      <div id="social-connections-section">
-        <ErrorBoundary fallback={null}>
-          <SocialConnectionsSection />
-        </ErrorBoundary>
-      </div>
-
-      {/* 3BOXES Curate Section */}
-      <div id="3boxes-curate-section">
-        <ErrorBoundary fallback={null}>
-          <ThreeboxesCurateSection />
-        </ErrorBoundary>
-      </div>
-
-      <ErrorBoundary fallback={null}>
-        <AppDownloadSection />
-      </ErrorBoundary>
     </>
   );
 }
@@ -176,7 +260,7 @@ function AppContent() {
 
   return (
     <div
-      className={`min-h-screen flex flex-col ${appTheme === 'light' ? 'bg-white' : 'bg-stone-950'}`}
+      className={`min-h-screen flex flex-col ${appTheme === 'light' ? 'bg-[#fdf9f1]' : 'bg-stone-950'}`}
       data-theme={appTheme}
     >
       <Header />
@@ -188,7 +272,7 @@ function AppContent() {
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2 }}
+              transition={{ duration: 0.25 }}
             >
               {renderView()}
             </motion.div>

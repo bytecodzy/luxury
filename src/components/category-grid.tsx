@@ -154,25 +154,25 @@ export function CategoryGrid() {
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -10 }}
-          transition={{ duration: 0.25, ease: 'easeOut' }}
-          className="overflow-hidden rounded-2xl border border-amber-900/20 bg-gradient-to-r from-stone-950/90 via-stone-900/70 to-stone-950/90 backdrop-blur-sm"
+          transition={{ duration: 0.3, ease: 'easeOut' }}
+          className="overflow-hidden rounded-2xl border border-amber-500/15 bg-gradient-to-r from-stone-950/90 via-stone-900/60 to-stone-950/90 backdrop-blur-sm"
         >
           {/* Header row with parent category */}
-          <div className="flex items-center gap-3 border-b border-amber-900/15 px-5 py-3">
-            <div className={`flex h-8 w-8 items-center justify-center rounded-lg border ${accentBg}`}>
-              <ParentIcon className={`h-4 w-4 ${accentIcon}`} strokeWidth={1.5} />
+          <div className="flex items-center gap-3 border-b border-amber-500/10 px-5 py-3.5">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-xl border ${accentBg}`}>
+              <ParentIcon className={`h-4.5 w-4.5 ${accentIcon}`} strokeWidth={1.5} />
             </div>
             <div className="flex-1">
-              <h3 className="text-sm font-semibold text-amber-100">
+              <h3 className="text-sm font-bold text-amber-100">
                 {activeParent.name}
               </h3>
-              <p className="text-[11px] text-amber-200/40">
+              <p className="text-[10px] text-amber-200/35 uppercase tracking-wider">
                 Browse subcategories
               </p>
             </div>
             <button
               onClick={() => setCategory(null)}
-              className="text-[11px] text-amber-200/40 hover:text-amber-200/70 transition-colors"
+              className="text-[10px] text-amber-200/35 hover:text-amber-200/60 transition-colors uppercase tracking-wider"
             >
               Clear
             </button>

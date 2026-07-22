@@ -189,7 +189,7 @@ export function ProductGrid() {
   const hasActiveFilters = selectedCategory || searchQuery || sourceFilter !== 'all' || platformFilter !== 'all' || occasionFilter !== 'all' || recipientFilter !== 'all' || relationshipFilter !== 'all' || priceRangeFilter !== 'all';
 
   return (
-    <section className="relative py-6">
+    <section className="relative py-8">
       {/* Subtle background decoration */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute left-0 top-0 h-32 w-full bg-gradient-to-b from-amber-900/[0.03] to-transparent" />
@@ -197,9 +197,12 @@ export function ProductGrid() {
 
       <div className="relative">
         {/* Header */}
-        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-lg font-bold text-amber-100 sm:text-xl">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-400/50">
+              {searchQuery ? 'Search Results' : selectedCategory ? 'Curated For You' : 'Our Collection'}
+            </p>
+            <h2 className="mt-1 text-xl font-bold text-amber-100 sm:text-2xl">
               {searchQuery
                 ? t('products.resultsFor', { query: searchQuery })
                 : selectedCategory
@@ -207,7 +210,7 @@ export function ProductGrid() {
                 : t('products.allProducts')}
             </h2>
             {!isLoading && (
-              <p className="mt-0.5 text-xs text-amber-200/40">
+              <p className="mt-1 text-xs text-amber-200/35">
                 {data?.total ?? 0} {t('categories.items')}
               </p>
             )}
@@ -356,14 +359,14 @@ export function ProductGrid() {
 
         {/* Grid */}
         {isLoading ? (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="overflow-hidden rounded-xl border border-amber-900/15 bg-stone-900/40">
-                <Skeleton className="aspect-square bg-stone-800/60" />
-                <div className="p-3 space-y-2">
-                  <Skeleton className="h-3 w-16 bg-stone-800/60" />
-                  <Skeleton className="h-4 w-3/4 bg-stone-800/60" />
-                  <Skeleton className="h-5 w-20 bg-stone-800/60" />
+              <div key={i} className="overflow-hidden rounded-xl border border-amber-900/10 bg-stone-900/30">
+                <Skeleton className="aspect-square bg-stone-800/40" />
+                <div className="p-4 space-y-2">
+                  <Skeleton className="h-3 w-16 bg-stone-800/40" />
+                  <Skeleton className="h-4 w-3/4 bg-stone-800/40" />
+                  <Skeleton className="h-5 w-20 bg-stone-800/40" />
                 </div>
               </div>
             ))}
@@ -387,8 +390,8 @@ export function ProductGrid() {
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.3 }}
-            className="grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
+            transition={{ duration: 0.4 }}
+            className="grid grid-cols-2 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
           >
             {products.map((product) => (
               <ProductCard key={product.id} product={product} />
