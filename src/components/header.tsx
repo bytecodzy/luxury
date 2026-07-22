@@ -206,7 +206,11 @@ export function Header() {
                 alt="3 Boxes Luxury Logo"
                 width={96}
                 height={96}
-                className="h-20 w-20 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)] sm:h-24 sm:w-24"
+                className={`h-20 w-20 object-contain sm:h-24 sm:w-24 ${
+                  appTheme === 'light'
+                    ? 'contrast-110 brightness-95 saturate-130'
+                    : 'contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]'
+                }`}
                 priority
               />
             </div>
@@ -447,7 +451,11 @@ export function Header() {
                       alt="3 Boxes Luxury Logo"
                       width={56}
                       height={56}
-                      className="h-14 w-14 object-contain contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]"
+                      className={`h-14 w-14 object-contain ${
+                        appTheme === 'light'
+                          ? 'contrast-110 brightness-95 saturate-130'
+                          : 'contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]'
+                      }`}
                     />
                   </div>
                   <span className="gold-shimmer text-lg font-bold tracking-widest">
@@ -654,7 +662,7 @@ export function Header() {
       </div>
 
       {/* Category Navigation Bar */}
-      <div className="border-t border-amber-900/20 bg-stone-950/90">
+      <div className={`border-t ${appTheme === 'light' ? 'border-amber-200/40 bg-white/95' : 'border-amber-900/20 bg-stone-950/90'}`}>
         <div className="container mx-auto px-4">
           {/* Desktop: horizontal row with hover/click dropdowns */}
           <nav className="hidden md:flex items-center gap-0.5" aria-label="Category navigation">

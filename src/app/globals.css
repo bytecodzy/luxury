@@ -555,6 +555,7 @@ html {
 }
 
 /* ─── Body & Root ─── */
+body[data-theme="light"],
 [data-theme="light"] body {
   background-color: rgb(253, 249, 241) !important;
   color: rgb(41, 37, 36) !important;
@@ -1162,4 +1163,813 @@ html {
 [data-theme="light"] .absolute.bg-stone-950\/60,
 [data-theme="light"] .absolute.bg-stone-900\/80 {
   background-color: rgba(253, 249, 241, 0.85) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ADDITIONAL LIGHT THEME OVERRIDES — Round 2
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── bg-stone-950/90 (category nav bar, category grid) ─── */
+[data-theme="light"] .bg-stone-950\/90 {
+  background-color: rgba(253, 249, 241, 0.97) !important;
+}
+
+/* ─── Category grid gradient: from-stone-950/90 via-stone-900/70 to-stone-950/90 ─── */
+[data-theme="light"] .bg-gradient-to-r.from-stone-950\/90.via-stone-900\/70 {
+  background: linear-gradient(to right, rgb(253, 249, 241), rgb(255, 255, 255), rgb(253, 249, 241)) !important;
+}
+
+/* ─── border-stone-700/50 (category chips) ─── */
+[data-theme="light"] .border-stone-700\/50 {
+  border-color: rgba(180, 150, 100, 0.25) !important;
+}
+
+/* ─── text-amber-500/50 (product card category label) ─── */
+[data-theme="light"] .text-amber-500\/50 {
+  color: rgb(146, 100, 30) !important;
+}
+
+/* ─── text-amber-100/70 (hero subtitle) ─── */
+[data-theme="light"] .text-amber-100\/70 {
+  color: rgb(68, 60, 40) !important;
+}
+
+/* ─── text-amber-100/60 ─── */
+[data-theme="light"] .text-amber-100\/60 {
+  color: rgb(87, 78, 55) !important;
+}
+
+/* ─── text-amber-200/45 ─── */
+[data-theme="light"] .text-amber-200\/45 {
+  color: rgb(100, 93, 82) !important;
+}
+
+/* ─── text-amber-400/80 (footer headings, badges) ─── */
+[data-theme="light"] .text-amber-400\/80 {
+  color: rgb(146, 64, 14) !important;
+}
+
+/* ─── text-amber-400/90 ─── */
+[data-theme="light"] .text-amber-400\/90 {
+  color: rgb(140, 58, 12) !important;
+}
+
+/* ─── text-amber-400/70 ─── */
+[data-theme="light"] .text-amber-400\/70 {
+  color: rgb(160, 80, 20) !important;
+}
+
+/* ─── text-amber-400/60 ─── */
+[data-theme="light"] .text-amber-400\/60 {
+  color: rgb(160, 90, 25) !important;
+}
+
+/* ─── text-amber-300/90 (mobile nav, dropdown items) ─── */
+[data-theme="light"] .text-amber-300\/90 {
+  color: rgb(140, 65, 15) !important;
+}
+
+/* ─── text-amber-300/70 (app download category pills) ─── */
+[data-theme="light"] .text-amber-300\/70 {
+  color: rgb(160, 80, 20) !important;
+}
+
+/* ─── text-amber-200/80 (mobile menu buttons) ─── */
+[data-theme="light"] .text-amber-200\/80 {
+  color: rgb(68, 64, 60) !important;
+}
+
+/* ─── text-amber-200/60 (product grid labels, various) ─── */
+[data-theme="light"] .text-amber-200\/60 {
+  color: rgb(87, 83, 78) !important;
+}
+
+/* ─── text-amber-200/25 (price strikethrough) ─── */
+[data-theme="light"] .text-amber-200\/25 {
+  color: rgb(160, 150, 130) !important;
+}
+
+/* ─── text-amber-200/30 (various small labels) ─── */
+[data-theme="light"] .text-amber-200\/30 {
+  color: rgb(120, 113, 108) !important;
+}
+
+/* ─── text-amber-700/30 (star rating empty) ─── */
+[data-theme="light"] .text-amber-700\/30 {
+  color: rgb(200, 180, 140) !important;
+}
+
+/* ─── bg-amber-500/15 (active category chip) ─── */
+[data-theme="light"] .bg-amber-500\/15 {
+  background-color: rgba(180, 130, 40, 0.1) !important;
+}
+
+/* ─── bg-amber-500/5 (app download category pills) ─── */
+[data-theme="light"] .bg-amber-500\/5 {
+  background-color: rgba(180, 130, 40, 0.04) !important;
+}
+
+/* ─── bg-amber-500/10 (benefit cards, various) ─── */
+[data-theme="light"] .bg-amber-500\/10 {
+  background-color: rgba(180, 130, 40, 0.07) !important;
+}
+
+/* ─── bg-amber-500/20 (active chip, icon backgrounds) ─── */
+[data-theme="light"] .bg-amber-500\/20 {
+  background-color: rgba(180, 130, 40, 0.12) !important;
+}
+
+/* ─── border-amber-500/15 (benefit card borders) ─── */
+[data-theme="light"] .border-amber-500\/15 {
+  border-color: rgba(180, 130, 40, 0.2) !important;
+}
+
+/* ─── border-amber-400/30 (various) ─── */
+[data-theme="light"] .border-amber-400\/30 {
+  border-color: rgba(180, 130, 40, 0.25) !important;
+}
+
+/* ─── shadow-amber-900/20 (phone mockup) ─── */
+[data-theme="light"] .shadow-amber-900\/20 {
+  --tw-shadow-color: rgba(180, 150, 100, 0.1) !important;
+}
+
+/* ─── bg-amber-600/30 (login button hover) ─── */
+[data-theme="light"] .bg-amber-600\/30 {
+  background-color: rgba(180, 100, 20, 0.15) !important;
+}
+
+/* ─── hover:bg-amber-600/30:hover ─── */
+[data-theme="light"] .hover\:bg-amber-600\/30:hover {
+  background-color: rgba(180, 100, 20, 0.15) !important;
+}
+
+/* ─── hover:bg-amber-600/20:hover ─── */
+[data-theme="light"] .hover\:bg-amber-600\/20:hover {
+  background-color: rgba(180, 100, 20, 0.1) !important;
+}
+
+/* ─── hover:border-amber-500/50:hover ─── */
+[data-theme="light"] .hover\:border-amber-500\/50:hover {
+  border-color: rgba(200, 170, 80, 0.4) !important;
+}
+
+/* ─── hover:border-amber-500/60:hover ─── */
+[data-theme="light"] .hover\:border-amber-500\/60:hover {
+  border-color: rgba(200, 170, 80, 0.5) !important;
+}
+
+/* ─── hover:border-amber-500/40:hover ─── */
+[data-theme="light"] .hover\:border-amber-500\/40:hover {
+  border-color: rgba(200, 170, 80, 0.35) !important;
+}
+
+/* ─── hover:text-amber-100:hover ─── */
+[data-theme="light"] .hover\:text-amber-100:hover {
+  color: rgb(55, 50, 45) !important;
+}
+
+/* ─── focus-visible:ring-amber-500/50 ─── */
+[data-theme="light"] .focus-visible\:ring-amber-500\/50 {
+  --tw-ring-color: rgba(180, 130, 40, 0.3) !important;
+}
+
+/* ─── bg-stone-950/98 (dropdown) ─── */
+[data-theme="light"] .bg-stone-950\/98 {
+  background-color: rgba(253, 249, 241, 0.99) !important;
+}
+
+/* ─── Category grid: border-amber-900/20 ─── */
+[data-theme="light"] .border-amber-900\/20 {
+  border-color: rgba(180, 150, 100, 0.18) !important;
+}
+
+/* ─── Category grid: border-amber-900/15 ─── */
+[data-theme="light"] .border-amber-900\/15 {
+  border-color: rgba(180, 150, 100, 0.14) !important;
+}
+
+/* ─── text-amber-200/70 (select triggers) ─── */
+[data-theme="light"] .text-amber-200\/70 {
+  color: rgb(87, 83, 78) !important;
+}
+
+/* ─── border-amber-900/40 (search input) ─── */
+[data-theme="light"] .border-amber-900\/40 {
+  border-color: rgba(180, 150, 100, 0.3) !important;
+}
+
+/* ─── focus:border-amber-600/60 ─── */
+[data-theme="light"] .focus\:border-amber-600\/60:focus {
+  border-color: rgba(180, 130, 40, 0.5) !important;
+}
+
+/* ─── focus:ring-amber-600/30 ─── */
+[data-theme="light"] .focus\:ring-amber-600\/30 {
+  --tw-ring-color: rgba(180, 130, 40, 0.15) !important;
+}
+
+/* ─── bg-stone-900/40 (product card, platform chip) ─── */
+[data-theme="light"] .bg-stone-900\/40 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+/* ─── hover:border-amber-700/30 (product card hover) ─── */
+[data-theme="light"] .hover\:border-amber-700\/30:hover {
+  border-color: rgba(180, 140, 50, 0.25) !important;
+}
+
+/* ─── hover:bg-stone-900/80:hover (category chip hover) ─── */
+[data-theme="light"] .hover\:bg-stone-900\/80:hover {
+  background-color: rgba(248, 244, 236, 0.97) !important;
+}
+
+/* ─── hover:text-amber-200/80:hover (category chip hover) ─── */
+[data-theme="light"] .hover\:text-amber-200\/80:hover {
+  color: rgb(87, 83, 78) !important;
+}
+
+/* ─── border-amber-500/30 (badge, install button) ─── */
+[data-theme="light"] .border-amber-500\/30 {
+  border-color: rgba(200, 170, 80, 0.25) !important;
+}
+
+/* ─── border-amber-600/50 (login button) ─── */
+[data-theme="light"] .border-amber-600\/50 {
+  border-color: rgba(190, 140, 50, 0.35) !important;
+}
+
+/* ─── border-amber-600/30 (gift builder) ─── */
+[data-theme="light"] .border-amber-600\/30 {
+  border-color: rgba(190, 140, 50, 0.25) !important;
+}
+
+/* ─── border-amber-600/40 (mobile login button) ─── */
+[data-theme="light"] .border-amber-600\/40 {
+  border-color: rgba(190, 140, 50, 0.3) !important;
+}
+
+/* ─── bg-amber-900/20 (login button bg, nav active) ─── */
+[data-theme="light"] .bg-amber-900\/20 {
+  background-color: rgba(180, 150, 100, 0.12) !important;
+}
+
+/* ─── hover:bg-amber-900/20:hover (nav items, dropdown items) ─── */
+[data-theme="light"] .hover\:bg-amber-900\/20:hover {
+  background-color: rgba(180, 150, 100, 0.12) !important;
+}
+
+/* ─── bg-amber-900/30 (active nav item) ─── */
+[data-theme="light"] .bg-amber-900\/30 {
+  background-color: rgba(180, 150, 100, 0.18) !important;
+}
+
+/* ─── text-amber-50 (hero headline, various headings) ─── */
+[data-theme="light"] .text-amber-50 {
+  color: rgb(41, 37, 36) !important;
+}
+
+/* ─── luxury-text for light mode (darker gold) ─── */
+[data-theme="light"] .luxury-text {
+  background: linear-gradient(135deg, #92700c, #d4a437, #92700c);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ─── Logo class override: remove mix-blend-lighten glow in light mode ─── */
+[data-theme="light"] .logo-flashy {
+  mix-blend-mode: normal !important;
+  filter: contrast(1.1) brightness(0.95) saturate(1.3) drop-shadow(0 1px 3px rgba(0,0,0,0.15)) !important;
+  animation: none !important;
+}
+
+/* ─── bg-amber-500/[0.06] (hero decorative) ─── */
+[data-theme="light"] .bg-amber-500\/\[0\.06\] {
+  background-color: rgba(180, 130, 40, 0.06) !important;
+}
+
+/* ─── bg-amber-600/[0.05] (hero decorative) ─── */
+[data-theme="light"] .bg-amber-600\/\[0\.05\] {
+  background-color: rgba(180, 100, 20, 0.04) !important;
+}
+
+/* ─── via-amber-500/25 (hero decorative line) ─── */
+[data-theme="light"] .via-amber-500\/25 {
+  --tw-gradient-via: rgba(180, 130, 40, 0.2) !important;
+}
+
+/* ─── via-amber-500/25 for from-transparent gradients ─── */
+[data-theme="light"] .bg-gradient-to-r.from-transparent.via-amber-500\/25 {
+  background: linear-gradient(to right, transparent, rgba(180, 130, 40, 0.2), transparent) !important;
+}
+
+/* ─── App download section: border-amber-500/10 in phone mockup ─── */
+[data-theme="light"] .border-amber-500\/10 {
+  border-color: rgba(200, 170, 80, 0.15) !important;
+}
+
+/* ─── Placeholder text for light theme ─── */
+[data-theme="light"] .placeholder\:text-amber-200\/30::placeholder {
+  color: rgba(120, 113, 108, 0.4) !important;
+}
+
+/* ─── Product card image area bg ─── */
+[data-theme="light"] .bg-stone-800\/60 {
+  background-color: rgb(240, 235, 225) !important;
+}
+
+/* ─── Skeleton overrides for light theme ─── */
+[data-theme="light"] .bg-stone-800\/60 {
+  background-color: rgb(240, 235, 225) !important;
+}
+
+/* ─── Product card sold out overlay ─── */
+[data-theme="light"] .bg-stone-950\/70 {
+  background-color: rgba(253, 249, 241, 0.85) !important;
+}
+
+/* ─── bg-stone-900/90 (sold out badge) ─── */
+[data-theme="light"] .bg-stone-900\/90 {
+  background-color: rgb(255, 255, 255) !important;
+}
+
+/* ─── text-red-200 (low stock badge) ─── */
+[data-theme="light"] .text-red-200 {
+  color: rgb(185, 28, 28) !important;
+}
+
+/* ─── bg-red-900/80 (low stock badge) ─── */
+[data-theme="light"] .bg-red-900\/80 {
+  background-color: rgba(254, 226, 226, 0.9) !important;
+}
+
+/* ─── Sheet content for mobile menu ─── */
+[data-theme="light"] [role="dialog"].bg-stone-950,
+[data-theme="light"] .bg-stone-950[class*="SheetContent"],
+[data-theme="light"] [data-state="open"].bg-stone-950 {
+  background-color: rgb(253, 249, 241) !important;
+}
+
+/* ─── App download: bg-amber-600/3 ─── */
+[data-theme="light"] .bg-amber-600\/3,
+[data-theme="light"] .bg-amber-600\/\[0\.03\] {
+  background-color: rgba(180, 100, 20, 0.03) !important;
+}
+
+/* ─── App download: bg-amber-700/5 ─── */
+[data-theme="light"] .bg-amber-700\/5,
+[data-theme="light"] .bg-amber-700\/\[0\.05\] {
+  background-color: rgba(160, 80, 15, 0.04) !important;
+}
+
+/* ─── Hover text amber-200/70 ─── */
+[data-theme="light"] .hover\:text-amber-200\/70:hover {
+  color: rgb(87, 83, 78) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ADDITIONAL LIGHT THEME OVERRIDES — Round 3 (Product Detail, etc.)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── text-amber-500/60 (product detail category link) ─── */
+[data-theme="light"] .text-amber-500\/60 {
+  color: rgb(146, 100, 30) !important;
+}
+
+/* ─── text-amber-200/20 (review icon, very muted) ─── */
+[data-theme="light"] .text-amber-200\/20 {
+  color: rgb(160, 150, 130) !important;
+}
+
+/* ─── bg-stone-900/95 (try-on overlay) ─── */
+[data-theme="light"] .bg-stone-900\/95 {
+  background-color: rgba(253, 249, 241, 0.97) !important;
+}
+
+/* ─── text-amber-700/40 (empty stars) ─── */
+[data-theme="light"] .text-amber-700\/40 {
+  color: rgb(210, 190, 150) !important;
+}
+
+/* ─── text-amber-200 bare (try-on status text) ─── */
+[data-theme="light"] .text-amber-200 {
+  color: rgb(87, 83, 78) !important;
+}
+
+/* ─── shadow-amber-900/30 (try-on overlay) ─── */
+[data-theme="light"] .shadow-amber-900\/30 {
+  --tw-shadow-color: rgba(180, 150, 100, 0.15) !important;
+}
+
+/* ─── shadow-amber-500/20 (try-on glow) ─── */
+[data-theme="light"] .shadow-amber-500\/20 {
+  --tw-shadow-color: rgba(180, 130, 40, 0.1) !important;
+}
+
+/* ─── border-amber-500/60 (try-on border) ─── */
+[data-theme="light"] .border-amber-500\/60 {
+  border-color: rgba(200, 170, 80, 0.5) !important;
+}
+
+/* ─── bg-stone-900/60 (review cards, quantity selector) ─── */
+[data-theme="light"] .bg-stone-900\/60 {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+/* ─── placeholder:text-amber-200/20 (review form) ─── */
+[data-theme="light"] .placeholder\:text-amber-200\/20::placeholder {
+  color: rgba(120, 113, 108, 0.3) !important;
+}
+
+/* ─── text-amber-200/50 bare (product detail rating, description) ─── */
+/* Already covered by existing override for .text-amber-200\/50 */
+
+/* ─── text-emerald-400 (stock indicator) ─── */
+[data-theme="light"] .text-emerald-400 {
+  color: rgb(22, 101, 52) !important;
+}
+
+/* ─── text-rose-400 (tanishq platform) ─── */
+[data-theme="light"] .text-rose-400 {
+  color: rgb(190, 40, 60) !important;
+}
+
+/* ─── text-orange-400 (amazon platform) ─── */
+[data-theme="light"] .text-orange-400 {
+  color: rgb(180, 80, 10) !important;
+}
+
+/* ─── text-pink-400 (nykaa platform) ─── */
+[data-theme="light"] .text-pink-400 {
+  color: rgb(180, 40, 100) !important;
+}
+
+/* ─── text-blue-400 (bluestone platform) ─── */
+[data-theme="light"] .text-blue-400 {
+  color: rgb(40, 80, 180) !important;
+}
+
+/* ─── text-yellow-400 (flipkart platform) ─── */
+[data-theme="light"] .text-yellow-400 {
+  color: rgb(160, 130, 10) !important;
+}
+
+/* ─── bg-red-600/20 (myntra badge bg) ─── */
+[data-theme="light"] .bg-red-600\/20 {
+  background-color: rgba(220, 50, 50, 0.1) !important;
+}
+
+/* ─── bg-pink-600/20 (nykaa badge bg) ─── */
+[data-theme="light"] .bg-pink-600\/20 {
+  background-color: rgba(220, 50, 120, 0.1) !important;
+}
+
+/* ─── bg-orange-600/20 (amazon badge bg) ─── */
+[data-theme="light"] .bg-orange-600\/20 {
+  background-color: rgba(220, 100, 10, 0.1) !important;
+}
+
+/* ─── bg-yellow-600/20 (flipkart badge bg) ─── */
+[data-theme="light"] .bg-yellow-600\/20 {
+  background-color: rgba(180, 140, 10, 0.1) !important;
+}
+
+/* ─── bg-rose-600/20 (tanishq badge bg) ─── */
+[data-theme="light"] .bg-rose-600\/20 {
+  background-color: rgba(220, 50, 80, 0.1) !important;
+}
+
+/* ─── bg-blue-600/20 (bluestone badge bg) ─── */
+[data-theme="light"] .bg-blue-600\/20 {
+  background-color: rgba(50, 80, 200, 0.1) !important;
+}
+
+/* ─── bg-purple-600/20 (voylla badge bg) ─── */
+[data-theme="light"] .bg-purple-600\/20 {
+  background-color: rgba(140, 50, 200, 0.1) !important;
+}
+
+/* ─── border-red-600/30 (myntra badge border) ─── */
+[data-theme="light"] .border-red-600\/30 {
+  border-color: rgba(220, 50, 50, 0.2) !important;
+}
+
+/* ─── border-pink-600/30 (nykaa badge border) ─── */
+[data-theme="light"] .border-pink-600\/30 {
+  border-color: rgba(220, 50, 120, 0.2) !important;
+}
+
+/* ─── border-orange-600/30 (amazon badge border) ─── */
+[data-theme="light"] .border-orange-600\/30 {
+  border-color: rgba(220, 100, 10, 0.2) !important;
+}
+
+/* ─── border-yellow-600/30 (flipkart badge border) ─── */
+[data-theme="light"] .border-yellow-600\/30 {
+  border-color: rgba(180, 140, 10, 0.2) !important;
+}
+
+/* ─── border-rose-600/30 (tanishq badge border) ─── */
+[data-theme="light"] .border-rose-600\/30 {
+  border-color: rgba(220, 50, 80, 0.2) !important;
+}
+
+/* ─── border-blue-600/30 (bluestone badge border) ─── */
+[data-theme="light"] .border-blue-600\/30 {
+  border-color: rgba(50, 80, 200, 0.2) !important;
+}
+
+/* ─── border-purple-600/30 (voylla badge border) ─── */
+[data-theme="light"] .border-purple-600\/30 {
+  border-color: rgba(140, 50, 200, 0.2) !important;
+}
+
+/* ─── border-emerald-600/30 (user role badge) ─── */
+[data-theme="light"] .border-emerald-600\/30 {
+  border-color: rgba(16, 185, 129, 0.2) !important;
+}
+
+/* ─── text-emerald-400 (emerald text) ─── */
+[data-theme="light"] .text-emerald-400 {
+  color: rgb(22, 101, 52) !important;
+}
+
+/* ─── text-blue-400 (blue text) ─── */
+[data-theme="light"] .text-blue-400 {
+  color: rgb(40, 80, 180) !important;
+}
+
+/* ─── bg-emerald-600/20 (user role badge bg) ─── */
+[data-theme="light"] .bg-emerald-600\/20 {
+  background-color: rgba(16, 185, 129, 0.1) !important;
+}
+
+/* ─── bg-blue-600/20 (agent role badge bg) ─── */
+[data-theme="light"] .bg-blue-600\/20 {
+  background-color: rgba(50, 80, 200, 0.1) !important;
+}
+
+/* ─── bg-amber-600/20 (corporate role badge bg) ─── */
+[data-theme="light"] .bg-amber-600\/20 {
+  background-color: rgba(180, 100, 20, 0.1) !important;
+}
+
+/* ─── border-amber-600/30 (corporate role badge border) ─── */
+[data-theme="light"] .border-amber-600\/30 {
+  border-color: rgba(190, 140, 50, 0.25) !important;
+}
+
+/* ─── bg-red-600/20 (admin role badge bg) ─── */
+[data-theme="light"] .bg-red-600\/20 {
+  background-color: rgba(220, 50, 50, 0.1) !important;
+}
+
+/* ─── border-red-600/30 (admin role badge border) ─── */
+[data-theme="light"] .border-red-600\/30 {
+  border-color: rgba(220, 50, 50, 0.2) !important;
+}
+
+/* ─── text-red-400 (admin text, sign out) ─── */
+[data-theme="light"] .text-red-400 {
+  color: rgb(185, 28, 28) !important;
+}
+
+/* ─── hover:bg-red-900/20:hover (sign out hover) ─── */
+[data-theme="light"] .hover\:bg-red-900\/20:hover {
+  background-color: rgba(254, 226, 226, 0.7) !important;
+}
+
+/* ─── hover:text-red-400:hover ─── */
+[data-theme="light"] .hover\:text-red-400:hover {
+  color: rgb(185, 28, 28) !important;
+}
+
+/* ─── text-amber-300/80 (gift builder button) ─── */
+[data-theme="light"] .text-amber-300\/80 {
+  color: rgb(150, 75, 15) !important;
+}
+
+/* ─── text-amber-300 bare (active nav, various) ─── */
+[data-theme="light"] .text-amber-300 {
+  color: rgb(150, 75, 15) !important;
+}
+
+/* ─── text-amber-400/60 (sparkles icon) ─── */
+[data-theme="light"] .text-amber-400\/60 {
+  color: rgb(160, 90, 25) !important;
+}
+
+/* ─── text-amber-600/60 (search icon) ─── */
+[data-theme="light"] .text-amber-600\/60 {
+  color: rgb(150, 75, 15) !important;
+}
+
+/* ─── hover:bg-amber-100/50 (theme toggle light hover) ─── */
+[data-theme="light"] .hover\:bg-amber-100\/50:hover {
+  background-color: rgba(254, 243, 199, 0.5) !important;
+}
+
+/* ─── hover:text-amber-700 (theme toggle light hover) ─── */
+[data-theme="light"] .hover\:text-amber-700:hover {
+  color: rgb(120, 53, 15) !important;
+}
+
+/* ─── bg-amber-500/[0.03] (app download section bg) ─── */
+[data-theme="light"] .bg-amber-500\/\[0\.03\] {
+  background-color: rgba(180, 130, 40, 0.02) !important;
+}
+
+/* ─── text-amber-200/40 hover:text-amber-200 (search clear) ─── */
+[data-theme="light"] .text-amber-200\/40 {
+  color: rgb(120, 113, 108) !important;
+}
+
+/* ─── hover:text-amber-200:hover (search clear hover) ─── */
+[data-theme="light"] .hover\:text-amber-200:hover {
+  color: rgb(87, 83, 78) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ADDITIONAL LIGHT THEME OVERRIDES — Round 4 (Final sweep)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── text-amber-400/50 (sparkles icon, explore label) ─── */
+[data-theme="light"] .text-amber-400\/50 {
+  color: rgb(160, 90, 25) !important;
+}
+
+/* ─── text-amber-100/90 (product card name) ─── */
+[data-theme="light"] .text-amber-100\/90 {
+  color: rgb(55, 50, 45) !important;
+}
+
+/* ─── group-hover:text-amber-400 ─── */
+[data-theme="light"] .group-hover\:text-amber-400 {
+  color: rgb(146, 64, 14) !important;
+}
+
+/* ─── hover:text-amber-300 (nav items) ─── */
+[data-theme="light"] .hover\:text-amber-300:hover {
+  color: rgb(150, 75, 15) !important;
+}
+
+/* ─── hover:border-amber-600/30 (category chip hover) ─── */
+[data-theme="light"] .hover\:border-amber-600\/30:hover {
+  border-color: rgba(190, 140, 50, 0.25) !important;
+}
+
+/* ─── text-red-400/80 (mobile sign out) ─── */
+[data-theme="light"] .text-red-400\/80 {
+  color: rgb(185, 28, 28) !important;
+}
+
+/* ─── hover:bg-red-900/20 (sign out hover mobile) ─── */
+[data-theme="light"] .hover\:bg-red-900\/20:hover {
+  background-color: rgba(254, 226, 226, 0.7) !important;
+}
+
+/* ─── hover:text-red-400:hover (sign out hover) ─── */
+[data-theme="light"] .hover\:text-red-400:hover {
+  color: rgb(185, 28, 28) !important;
+}
+
+/* ─── border-amber-200/40 (light theme nav bar) ─── */
+[data-theme="light"] .border-amber-200\/40 {
+  border-color: rgba(220, 190, 130, 0.35) !important;
+}
+
+/* ─── border-amber-200/50 (light theme header border) ─── */
+[data-theme="light"] .border-amber-200\/50 {
+  border-color: rgba(220, 190, 130, 0.4) !important;
+}
+
+/* ─── bg-white/95 (light theme header/category bar) ─── */
+/* Already white, no override needed */
+
+/* ─── text-stone-600 (light theme toggle icon) ─── */
+[data-theme="light"] .text-stone-600 {
+  color: rgb(87, 83, 78) !important;
+}
+
+/* ─── text-amber-700 (light theme toggle hover) ─── */
+[data-theme="light"] .text-amber-700 {
+  color: rgb(120, 53, 15) !important;
+}
+
+/* ─── bg-amber-500/3 (very subtle amber bg) ─── */
+[data-theme="light"] .bg-amber-500\/3,
+[data-theme="light"] .bg-amber-500\/\[3\] {
+  background-color: rgba(180, 130, 40, 0.02) !important;
+}
+
+/* ─── bg-amber-900/[0.03] (subtle gradient bg) ─── */
+[data-theme="light"] .bg-amber-900\/\[0\.03\] {
+  background-color: rgba(180, 150, 100, 0.02) !important;
+}
+
+/* ─── text-stone-950 on buttons (cart badge, CTA) ─── */
+/* Already dark, no override needed */
+
+/* ─── bg-amber-600/90 (platform badges) ─── */
+[data-theme="light"] .bg-amber-600\/90 {
+  background-color: rgb(180, 100, 20) !important;
+  color: rgb(255, 255, 255) !important;
+}
+
+/* ─── bg-emerald-600/90 (discount badge) ─── */
+[data-theme="light"] .bg-emerald-600\/90 {
+  background-color: rgb(22, 101, 52) !important;
+  color: rgb(255, 255, 255) !important;
+}
+
+/* ─── Shadow color for cards in light mode ─── */
+[data-theme="light"] .shadow-lg {
+  --tw-shadow-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+/* ─── bg-white/15 (quick view overlay on images) - OK in light mode, keep as-is ─── */
+
+/* ─── text-amber-400/70 (hero badge text, various) ─── */
+[data-theme="light"] .text-amber-400\/70 {
+  color: rgb(160, 80, 20) !important;
+}
+
+/* ─── border-amber-500/40 (install button border) ─── */
+[data-theme="light"] .border-amber-500\/40 {
+  border-color: rgba(200, 170, 80, 0.35) !important;
+}
+
+/* ─── bg-amber-600/10 (install button bg) ─── */
+/* Already covered by existing override */
+
+/* ─── hover:bg-amber-600/20:hover (install button hover) ─── */
+[data-theme="light"] .hover\:bg-amber-600\/20:hover {
+  background-color: rgba(180, 100, 20, 0.1) !important;
+}
+
+/* ─── hover:text-amber-200:hover (install button hover text) ─── */
+/* Already covered above */
+
+/* ─── hover:border-amber-500/60:hover (install button hover border) ─── */
+/* Already covered above */
+
+/* ─── bg-emerald-600 (success states, add-to-cart) ─── */
+[data-theme="light"] .bg-emerald-600 {
+  background-color: rgb(22, 101, 52) !important;
+  color: rgb(255, 255, 255) !important;
+}
+
+/* ─── scale-95 (adding to cart animation) ─── */
+/* No color change needed */
+
+/* ─── Ensure dropdown menus look correct in light mode ─── */
+[data-theme="light"] [data-radix-popper-content-wrapper] {
+  background-color: rgb(253, 249, 241) !important;
+  border-color: rgba(180, 150, 100, 0.25) !important;
+}
+
+[data-theme="light"] [data-radix-popper-content-wrapper] > div {
+  background-color: rgb(253, 249, 241) !important;
+  color: rgb(41, 37, 36) !important;
+}
+
+/* ─── Ensure the SelectContent dropdowns work in light mode ─── */
+[data-theme="light"] [role="listbox"],
+[data-theme="light"] [data-radix-select-viewport] {
+  background-color: rgb(253, 249, 241) !important;
+  color: rgb(41, 37, 36) !important;
+}
+
+[data-theme="light"] [role="option"] {
+  color: rgb(41, 37, 36) !important;
+}
+
+[data-theme="light"] [role="option"]:hover,
+[data-theme="light"] [role="option"][data-highlighted] {
+  background-color: rgba(180, 150, 100, 0.12) !important;
+  color: rgb(41, 37, 36) !important;
+}
+
+/* ─── Auth dialog specific overrides ─── */
+[data-theme="light"] .bg-stone-950[class*="DialogContent"] {
+  background-color: rgb(253, 249, 241) !important;
+}
+
+/* ─── Gift builder full-screen override ─── */
+[data-theme="light"] .fixed.inset-0.bg-stone-950 {
+  background-color: rgb(253, 249, 241) !important;
+}
+
+/* ─── text-amber-200/50 hover:text-amber-400 (various interactive items) ─── */
+/* Both already covered above */
+
+/* ─── bg-amber-500/25 (hero decorative line via) ─── */
+[data-theme="light"] .bg-amber-500\/25 {
+  background-color: rgba(180, 130, 40, 0.18) !important;
+}
+
+/* ─── via-amber-500/25 in gradient context ─── */
+[data-theme="light"] [class*="via-amber-500\/25"] {
+  --tw-gradient-via: rgba(180, 130, 40, 0.18) !important;
 }

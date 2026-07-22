@@ -74,7 +74,7 @@ export default function RootLayout({
         <meta name="msapplication-TileImage" content="/icons/icon-512.png" />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-stone-950 text-amber-50`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
         <Toaster />

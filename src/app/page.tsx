@@ -256,6 +256,24 @@ function AppContent() {
   const appTheme = useStore((s) => s.appTheme);
   const appThemeColor = useStore((s) => s.appThemeColor);
 
+  // Sync theme to body element for global CSS overrides
+  React.useEffect(() => {
+    const body = document.body;
+    if (appTheme === 'light') {
+      body.classList.add('theme-light');
+      body.classList.remove('theme-dark');
+      body.style.backgroundColor = '#fdf9f1';
+      body.style.color = '#292524';
+      body.setAttribute('data-theme', 'light');
+    } else {
+      body.classList.add('theme-dark');
+      body.classList.remove('theme-light');
+      body.style.backgroundColor = '#0c0a09';
+      body.style.color = '#fffbeb';
+      body.setAttribute('data-theme', 'dark');
+    }
+  }, [appTheme]);
+
   const renderView = () => {
     switch (view) {
       case 'home':
@@ -289,7 +307,7 @@ function AppContent() {
 
   return (
     <div
-      className={`min-h-screen flex flex-col ${appTheme === 'light' ? 'bg-[#fdf9f1]' : 'bg-stone-950'}`}
+      className={`min-h-screen flex flex-col ${appTheme === 'light' ? 'bg-[#fdf9f1]' : 'bg-stone-950'} ${appTheme === 'light' ? 'text-stone-800' : 'text-amber-50'}`}
       data-theme={appTheme}
       data-theme-color={appThemeColor}
     >
