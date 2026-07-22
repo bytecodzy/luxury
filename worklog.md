@@ -23,3 +23,34 @@ Stage Summary:
 - Deployment LIVE: https://3boxes-luxury-v12.vercel.app/
 - Virtual try-on CONFIRMED WORKING — saree draped on selfie (not side-by-side)
 - Gemini strategy works when ZAI direct is unreachable from Vercel
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Simplify home page - remove Family/Social/Curate from home, fix Chinese images, change product display, push to Vercel
+
+Work Log:
+- Read and analyzed all home page sections (Hero, AboutPortal, HowItWorks, PromoBanner, CategoryGrid, ProductGrid, WhyChoose, StyleGallery, FamilyPack, SocialConnections, ThreeboxesCurate, AppDownload)
+- Used VLM to check all infographic images for Chinese text - found how-it-works.png had Chinese text (奢华购物流程, 浏览, 选择, 结账)
+- Regenerated how-it-works.png infographic with AI image generation (English-only, no Chinese text)
+- Removed FamilyPackSection, SocialConnectionsSection, ThreeboxesCurateSection from HomeSections in page.tsx
+- Added 'family-packs', 'social-connections', '3boxes-curate' view types to store.ts
+- Created new FeaturedProductsSection component with showcase layout (hero product card + grid) to replace ProductGrid on home page
+- Added StandalonePageWrapper for the 3 removed sections as dedicated pages
+- Updated page.tsx renderView to handle new views with standalone page wrappers
+- Updated header.tsx CATEGORY_NAV to use viewId instead of scrollToId for Family Packs, Social, Curate
+- Updated header navigation handlers (desktop, mobile, sheet) to use setView(viewId) without setCategory(null)
+- Fixed critical bug: setCategory(null) was overriding setView because setCategory always sets view:'home'
+- Verified with agent browser that all navigation works correctly - Family Packs, Social, Curate all navigate to dedicated pages
+- Verified virtual try-on still accessible on home page (Try On badges, Virtual Try-On labels)
+- Removed Vercel token from worklog.md and git history (filter-branch) before pushing
+- Pushed v47 to GitHub (force push to rewrite token history)
+
+Stage Summary:
+- Home page simplified: 9 sections instead of 12 (removed Family Packs, Social, Curate)
+- Product display changed: FeaturedProductsSection showcase layout (hero card + grid) instead of ProductGrid
+- Chinese text removed: how-it-works.png regenerated with English-only text
+- Header navigation: Family Packs, Social, Curate now navigate to dedicated view pages (not scroll-to sections)
+- All 3 standalone pages verified working via agent browser
+- Virtual try-on NOT affected by any changes
+- v47 pushed to GitHub and Vercel deployment triggered
