@@ -5,9 +5,10 @@ import { useQuery } from '@tanstack/react-query';
 import { useCurrency } from '@/lib/currency';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
-import { ShoppingCart, ArrowRight } from 'lucide-react';
+import { ShoppingCart, ArrowRight, Eye } from 'lucide-react';
 import { useState } from 'react';
 import { getProxiedImageUrl } from '@/lib/image-utils';
+import { QuickViewDialog } from '@/components/quick-view-dialog';
 
 interface Product {
   id: string;
@@ -45,6 +46,9 @@ export function FeaturedProductsSection() {
   const { format } = useCurrency();
   const [activeTab, setActiveTab] = useState('featured');
   const [isAdding, setIsAdding] = useState<string | null>(null);
+  const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
+  const [quickViewOpen, setQuickViewOpen] = useState(false);
+  const appTheme = useStore((s) => s.appTheme);
 
   // Fetch products for the selected tab
   const { data, isLoading } = useQuery({
@@ -76,6 +80,12 @@ export function FeaturedProductsSection() {
     setTimeout(() => setIsAdding(null), 600);
   };
 
+  const handleQuickView = (e: React.MouseEvent, product: Product) => {
+    e.stopPropagation();
+    setQuickViewProduct(product);
+    setQuickViewOpen(true);
+  };
+
   const handleViewAll = () => {
     if (activeTab === 'featured') {
       setCategory(null);
@@ -90,9 +100,16 @@ export function FeaturedProductsSection() {
     }
   };
 
+  const isLight = appTheme === 'light';
+  const cardBg = isLight ? 'bg-white/80' : 'bg-stone-900/50';
+  const cardBorder = isLight ? 'border-stone-200/60' : 'border-amber-500/8';
+  const cardHoverBorder = isLight ? 'hover:border-amber-400/40' : 'hover:border-amber-500/20';
+  const textPrimary = isLight ? 'text-stone-800' : 'text-amber-50';
+  const textSecondary = isLight ? 'text-stone-500' : 'text-amber-100/60';
+
   return (
     <section className="py-12 sm:py-16 lg:py-20">
-      {/* Section Header — Clean, minimal */}
+      {/* Section Header — "Curated Collections" with gold accent diamond divider */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -101,20 +118,20 @@ export function FeaturedProductsSection() {
         className="mb-10 text-center"
       >
         <h2
-          className="text-2xl sm:text-3xl lg:text-4xl font-medium text-amber-50"
+          className={`text-2xl sm:text-3xl lg:text-4xl font-medium ${isLight ? 'text-stone-900' : 'text-amber-50'}`}
           style={{ fontFamily: "'Lora', serif" }}
         >
-          Collections
+          Curated Collections
         </h2>
-        {/* Gold accent line */}
+        {/* Gold accent diamond divider */}
         <div className="mt-3 flex items-center justify-center gap-2">
           <span className="luxury-accent-bg h-px w-8 opacity-60" />
-          <span className="luxury-accent-bg h-1 w-1 rotate-45 rounded-sm opacity-70" />
+          <span className="luxury-accent-bg h-1.5 w-1.5 rotate-45 rounded-sm opacity-70" />
           <span className="luxury-accent-bg h-px w-8 opacity-60" />
         </div>
       </motion.div>
 
-      {/* Simplified Tabs — Simple text with gold underline */}
+      {/* Animated Tabs — gold underline on active tab (framer-motion layoutId) */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -131,12 +148,12 @@ export function FeaturedProductsSection() {
               className={`relative px-4 py-2.5 text-xs sm:text-sm font-medium uppercase tracking-wider transition-colors duration-200 ${
                 isActive
                   ? 'luxury-accent-text'
-                  : 'text-amber-100/40 hover:text-amber-100/70'
+                  : isLight ? 'text-stone-400 hover:text-stone-600' : 'text-amber-100/40 hover:text-amber-100/70'
               }`}
               style={{ fontFamily: "'Urbanist', sans-serif" }}
             >
               {tab.label}
-              {/* Gold underline on active tab */}
+              {/* Animated gold underline on active tab */}
               {isActive && (
                 <motion.div
                   layoutId="tab-underline"
@@ -153,12 +170,12 @@ export function FeaturedProductsSection() {
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 9 }).map((_, i) => (
-            <div key={i} className="rounded-xl bg-stone-900/50 border border-amber-500/8 animate-pulse">
+            <div key={i} className={`rounded-xl ${cardBg} ${isLight ? 'border border-stone-200/60' : 'border border-amber-500/8'} animate-pulse`}>
               <div className="aspect-[3/4] rounded-t-xl bg-stone-800/40" />
               <div className="p-4 space-y-2">
-                <div className="h-3 w-16 rounded bg-stone-800/40" />
-                <div className="h-4 w-3/4 rounded bg-stone-800/40" />
-                <div className="h-3 w-24 rounded bg-stone-800/40" />
+                <div className={`h-3 w-16 rounded ${isLight ? 'bg-stone-200/60' : 'bg-stone-800/40'}`} />
+                <div className={`h-4 w-3/4 rounded ${isLight ? 'bg-stone-200/60' : 'bg-stone-800/40'}`} />
+                <div className={`h-3 w-24 rounded ${isLight ? 'bg-stone-200/60' : 'bg-stone-800/40'}`} />
               </div>
             </div>
           ))}
@@ -168,17 +185,17 @@ export function FeaturedProductsSection() {
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex flex-col items-center justify-center rounded-xl border border-dashed border-amber-500/10 bg-stone-900/20 py-16 px-6"
+          className={`flex flex-col items-center justify-center rounded-xl border border-dashed ${isLight ? 'border-stone-300/40 bg-stone-100/20' : 'border-amber-500/10 bg-stone-900/20'} py-16 px-6`}
         >
-          <p className="text-base font-medium text-amber-100/40 mb-1" style={{ fontFamily: "'Urbanist', sans-serif" }}>
+          <p className={`text-base font-medium mb-1 ${textSecondary}`} style={{ fontFamily: "'Urbanist', sans-serif" }}>
             No products found
           </p>
-          <p className="text-sm text-amber-100/25 max-w-md text-center" style={{ fontFamily: "'Urbanist', sans-serif" }}>
+          <p className={`text-sm max-w-md text-center ${isLight ? 'text-stone-400' : 'text-amber-100/25'}`} style={{ fontFamily: "'Urbanist', sans-serif" }}>
             Try selecting a different collection to explore our offerings.
           </p>
         </motion.div>
       ) : (
-        /* 3-Column Grid Layout — Clean and minimal */
+        /* 3-Column Grid Layout with hover overlay */
         <motion.div
           key={activeTab}
           initial={{ opacity: 0 }}
@@ -192,10 +209,10 @@ export function FeaturedProductsSection() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05, duration: 0.35 }}
-              className="group cursor-pointer rounded-xl bg-stone-900/50 border border-amber-500/8 hover:border-amber-500/20 transition-all duration-300 overflow-hidden"
+              className={`group cursor-pointer rounded-xl ${cardBg} border ${cardBorder} ${cardHoverBorder} transition-all duration-300 overflow-hidden relative`}
               onClick={() => selectProduct(product.id)}
             >
-              {/* Product image — aspect-[3/4] with subtle hover scale */}
+              {/* Product image — aspect-[3/4] with hover overlay */}
               <div className="aspect-[3/4] relative overflow-hidden bg-stone-800/30">
                 <img
                   src={getProxiedImageUrl(product.images?.[0] || '/images/placeholder.jpg', product.platform)}
@@ -203,9 +220,41 @@ export function FeaturedProductsSection() {
                   className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
                   loading="lazy"
                 />
+                {/* Hover overlay with Quick View + Add to Cart */}
+                <div className={`absolute inset-0 flex flex-col items-center justify-center gap-3 transition-opacity duration-300 ${isLight ? 'bg-stone-900/40' : 'bg-stone-950/50'} opacity-0 group-hover:opacity-100`}>
+                  <Button
+                    onClick={(e) => handleQuickView(e, product)}
+                    className="gap-2 h-9 px-6 text-xs font-medium rounded-full bg-white/90 text-stone-900 hover:bg-white transition-all duration-200 backdrop-blur-sm"
+                    style={{ fontFamily: "'Urbanist', sans-serif" }}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    Quick View
+                  </Button>
+                  <Button
+                    onClick={(e) => handleAddToCart(e, product)}
+                    disabled={product.stock === 0}
+                    className={`gap-2 h-9 px-6 text-xs font-medium rounded-full transition-all duration-200 ${
+                      isAdding === product.id
+                        ? 'bg-emerald-600 text-white scale-[0.97]'
+                        : 'luxury-accent-gradient-bg text-stone-950 hover:opacity-90'
+                    }`}
+                    style={{ fontFamily: "'Urbanist', sans-serif" }}
+                  >
+                    <ShoppingCart className="h-3.5 w-3.5" />
+                    {isAdding === product.id ? 'Added!' : product.stock === 0 ? 'Sold Out' : 'Add to Cart'}
+                  </Button>
+                </div>
+
+                {/* Gold shimmer border effect on hover */}
+                <motion.div
+                  className="absolute inset-0 rounded-t-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                  style={{
+                    boxShadow: 'inset 0 0 0 1px rgba(219,175,54,0.3), inset 0 0 20px rgba(219,175,54,0.05)',
+                  }}
+                />
               </div>
 
-              {/* Card info — clean, minimal */}
+              {/* Card info */}
               <div className="p-4">
                 {/* Category label — small uppercase gold */}
                 <p
@@ -215,15 +264,15 @@ export function FeaturedProductsSection() {
                   {product.category}
                 </p>
 
-                {/* Product name — regular weight */}
+                {/* Product name — Urbanist */}
                 <h3
-                  className="mt-1.5 text-sm sm:text-base font-normal text-amber-50 line-clamp-1 group-hover:text-amber-100 transition-colors"
+                  className={`mt-1.5 text-sm sm:text-base font-normal ${textPrimary} line-clamp-1 group-hover:${isLight ? 'text-stone-900' : 'text-amber-100'} transition-colors`}
                   style={{ fontFamily: "'Urbanist', sans-serif" }}
                 >
                   {product.name}
                 </h3>
 
-                {/* Price with optional compare-at price */}
+                {/* Price in luxury-accent-text gold color */}
                 <div className="mt-2 flex items-baseline gap-2">
                   <span
                     className="text-sm sm:text-base font-semibold luxury-accent-text"
@@ -232,34 +281,18 @@ export function FeaturedProductsSection() {
                     {format(product.price)}
                   </span>
                   {product.compareAtPrice && (
-                    <span className="text-xs text-amber-100/25 line-through" style={{ fontFamily: "'Urbanist', sans-serif" }}>
+                    <span className={`text-xs ${isLight ? 'text-stone-400' : 'text-amber-100/25'} line-through`} style={{ fontFamily: "'Urbanist', sans-serif" }}>
                       {format(product.compareAtPrice)}
                     </span>
                   )}
                 </div>
-
-                {/* Add to Cart button — small, clean */}
-                <Button
-                  onClick={(e) => handleAddToCart(e, product)}
-                  disabled={product.stock === 0}
-                  className={`mt-3 w-full gap-2 h-8 text-xs font-medium rounded-lg transition-all duration-200 ${
-                    isAdding === product.id
-                      ? 'bg-emerald-600 text-white scale-[0.97]'
-                      : 'bg-stone-800/80 text-amber-100/80 hover:bg-stone-700/80 hover:text-amber-50 border border-amber-500/10 hover:border-amber-500/20'
-                  }`}
-                  size="sm"
-                  style={{ fontFamily: "'Urbanist', sans-serif" }}
-                >
-                  <ShoppingCart className="h-3 w-3" />
-                  {isAdding === product.id ? 'Added!' : product.stock === 0 ? 'Sold Out' : 'Add to Cart'}
-                </Button>
               </div>
             </motion.div>
           ))}
         </motion.div>
       )}
 
-      {/* View All CTA — simple rounded button */}
+      {/* View All CTA */}
       <motion.div
         initial={{ opacity: 0 }}
         whileInView={{ opacity: 1 }}
@@ -269,13 +302,24 @@ export function FeaturedProductsSection() {
       >
         <Button
           onClick={handleViewAll}
-          className="gap-2 rounded-full px-7 h-10 text-sm font-medium bg-transparent border border-amber-500/25 text-amber-100/70 hover:border-amber-500/40 hover:text-amber-50 hover:bg-amber-500/[0.06] transition-all duration-300"
+          className={`gap-2 rounded-full px-7 h-10 text-sm font-medium transition-all duration-300 ${
+            isLight
+              ? 'bg-transparent border border-amber-600/25 text-amber-700/70 hover:border-amber-600/40 hover:text-amber-800 hover:bg-amber-500/[0.06]'
+              : 'bg-transparent border border-amber-500/25 text-amber-100/70 hover:border-amber-500/40 hover:text-amber-50 hover:bg-amber-500/[0.06]'
+          }`}
           style={{ fontFamily: "'Urbanist', sans-serif" }}
         >
           View All
           <ArrowRight className="h-4 w-4" />
         </Button>
       </motion.div>
+
+      {/* Quick View Dialog */}
+      <QuickViewDialog
+        open={quickViewOpen}
+        onOpenChange={setQuickViewOpen}
+        product={quickViewProduct as any}
+      />
     </section>
   );
 }

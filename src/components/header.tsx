@@ -5,7 +5,11 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
-import { Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield, Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase, ChevronDown, Building2, Sun, Moon, Users, Crown, Palette } from 'lucide-react';
+import {
+  Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield,
+  Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase,
+  ChevronDown, Sun, Moon, Users, Crown, Palette, Watch, Gem
+} from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
@@ -15,6 +19,9 @@ import { showToast } from '@/hooks/use-toast-notification';
 import type { LucideIcon } from 'lucide-react';
 import type { ThemeColor } from '@/lib/store';
 
+/* ═══════════════════════════════════════════════════════════════════
+   CATEGORY NAVIGATION DATA
+   ═══════════════════════════════════════════════════════════════════ */
 interface CategoryChild {
   name: string;
   slug: string;
@@ -25,8 +32,8 @@ interface CategoryNavItem {
   slug: string;
   icon: LucideIcon;
   children: CategoryChild[];
-  scrollToId?: string; // If set, clicking scrolls to this section ID on the home page
-  viewId?: string; // If set, clicking navigates to this dedicated view page
+  scrollToId?: string;
+  viewId?: string;
 }
 
 const CATEGORY_NAV: CategoryNavItem[] = [
@@ -72,6 +79,38 @@ const CATEGORY_NAV: CategoryNavItem[] = [
       { name: 'Kids Fashion', slug: 'kids-fashion' },
       { name: 'Shirts (5-18 yrs)', slug: 'kids-shirts' },
       { name: 'Dresses (5-18 yrs)', slug: 'kids-dresses' },
+    ],
+  },
+  {
+    name: 'Watches',
+    slug: 'watches',
+    icon: Watch,
+    children: [
+      { name: 'Men\'s Watches', slug: 'men-watches' },
+      { name: 'Women\'s Watches', slug: 'women-watches' },
+      { name: 'Couple Watch Sets', slug: 'couple-watches' },
+    ],
+  },
+  {
+    name: 'Jewelry',
+    slug: 'jewelry',
+    icon: Gem,
+    children: [
+      { name: 'Rings', slug: 'jewelry-rings' },
+      { name: 'Earrings', slug: 'jewelry-earrings' },
+      { name: 'Necklaces', slug: 'jewelry-necklaces' },
+      { name: 'Bracelets', slug: 'jewelry-bracelets' },
+      { name: 'Jewelry Sets', slug: 'jewelry-sets' },
+    ],
+  },
+  {
+    name: 'Sarees',
+    slug: 'sarees',
+    icon: Sparkles,
+    children: [
+      { name: 'Silk Sarees', slug: 'sarees-silk' },
+      { name: 'Cotton Sarees', slug: 'sarees-cotton' },
+      { name: 'Designer Sarees', slug: 'sarees-designer' },
     ],
   },
   {
@@ -123,23 +162,74 @@ const CATEGORY_NAV: CategoryNavItem[] = [
   },
 ];
 
+/* ═══════════════════════════════════════════════════════════════════
+   THEME COLOR DEFINITIONS
+   ═══════════════════════════════════════════════════════════════════ */
+const themeColors: { id: ThemeColor; label: string; color: string }[] = [
+  { id: 'royal-gold', label: 'Royal Gold', color: '#dbaf36' },
+  { id: 'rose-elegance', label: 'Rose Elegance', color: '#e11d48' },
+  { id: 'emerald-luxe', label: 'Emerald Luxe', color: '#059669' },
+  { id: 'sapphire-classic', label: 'Sapphire Classic', color: '#2563eb' },
+  { id: 'onyx-noir', label: 'Onyx Noir', color: '#a3a3a3' },
+];
+
+/* ═══════════════════════════════════════════════════════════════════
+   ANNOUNCEMENT BAR TEXT
+   ═══════════════════════════════════════════════════════════════════ */
+const ANNOUNCEMENT_TEXT = "Free Shipping on Orders Over ₹5,000 | Curated Luxury Gifts | New Arrivals Every Week";
+
+/* ═══════════════════════════════════════════════════════════════════
+   ROLE BADGE STYLES
+   ═══════════════════════════════════════════════════════════════════ */
+const roleBadgeDark: Record<string, string> = {
+  admin: 'bg-red-600/20 text-red-400 border-red-600/30',
+  user: 'bg-emerald-600/20 text-emerald-400 border-emerald-600/30',
+  agent: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
+  team: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
+  corporate: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
+};
+
+const roleBadgeLight: Record<string, string> = {
+  admin: 'bg-red-100 text-red-600 border-red-200',
+  user: 'bg-emerald-100 text-emerald-600 border-emerald-200',
+  agent: 'bg-blue-100 text-blue-600 border-blue-200',
+  team: 'bg-purple-100 text-purple-600 border-purple-200',
+  corporate: 'bg-amber-100 text-amber-600 border-amber-200',
+};
+
+/* ═══════════════════════════════════════════════════════════════════
+   HEADER COMPONENT
+   ═══════════════════════════════════════════════════════════════════ */
 export function Header() {
-  const { searchQuery, setSearch, setView, cartItems, setCategory, selectedCategory, authUser, setAuthView, clearAuth, toggleGiftBuilder, appTheme, setAppTheme, appThemeColor, setAppThemeColor } = useStore();
+  const {
+    searchQuery, setSearch, setView, cartItems, setCategory,
+    selectedCategory, authUser, setAuthView, clearAuth,
+    toggleGiftBuilder, appTheme, setAppTheme, appThemeColor, setAppThemeColor,
+  } = useStore();
   const { t } = useTranslation();
   const { canInstall, promptInstall } = usePWAInstall();
+
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [themeColorPickerOpen, setThemeColorPickerOpen] = useState(false);
+  const [searchDropdownOpen, setSearchDropdownOpen] = useState(false);
   const themeColorPickerRef = useRef<HTMLDivElement>(null);
-  const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
 
-  const themeColors: { id: ThemeColor; label: string; color: string }[] = [
-    { id: 'royal-gold', label: 'Royal Gold', color: '#dbaf36' },
-    { id: 'rose-elegance', label: 'Rose Elegance', color: '#e11d48' },
-    { id: 'emerald-luxe', label: 'Emerald Luxe', color: '#059669' },
-    { id: 'sapphire-classic', label: 'Sapphire Classic', color: '#2563eb' },
-    { id: 'onyx-noir', label: 'Onyx Noir', color: '#a3a3a3' },
-  ];
+  const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+  const isDark = appTheme === 'dark';
+  const isLight = appTheme === 'light';
+
+  // Theme-aware styling helpers
+  const accentText = isDark ? 'text-[var(--luxury-accent,#dbaf36)]' : 'text-[var(--luxury-accent-dark,#b8860b)]';
+  const mutedText = isDark ? 'text-amber-200/70' : 'text-stone-600';
+  const mutedTextHover = isDark ? 'hover:text-amber-400' : 'hover:text-amber-700';
+  const iconBg = isDark ? 'hover:bg-amber-900/20' : 'hover:bg-amber-50';
+  const bgSurface = isDark ? 'bg-stone-950' : 'bg-[#fdf9f1]';
+  const bgSurface95 = isDark ? 'bg-stone-950/95' : 'bg-[#fdf9f1]/95';
+  const borderColor = isDark ? 'border-amber-900/30' : 'border-amber-200/50';
+  const borderColorLight = isDark ? 'border-amber-900/20' : 'border-amber-200/40';
 
   // Close theme color picker when clicking outside
   useEffect(() => {
@@ -154,19 +244,34 @@ export function Header() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [themeColorPickerOpen]);
 
+  // Close search dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchDropdownOpen(false);
+      }
+    }
+    if (searchDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [searchDropdownOpen]);
+
+  // Sync local search with global state
+  useEffect(() => {
+    setLocalSearch(searchQuery);
+  }, [searchQuery]);
+
   const handleSearch = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       setSearch(localSearch);
       setCategory(null);
       setView('home');
+      setSearchDropdownOpen(false);
     },
     [localSearch, setSearch, setCategory, setView]
   );
-
-  useEffect(() => {
-    setLocalSearch(searchQuery);
-  }, [searchQuery]);
 
   const handleDashboard = () => {
     if (!authUser) return;
@@ -179,451 +284,487 @@ export function Header() {
     }
   };
 
-  const roleBadge: Record<string, string> = {
-    admin: 'bg-red-600/20 text-red-400 border-red-600/30',
-    user: 'bg-emerald-600/20 text-emerald-400 border-emerald-600/30',
-    agent: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
-    team: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
-    corporate: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
+  // Helper: handle nav item click
+  const handleNavClick = (cat: CategoryNavItem) => {
+    if (cat.viewId) {
+      setView(cat.viewId as any);
+    } else if (cat.scrollToId) {
+      setView('home');
+      setCategory(null);
+      setTimeout(() => {
+        const el = document.getElementById(cat.scrollToId!);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    } else {
+      setCategory(cat.slug);
+    }
   };
 
+  /* ═══════════════════════════════════════════════════════════════════
+     ICON BUTTON COMPONENT (reusable for header icons)
+     ═══════════════════════════════════════════════════════════════════ */
+  const IconButton = ({ icon: Icon, onClick, ariaLabel, className = '', badge = null }: {
+    icon: LucideIcon;
+    onClick: () => void;
+    ariaLabel: string;
+    className?: string;
+    badge?: React.ReactNode;
+  }) => (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onClick}
+      className={`relative group ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 rounded-full h-10 w-10 hover:shadow-[0_0_12px_rgba(var(--luxury-accent-rgb,219,175,54),0.3)] ${className}`}
+      aria-label={ariaLabel}
+    >
+      <Icon className="h-[18px] w-[18px] transition-all duration-300 group-hover:scale-110" />
+      {badge}
+    </Button>
+  );
+
   return (
-    <header className={`sticky top-0 z-50 w-full backdrop-blur-md ${appTheme === 'light' ? 'border-b border-amber-200/50 bg-white/95' : 'border-b border-amber-900/30 bg-stone-950/95'}`}>
-      <div className="container mx-auto px-4">
-        <div className="flex h-24 items-center justify-between gap-4">
-          {/* Logo */}
-          <button
-            onClick={() => {
-              setView('home');
-              setSearch('');
-              setLocalSearch('');
-              setCategory(null);
-            }}
-            className="flex-shrink-0 flex items-center gap-3 group"
-          >
-            <div className="relative flex h-20 w-20 items-center justify-center sm:h-24 sm:w-24">
-              <Image
-                src="/images/logo-uploaded.png"
-                alt="3 Boxes Luxury Logo"
-                width={96}
-                height={96}
-                className={`h-20 w-20 object-contain sm:h-24 sm:w-24 ${
-                  appTheme === 'light'
-                    ? 'contrast-110 brightness-95 saturate-130'
-                    : 'contrast-130 brightness-110 saturate-120'
-                }`}
-                priority
-              />
-            </div>
-            <h1 className="gold-shimmer text-2xl font-bold tracking-widest sm:text-3xl hidden sm:block ml-1" style={{ fontFamily: 'Urbanist, sans-serif' }}>
-              3 BOXES LUXURY
-            </h1>
-          </button>
+    <header className={`sticky top-0 z-50 w-full backdrop-blur-md transition-colors duration-500 ${bgSurface95} border-b ${borderColor}`}>
+      {/* ═══════════════════════════════════════════════════════════════
+          ROW 1: ANNOUNCEMENT BAR
+          ═══════════════════════════════════════════════════════════════ */}
+      <div className="announcement-bar relative overflow-hidden">
+        {/* Gold/champagne gradient background with shimmer */}
+        <div className={`absolute inset-0 ${isDark
+          ? 'bg-gradient-to-r from-[#1a1407] via-[#2a1f0a] to-[#1a1407]'
+          : 'bg-gradient-to-r from-[#f5e6a3] via-[#dbaf36] to-[#f5e6a3]'
+        }`} />
+        <div className="announcement-shimmer absolute inset-0" />
+        <div className={`relative text-center py-2 px-4 text-xs font-medium tracking-wide ${isDark
+          ? 'text-amber-200/80'
+          : 'text-[#3d2e0a]'
+        }`} style={{ fontFamily: 'Urbanist, sans-serif' }}>
+          {ANNOUNCEMENT_TEXT}
+        </div>
+      </div>
 
-          {/* Search Bar - Desktop */}
-          <form onSubmit={handleSearch} className="hidden flex-1 max-w-xl md:flex">
-            <div className="relative w-full">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/60" />
-              <Input
-                value={localSearch}
-                onChange={(e) => setLocalSearch(e.target.value)}
-                placeholder={t('common.searchPlaceholder')}
-                className="w-full border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:ring-amber-600/30"
-              />
-              {localSearch && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLocalSearch('');
-                    setSearch('');
-                  }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-200/40 hover:text-amber-200"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          </form>
+      {/* ═══════════════════════════════════════════════════════════════
+          ROW 2: MAIN HEADER — Logo centered, icons flanking
+          ═══════════════════════════════════════════════════════════════ */}
+      <div className={`border-b ${borderColorLight}`}>
+        <div className="container mx-auto px-4">
+          {/* Desktop layout: 3-column with centered logo */}
+          <div className="hidden md:flex items-center justify-between h-[88px]">
 
-          {/* Actions */}
-          <div className="flex items-center gap-2">
-            {/* Install App Button */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                if (canInstall) {
-                  promptInstall();
-                } else {
-                  const section = document.getElementById('app-download');
-                  section?.scrollIntoView({ behavior: 'smooth' });
-                }
-              }}
-              className="hidden lg:flex items-center gap-1.5 border-amber-500/40 bg-amber-600/10 text-amber-300 hover:bg-amber-600/20 hover:text-amber-200 hover:border-amber-500/60"
-            >
-              <Download className="h-4 w-4" />
-              <span className="text-xs font-medium">Install App</span>
-            </Button>
-
-            {/* Theme Toggle (Desktop) */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setAppTheme(appTheme === 'dark' ? 'light' : 'dark')}
-              className={`hidden md:flex ${appTheme === 'light' ? 'text-stone-600 hover:bg-amber-100/50 hover:text-amber-700' : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400'}`}
-              aria-label={appTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {appTheme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-            </Button>
-
-            {/* Theme Color Picker (Desktop) */}
-            <div className="relative hidden md:block" ref={themeColorPickerRef}>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setThemeColorPickerOpen(!themeColorPickerOpen)}
-                className={`${appTheme === 'light' ? 'text-stone-600 hover:bg-amber-100/50 hover:text-amber-700' : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400'}`}
-                aria-label="Change theme color"
-              >
-                <Palette className="h-5 w-5" />
-              </Button>
-              <AnimatePresence>
-                {themeColorPickerOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 top-full mt-2 z-[100] rounded-xl border border-amber-500/20 bg-stone-950/95 backdrop-blur-xl p-3 shadow-2xl shadow-black/40"
-                    style={{ minWidth: '170px' }}
-                  >
-                    <p className="text-[10px] uppercase tracking-[0.15em] text-amber-400/60 mb-2 px-1">Theme Color</p>
-                    <div className="space-y-1">
-                      {themeColors.map((tc) => (
-                        <button
-                          key={tc.id}
-                          onClick={() => {
-                            setAppThemeColor(tc.id);
-                            setThemeColorPickerOpen(false);
-                          }}
-                          className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${
-                            appThemeColor === tc.id
-                              ? 'bg-amber-500/15 text-amber-200'
-                              : 'text-amber-200/60 hover:bg-amber-500/10 hover:text-amber-200/90'
-                          }`}
-                        >
-                          <span
-                            className="h-4 w-4 rounded-full border-2 flex-shrink-0 transition-shadow"
-                            style={{
-                              backgroundColor: tc.color,
-                              borderColor: appThemeColor === tc.id ? '#fff' : tc.color,
-                              boxShadow: appThemeColor === tc.id ? `0 0 8px ${tc.color}80` : 'none',
-                            }}
+            {/* LEFT GROUP: Search, Palette, Locale */}
+            <div className="flex items-center gap-1 min-w-0">
+              {/* Search Icon Button — opens search dropdown */}
+              <div className="relative" ref={searchRef}>
+                <IconButton
+                  icon={Search}
+                  onClick={() => setSearchDropdownOpen(!searchDropdownOpen)}
+                  ariaLabel={t('common.searchPlaceholder')}
+                />
+                <AnimatePresence>
+                  {searchDropdownOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8, width: 0 }}
+                      animate={{ opacity: 1, y: 0, width: 320 }}
+                      exit={{ opacity: 0, y: -8, width: 0 }}
+                      transition={{ duration: 0.25 }}
+                      className="absolute left-0 top-full mt-2 z-[100]"
+                    >
+                      <form onSubmit={handleSearch} className="w-full">
+                        <div className="relative">
+                          <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${isDark ? 'text-amber-600/60' : 'text-amber-500/60'}`} />
+                          <Input
+                            value={localSearch}
+                            onChange={(e) => setLocalSearch(e.target.value)}
+                            placeholder={t('common.searchPlaceholder')}
+                            autoFocus
+                            className={`w-full pl-10 ${isDark
+                              ? 'border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60'
+                              : 'border-amber-200/60 bg-white text-stone-800 placeholder:text-stone-400 focus:border-amber-500'
+                            }`}
                           />
-                          <span className="text-xs font-medium">{tc.label}</span>
-                          {appThemeColor === tc.id && (
-                            <svg className="ml-auto h-3.5 w-3.5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                            </svg>
+                          {localSearch && (
+                            <button
+                              type="button"
+                              onClick={() => { setLocalSearch(''); setSearch(''); }}
+                              className={`absolute right-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-amber-200/40 hover:text-amber-200' : 'text-stone-400 hover:text-stone-600'}`}
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
                           )}
-                        </button>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                        </div>
+                      </form>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Theme Color Picker */}
+              <div className="relative" ref={themeColorPickerRef}>
+                <IconButton
+                  icon={Palette}
+                  onClick={() => setThemeColorPickerOpen(!themeColorPickerOpen)}
+                  ariaLabel="Change theme color"
+                />
+                <AnimatePresence>
+                  {themeColorPickerOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                      transition={{ duration: 0.15 }}
+                      className={`absolute left-0 top-full mt-2 z-[100] rounded-xl border shadow-2xl p-3 ${isDark
+                        ? 'border-amber-500/20 bg-stone-950/95 shadow-black/40 backdrop-blur-xl'
+                        : 'border-amber-200 bg-white shadow-amber-200/40 backdrop-blur-xl'
+                      }`}
+                      style={{ minWidth: '170px' }}
+                    >
+                      <p className={`text-[10px] uppercase tracking-[0.15em] mb-2 px-1 ${isDark ? 'text-amber-400/60' : 'text-amber-600/60'}`}>
+                        Theme Color
+                      </p>
+                      <div className="space-y-1">
+                        {themeColors.map((tc) => (
+                          <button
+                            key={tc.id}
+                            onClick={() => {
+                              setAppThemeColor(tc.id);
+                              setThemeColorPickerOpen(false);
+                            }}
+                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${
+                              appThemeColor === tc.id
+                                ? (isDark ? 'bg-amber-500/15 text-amber-200' : 'bg-amber-100 text-amber-700')
+                                : (isDark ? 'text-amber-200/60 hover:bg-amber-500/10 hover:text-amber-200/90' : 'text-stone-500 hover:bg-amber-50 hover:text-amber-600')
+                            }`}
+                          >
+                            <span
+                              className="h-4 w-4 rounded-full border-2 flex-shrink-0 transition-shadow"
+                              style={{
+                                backgroundColor: tc.color,
+                                borderColor: appThemeColor === tc.id ? (isDark ? '#fff' : '#3d2e0a') : tc.color,
+                                boxShadow: appThemeColor === tc.id ? `0 0 8px ${tc.color}80` : 'none',
+                              }}
+                            />
+                            <span className="text-xs font-medium">{tc.label}</span>
+                            {appThemeColor === tc.id && (
+                              <svg className="ml-auto h-3.5 w-3.5 luxury-accent-text" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Locale/Currency Switcher */}
+              <LocaleSwitcher />
             </div>
 
-            {/* Locale Switcher (Desktop) */}
-            <LocaleSwitcher />
-
-            {/* Orders */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setView('orders')}
-              className="text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
-              aria-label={t('common.orders')}
+            {/* CENTER: Logo + Brand Name */}
+            <button
+              onClick={() => {
+                setView('home');
+                setSearch('');
+                setLocalSearch('');
+                setCategory(null);
+              }}
+              className="flex-shrink-0 flex items-center gap-3 group"
             >
-              <Package className="h-5 w-5" />
-            </Button>
-
-            {/* Gift Builder */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleGiftBuilder}
-              className="hidden sm:flex items-center gap-1.5 text-amber-300/80 hover:bg-amber-900/20 hover:text-amber-300 border border-amber-600/30 hover:border-amber-500/50"
-            >
-              <Gift className="h-4 w-4" />
-              <span className="text-xs font-medium">{t('nav.giftBuilder')}</span>
-              <Sparkles className="h-3 w-3 text-amber-400/60" />
-            </Button>
-
-            {/* Login / Profile */}
-            {authUser ? (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleDashboard}
-                  className="hidden sm:flex items-center gap-2 text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
-                >
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-600/20 text-xs font-bold text-amber-400">
-                    {authUser.name.charAt(0).toUpperCase()}
-                  </div>
-                  <span className="max-w-24 truncate text-sm">{authUser.name}</span>
-                  <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${roleBadge[authUser.role] || ''}`}>
-                    {authUser.role}
-                  </span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleDashboard}
-                  className="sm:hidden text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
-                  aria-label={t('common.myDashboard')}
-                >
-                  <Shield className="h-5 w-5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => { clearAuth(); setView('home'); showToast('success', 'You have been signed out successfully.') }}
-                  className="text-amber-200/40 hover:bg-red-900/20 hover:text-red-400"
-                  aria-label={t('common.signOut')}
-                >
-                  <LogOut className="h-4 w-4" />
-                </Button>
+              <div className="relative flex h-16 w-16 items-center justify-center">
+                <Image
+                  src="/images/logo-uploaded.png"
+                  alt="3 Boxes Luxury Logo"
+                  width={64}
+                  height={64}
+                  className={`h-16 w-16 object-contain transition-all duration-500 group-hover:scale-105 ${
+                    isLight
+                      ? 'contrast-110 brightness-95 saturate-130'
+                      : 'contrast-130 brightness-110 saturate-120'
+                  }`}
+                  priority
+                />
               </div>
-            ) : (
-              <Button
-                variant="outline"
-                size="default"
-                onClick={() => setAuthView('login')}
-                className="border-amber-600/50 bg-amber-900/20 text-amber-300 hover:bg-amber-600/30 hover:text-amber-100 hover:border-amber-500/60 gap-2 px-4 py-2 font-medium shadow-sm shadow-amber-900/20"
-                aria-label={t('common.signIn')}
+              <h1
+                className="logo-shimmer-text hidden sm:block text-xl font-bold tracking-[0.25em] transition-all duration-500"
+                style={{ fontFamily: 'Lora, serif' }}
               >
-                <LogIn className="h-5 w-5" />
-                <span className="text-sm">{t('common.signIn')}</span>
-              </Button>
-            )}
+                3 BOXES LUXURY
+              </h1>
+            </button>
 
-            {/* Cart */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setView('cart')}
-              className="relative text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400"
-              aria-label={t('common.viewCart')}
-            >
-              <ShoppingCart className="h-5 w-5" />
-              <AnimatePresence>
-                {totalItems > 0 && (
-                  <motion.span
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    exit={{ scale: 0 }}
-                    className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-600 text-[10px] font-bold text-stone-950"
+            {/* RIGHT GROUP: Theme toggle, Gift, Orders, Install, Auth, Cart */}
+            <div className="flex items-center gap-1 min-w-0">
+
+              {/* Theme Toggle (Dark/Light) */}
+              <IconButton
+                icon={isDark ? Sun : Moon}
+                onClick={() => setAppTheme(isDark ? 'light' : 'dark')}
+                ariaLabel={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+              />
+
+              {/* Gift Builder */}
+              <IconButton
+                icon={Gift}
+                onClick={toggleGiftBuilder}
+                ariaLabel={t('nav.giftBuilder')}
+              />
+
+              {/* Orders */}
+              <IconButton
+                icon={Package}
+                onClick={() => setView('orders')}
+                ariaLabel={t('common.orders')}
+              />
+
+              {/* Install App */}
+              {canInstall && (
+                <IconButton
+                  icon={Download}
+                  onClick={promptInstall}
+                  ariaLabel="Install App"
+                  className="hidden lg:flex"
+                />
+              )}
+
+              {/* Auth Button */}
+              {authUser ? (
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleDashboard}
+                    className={`relative group ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 rounded-full h-10 w-10 hover:shadow-[0_0_12px_rgba(var(--luxury-accent-rgb,219,175,54),0.3)]`}
+                    ariaLabel={t('common.myDashboard')}
                   >
-                    {totalItems}
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </Button>
+                    <div className={`flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-bold transition-all duration-300 group-hover:scale-110 ${
+                      isDark ? 'bg-amber-600/20 text-amber-400' : 'bg-amber-100 text-amber-700'
+                    }`}>
+                      {authUser.name.charAt(0).toUpperCase()}
+                    </div>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => { clearAuth(); setView('home'); showToast('success', 'You have been signed out successfully.') }}
+                    className={`${isDark ? 'text-amber-200/40 hover:bg-red-900/20 hover:text-red-400' : 'text-stone-400 hover:bg-red-50 hover:text-red-500'} transition-all duration-300 rounded-full h-8 w-8`}
+                    aria-label={t('common.signOut')}
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <IconButton
+                  icon={LogIn}
+                  onClick={() => setAuthView('login')}
+                  ariaLabel={t('common.signIn')}
+                />
+              )}
 
-            {/* Mobile Menu */}
+              {/* Cart with bounce animation */}
+              <div className="relative">
+                <motion.div
+                  key={totalItems}
+                  initial={totalItems > 0 ? { scale: 1.2 } : { scale: 1 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+                >
+                  <IconButton
+                    icon={ShoppingCart}
+                    onClick={() => setView('cart')}
+                    ariaLabel={t('common.viewCart')}
+                    badge={
+                      <AnimatePresence>
+                        {totalItems > 0 && (
+                          <motion.span
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            exit={{ scale: 0 }}
+                            className={`absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
+                              isDark ? 'bg-[var(--luxury-accent,#dbaf36)] text-stone-950' : 'bg-[var(--luxury-accent,#dbaf36)] text-white'
+                            }`}
+                          >
+                            {totalItems}
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                    }
+                  />
+                </motion.div>
+              </div>
+            </div>
+          </div>
+
+          {/* ═══════════════════════════════════════════════════════════════
+              MOBILE LAYOUT: Hamburger + Logo + Search + Cart
+              ═══════════════════════════════════════════════════════════════ */}
+          <div className="flex md:hidden items-center justify-between h-[56px]">
+            {/* Hamburger */}
             <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
               <SheetTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-400 md:hidden"
+                  className={`${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300`}
                   aria-label="Open menu"
                 >
                   <Menu className="h-5 w-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="border-amber-900/30 bg-stone-950">
+              <SheetContent side="right" className={`border ${borderColor} ${bgSurface}`}>
                 <SheetTitle className="flex items-center gap-2">
-                  <div className="relative flex h-14 w-14 items-center justify-center">
+                  <div className="relative flex h-12 w-12 items-center justify-center">
                     <Image
                       src="/images/logo-uploaded.png"
                       alt="3 Boxes Luxury Logo"
-                      width={56}
-                      height={56}
-                      className={`h-14 w-14 object-contain ${
-                        appTheme === 'light'
-                          ? 'contrast-110 brightness-95 saturate-130'
-                          : 'contrast-130 brightness-110 saturate-120'
+                      width={48}
+                      height={48}
+                      className={`h-12 w-12 object-contain ${
+                        isLight ? 'contrast-110 brightness-95 saturate-130' : 'contrast-130 brightness-110 saturate-120'
                       }`}
                     />
                   </div>
-                  <span className="gold-shimmer text-lg font-bold tracking-widest">
+                  <span className={`gold-shimmer text-lg font-bold tracking-widest`}>
                     3 BOXES LUXURY
                   </span>
                 </SheetTitle>
-                <div className="mt-8 flex flex-col gap-4">
-                  <form onSubmit={handleSearch} className="md:hidden">
+                <div className="mt-8 flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-120px)] custom-scrollbar">
+                  {/* Search */}
+                  <form onSubmit={(e) => { handleSearch(e); setMobileMenuOpen(false); }}>
                     <div className="relative">
-                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-600/60" />
+                      <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${isDark ? 'text-amber-600/60' : 'text-amber-500/60'}`} />
                       <Input
                         value={localSearch}
                         onChange={(e) => setLocalSearch(e.target.value)}
                         placeholder={t('common.searchPlaceholder')}
-                        className="w-full border-amber-900/40 bg-stone-900/50 pl-10 text-amber-50 placeholder:text-amber-200/30"
+                        className={`w-full pl-10 ${isDark
+                          ? 'border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30'
+                          : 'border-amber-200/60 bg-white text-stone-800 placeholder:text-stone-400'
+                        }`}
                       />
                     </div>
                   </form>
+
+                  {/* Home */}
                   <button
-                    onClick={() => {
-                      setView('home');
-                      setSearch('');
-                      setLocalSearch('');
-                      setCategory(null);
-                      setMobileMenuOpen(false);
-                    }}
-                    className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
+                    onClick={() => { setView('home'); setSearch(''); setLocalSearch(''); setCategory(null); setMobileMenuOpen(false); }}
+                    className={`rounded-md px-4 py-2 text-left transition-colors ${isDark ? 'text-amber-200/80 hover:bg-amber-900/20 hover:text-amber-400' : 'text-stone-700 hover:bg-amber-50 hover:text-amber-700'}`}
                   >
                     {t('nav.home')}
                   </button>
+
+                  {/* Auth */}
                   {authUser ? (
                     <>
                       <button
-                        onClick={() => {
-                          handleDashboard();
-                          setMobileMenuOpen(false);
-                        }}
-                        className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
+                        onClick={() => { handleDashboard(); setMobileMenuOpen(false); }}
+                        className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${isDark ? 'text-amber-200/80 hover:bg-amber-900/20 hover:text-amber-400' : 'text-stone-700 hover:bg-amber-50 hover:text-amber-700'}`}
                       >
-                        <span className="flex items-center gap-2">
-                          <User className="h-4 w-4" />
-                          {t('common.myDashboard')} ({authUser.role})
+                        <User className="h-4 w-4" />
+                        {t('common.myDashboard')} ({authUser.role})
+                        <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium border ${
+                          isDark ? (roleBadgeDark[authUser.role] || '') : (roleBadgeLight[authUser.role] || '')
+                        }`}>
+                          {authUser.role}
                         </span>
                       </button>
                       <button
-                        onClick={() => {
-                          clearAuth();
-                          setView('home');
-                          setMobileMenuOpen(false);
-                          showToast('success', 'You have been signed out successfully.')
-                        }}
-                        className="rounded-md px-4 py-2 text-left text-red-400/80 transition-colors hover:bg-red-900/20 hover:text-red-400"
+                        onClick={() => { clearAuth(); setView('home'); setMobileMenuOpen(false); showToast('success', 'You have been signed out successfully.') }}
+                        className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${isDark ? 'text-red-400/80 hover:bg-red-900/20' : 'text-red-500 hover:bg-red-50'}`}
                       >
-                        <span className="flex items-center gap-2">
-                          <LogOut className="h-4 w-4" />
-                          {t('common.signOut')}
-                        </span>
+                        <LogOut className="h-4 w-4" />
+                        {t('common.signOut')}
                       </button>
                     </>
                   ) : (
                     <button
-                      onClick={() => {
-                        setAuthView('login');
-                        setMobileMenuOpen(false);
-                      }}
-                      className="rounded-md px-4 py-3 text-left text-amber-100 font-medium transition-colors bg-amber-600/20 border border-amber-600/40 hover:bg-amber-600/30"
+                      onClick={() => { setAuthView('login'); setMobileMenuOpen(false); }}
+                      className={`rounded-md px-4 py-3 text-left font-medium transition-colors flex items-center gap-2 ${isDark
+                        ? 'text-amber-100 bg-amber-600/20 border border-amber-600/40 hover:bg-amber-600/30'
+                        : 'text-white bg-[var(--luxury-accent,#dbaf36)] border border-amber-400 hover:bg-amber-500'
+                      }`}
                     >
-                      <span className="flex items-center gap-2">
-                        <LogIn className="h-5 w-5" />
-                        {t('common.signIn')}
-                      </span>
+                      <LogIn className="h-5 w-5" />
+                      {t('common.signIn')}
                     </button>
                   )}
+
+                  {/* Cart */}
                   <button
-                    onClick={() => {
-                      setView('cart');
-                      setMobileMenuOpen(false);
-                    }}
-                    className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
+                    onClick={() => { setView('cart'); setMobileMenuOpen(false); }}
+                    className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${isDark ? 'text-amber-200/80 hover:bg-amber-900/20 hover:text-amber-400' : 'text-stone-700 hover:bg-amber-50 hover:text-amber-700'}`}
                   >
+                    <ShoppingCart className="h-4 w-4" />
                     {t('common.cart')} ({totalItems})
                   </button>
+
+                  {/* Orders */}
                   <button
-                    onClick={() => {
-                      setView('orders');
-                      setMobileMenuOpen(false);
-                    }}
-                    className="rounded-md px-4 py-2 text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400"
+                    onClick={() => { setView('orders'); setMobileMenuOpen(false); }}
+                    className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${isDark ? 'text-amber-200/80 hover:bg-amber-900/20 hover:text-amber-400' : 'text-stone-700 hover:bg-amber-50 hover:text-amber-700'}`}
                   >
+                    <Package className="h-4 w-4" />
                     {t('common.orders')}
                   </button>
+
+                  {/* Gift Builder */}
                   <button
-                    onClick={() => {
-                      toggleGiftBuilder();
-                      setMobileMenuOpen(false);
-                    }}
-                    className="rounded-md px-4 py-2 text-left text-amber-300/90 transition-colors hover:bg-amber-900/20 hover:text-amber-300 flex items-center gap-2"
+                    onClick={() => { toggleGiftBuilder(); setMobileMenuOpen(false); }}
+                    className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${accentText}`}
                   >
                     <Gift className="h-4 w-4" />
                     {t('nav.giftBuilder')}
-                    <Sparkles className="h-3 w-3 text-amber-400/60" />
+                    <Sparkles className="h-3 w-3 opacity-60" />
                   </button>
 
-                  {/* Quick section links */}
-                  <div className="my-3 border-t border-amber-900/20 pt-3">
-                    <p className="px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest text-amber-400/50">Explore</p>
-                    <button
-                      onClick={() => {
-                        setView('family-packs');
-                        setMobileMenuOpen(false);
-                      }}
-                      className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
-                    >
-                      <Package className="h-4 w-4" />
-                      Family Packs
-                    </button>
-                    <button
-                      onClick={() => {
-                        setView('social-connections');
-                        setMobileMenuOpen(false);
-                      }}
-                      className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
-                    >
-                      <Users className="h-4 w-4" />
-                      Social Connections
-                    </button>
-                    <button
-                      onClick={() => {
-                        setView('3boxes-curate');
-                        setMobileMenuOpen(false);
-                      }}
-                      className="rounded-md px-4 py-2 w-full text-left text-amber-200/80 transition-colors hover:bg-amber-900/20 hover:text-amber-400 flex items-center gap-2"
-                    >
-                      <Crown className="h-4 w-4" />
-                      3BOXES Curate
-                    </button>
+                  {/* Quick Section Links */}
+                  <div className={`my-3 border-t pt-3 ${isDark ? 'border-amber-900/20' : 'border-amber-200/40'}`}>
+                    <p className={`px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>Explore</p>
+                    {CATEGORY_NAV.map((cat) => (
+                      <button
+                        key={cat.slug}
+                        onClick={() => { handleNavClick(cat); setMobileMenuOpen(false); }}
+                        className={`rounded-md px-4 py-2 w-full text-left transition-colors flex items-center gap-2 ${isDark ? 'text-amber-200/80 hover:bg-amber-900/20 hover:text-amber-400' : 'text-stone-600 hover:bg-amber-50 hover:text-amber-700'}`}
+                      >
+                        <cat.icon className="h-4 w-4" />
+                        {cat.name}
+                      </button>
+                    ))}
                   </div>
 
+                  {/* Install App */}
+                  {canInstall && (
+                    <button
+                      onClick={() => { promptInstall(); setMobileMenuOpen(false); }}
+                      className={`rounded-md px-4 py-3 text-left font-medium transition-colors flex items-center gap-2 ${isDark
+                        ? 'text-amber-100 bg-amber-600/10 border border-amber-500/30 hover:bg-amber-600/20'
+                        : 'text-amber-700 bg-amber-50 border border-amber-300 hover:bg-amber-100'
+                      }`}
+                    >
+                      <Download className="h-5 w-5" />
+                      Install App
+                    </button>
+                  )}
+
+                  {/* Theme Toggle */}
                   <button
-                    onClick={() => {
-                      if (canInstall) {
-                        promptInstall();
-                      } else {
-                        const section = document.getElementById('app-download');
-                        section?.scrollIntoView({ behavior: 'smooth' });
-                      }
-                      setMobileMenuOpen(false);
-                    }}
-                    className="rounded-md px-4 py-3 text-left text-amber-100 font-medium transition-colors bg-amber-600/10 border border-amber-500/30 hover:bg-amber-600/20 flex items-center gap-2"
+                    onClick={() => { setAppTheme(isDark ? 'light' : 'dark'); }}
+                    className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${isDark ? 'text-amber-200/80 hover:bg-amber-900/20' : 'text-stone-600 hover:bg-amber-50'}`}
                   >
-                    <Download className="h-5 w-5" />
-                    Install App
+                    {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                    {isDark ? 'Light Mode' : 'Dark Mode'}
                   </button>
 
-                  {/* Mobile Locale Switcher */}
+                  {/* Locale Switcher */}
                   <LocaleSwitcherMobile />
 
-                  {/* Mobile Theme Color Picker */}
-                  <div className="my-3 border-t border-amber-900/20 pt-3">
-                    <p className="px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest text-amber-400/50">Theme Color</p>
+                  {/* Theme Color Picker */}
+                  <div className={`my-3 border-t pt-3 ${isDark ? 'border-amber-900/20' : 'border-amber-200/40'}`}>
+                    <p className={`px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>Theme Color</p>
                     <div className="flex items-center gap-3 px-4">
                       {themeColors.map((tc) => (
                         <button
                           key={tc.id}
-                          onClick={() => {
-                            setAppThemeColor(tc.id);
-                          }}
+                          onClick={() => setAppThemeColor(tc.id)}
                           className="flex flex-col items-center gap-1"
                           aria-label={tc.label}
                         >
@@ -631,11 +772,13 @@ export function Header() {
                             className="h-6 w-6 rounded-full border-2 transition-shadow"
                             style={{
                               backgroundColor: tc.color,
-                              borderColor: appThemeColor === tc.id ? '#fff' : tc.color,
+                              borderColor: appThemeColor === tc.id ? (isDark ? '#fff' : '#3d2e0a') : tc.color,
                               boxShadow: appThemeColor === tc.id ? `0 0 10px ${tc.color}80` : 'none',
                             }}
                           />
-                          <span className="text-[8px] text-amber-200/50 leading-tight">{tc.label.split(' ')[0]}</span>
+                          <span className={`text-[8px] leading-tight ${isDark ? 'text-amber-200/50' : 'text-stone-500'}`}>
+                            {tc.label.split(' ')[0]}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -643,64 +786,162 @@ export function Header() {
                 </div>
               </SheetContent>
             </Sheet>
+
+            {/* Logo (Mobile) */}
+            <button
+              onClick={() => { setView('home'); setSearch(''); setLocalSearch(''); setCategory(null); }}
+              className="flex items-center gap-2 group"
+            >
+              <div className="relative flex h-10 w-10 items-center justify-center">
+                <Image
+                  src="/images/logo-uploaded.png"
+                  alt="3 Boxes Luxury Logo"
+                  width={40}
+                  height={40}
+                  className={`h-10 w-10 object-contain transition-all duration-300 group-hover:scale-105 ${
+                    isLight ? 'contrast-110 brightness-95 saturate-130' : 'contrast-130 brightness-110 saturate-120'
+                  }`}
+                  priority
+                />
+              </div>
+              <span className="logo-shimmer-text text-sm font-bold tracking-[0.2em] hidden sm:block" style={{ fontFamily: 'Lora, serif' }}>
+                3 BOXES
+              </span>
+            </button>
+
+            {/* Search + Cart (Mobile) */}
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSearchDropdownOpen(!searchDropdownOpen)}
+                className={`${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300`}
+                aria-label="Search"
+              >
+                <Search className="h-5 w-5" />
+              </Button>
+              <motion.div
+                key={totalItems}
+                initial={totalItems > 0 ? { scale: 1.2 } : { scale: 1 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+              >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setView('cart')}
+                  className={`relative ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300`}
+                  aria-label={t('common.viewCart')}
+                >
+                  <ShoppingCart className="h-5 w-5" />
+                  <AnimatePresence>
+                    {totalItems > 0 && (
+                      <motion.span
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        exit={{ scale: 0 }}
+                        className={`absolute -right-1 -top-1 flex h-4.5 w-4.5 items-center justify-center rounded-full text-[9px] font-bold ${
+                          isDark ? 'bg-[var(--luxury-accent,#dbaf36)] text-stone-950' : 'bg-[var(--luxury-accent,#dbaf36)] text-white'
+                        }`}
+                      >
+                        {totalItems}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </Button>
+              </motion.div>
+            </div>
           </div>
+
+          {/* Mobile Search Dropdown */}
+          <AnimatePresence>
+            {searchDropdownOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="md:hidden overflow-hidden"
+              >
+                <form onSubmit={(e) => { handleSearch(e); setSearchDropdownOpen(false); }} className="px-4 pb-3">
+                  <div className="relative">
+                    <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${isDark ? 'text-amber-600/60' : 'text-amber-500/60'}`} />
+                    <Input
+                      value={localSearch}
+                      onChange={(e) => setLocalSearch(e.target.value)}
+                      placeholder={t('common.searchPlaceholder')}
+                      autoFocus
+                      className={`w-full pl-10 ${isDark
+                        ? 'border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60'
+                        : 'border-amber-200/60 bg-white text-stone-800 placeholder:text-stone-400 focus:border-amber-500'
+                      }`}
+                    />
+                    {localSearch && (
+                      <button
+                        type="button"
+                        onClick={() => { setLocalSearch(''); setSearch(''); }}
+                        className={`absolute right-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-amber-200/40 hover:text-amber-200' : 'text-stone-400 hover:text-stone-600'}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
-      {/* Category Navigation Bar */}
-      <div className={`border-t ${appTheme === 'light' ? 'border-amber-200/40 bg-white/95' : 'border-amber-900/20 bg-stone-950/90'}`}>
+      {/* ═══════════════════════════════════════════════════════════════
+          ROW 3: CATEGORY ICONS ROW
+          ═══════════════════════════════════════════════════════════════ */}
+      <div className={`${bgSurface}`}>
         <div className="container mx-auto px-4">
-          {/* Desktop: horizontal row with hover/click dropdowns */}
-          <nav className="hidden md:flex items-center gap-0.5" aria-label="Category navigation" style={{ fontFamily: 'Urbanist, sans-serif' }}>
+          {/* Desktop: Icon circles with labels and dropdowns */}
+          <nav className="hidden md:flex items-center justify-center gap-2 py-3 overflow-x-auto" aria-label="Category navigation" style={{ fontFamily: 'Urbanist, sans-serif' }}>
             {CATEGORY_NAV.map((cat) => {
               const Icon = cat.icon;
               const hasChildren = cat.children.length > 0;
               const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
 
-              // Helper: handle nav item click — navigate to view, scroll to section, or set category
-              const handleNavClick = () => {
-                if (cat.viewId) {
-                  // Navigate to dedicated view page (don't call setCategory — it forces view:'home')
-                  setView(cat.viewId as any);
-                } else if (cat.scrollToId) {
-                  // Scroll to section on home page
-                  setView('home');
-                  setCategory(null);
-                  // Use setTimeout to ensure the home view is rendered before scrolling
-                  setTimeout(() => {
-                    const el = document.getElementById(cat.scrollToId!);
-                    if (el) {
-                      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                  }, 100);
-                } else {
-                  setCategory(cat.slug);
-                }
-              };
-
               if (!hasChildren) {
-                // No subcategories — click directly sets filter or scrolls to section
                 return (
                   <button
                     key={cat.slug}
-                    onClick={handleNavClick}
-                    className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors rounded-md ${
+                    onClick={() => handleNavClick(cat)}
+                    className={`category-icon-btn group flex flex-col items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-300 ${
                       isActive
-                        ? 'bg-amber-900/30 text-amber-300'
-                        : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-300'
-                    }`}
-                    style={{ fontFamily: 'Urbanist, sans-serif' }}
+                        ? (isDark
+                          ? 'bg-[var(--luxury-glow,rgba(219,175,54,0.15))] border-[var(--luxury-accent,#dbaf36)]/40 text-amber-300 shadow-[0_0_15px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]'
+                          : 'bg-amber-50 border-[var(--luxury-accent,#dbaf36)] text-amber-700 shadow-[0_0_10px_rgba(var(--luxury-accent-rgb,219,175,54),0.15)]')
+                        : (isDark
+                          ? 'text-amber-200/60 hover:bg-amber-900/10 border border-amber-900/20 hover:border-amber-600/30'
+                          : 'text-stone-500 hover:bg-amber-50 border border-amber-200/30 hover:border-amber-300')
+                    } ${cat.slug === 'new-arrivals' || cat.viewId ? 'relative' : ''}`}
                   >
-                    <Icon className="h-4 w-4" />
-                    {cat.name}
-                    {cat.viewId && (
-                      <span className="ml-1 rounded bg-amber-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                        Page
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-full border transition-all duration-300 ${
+                      isActive
+                        ? (isDark ? 'border-[var(--luxury-accent,#dbaf36)] bg-amber-900/30' : 'border-[var(--luxury-accent,#dbaf36)] bg-amber-100')
+                        : (isDark ? 'border-amber-800/30 group-hover:border-amber-500/50 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.25)]' : 'border-amber-200 group-hover:border-amber-300 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]')
+                    }`}>
+                      <Icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${isActive ? 'luxury-accent-text' : ''}`} />
+                    </div>
+                    <span className={`text-[11px] font-medium tracking-wide whitespace-nowrap ${isActive ? 'luxury-accent-text' : ''}`}>
+                      {cat.name}
+                    </span>
+                    {cat.slug === 'new-arrivals' && (
+                      <span className={`absolute -top-1 -right-1 rounded-full px-1.5 text-[8px] font-bold uppercase tracking-wider ${
+                        isDark ? 'bg-[var(--luxury-accent,#dbaf36)] text-stone-950' : 'bg-[var(--luxury-accent,#dbaf36)] text-white'
+                      }`}>
+                        New
                       </span>
                     )}
-                    {cat.slug === 'new-arrivals' && !cat.scrollToId && (
-                      <span className="ml-1 rounded bg-amber-600/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                        New
+                    {cat.viewId && (
+                      <span className={`absolute -top-1 -right-1 rounded-full px-1.5 text-[8px] font-bold uppercase tracking-wider ${
+                        isDark ? 'bg-amber-600/30 text-amber-400' : 'bg-amber-100 text-amber-600'
+                      }`}>
+                        ★
                       </span>
                     )}
                   </button>
@@ -711,99 +952,111 @@ export function Header() {
                 <div
                   key={cat.slug}
                   className="group relative"
-                  onMouseEnter={() => {
-                    const el = document.getElementById(`dropdown-${cat.slug}`);
-                    if (el) { el.style.visibility = 'visible'; el.style.opacity = '1'; }
-                  }}
-                  onMouseLeave={() => {
-                    const el = document.getElementById(`dropdown-${cat.slug}`);
-                    if (el) { el.style.visibility = 'hidden'; el.style.opacity = '0'; }
-                  }}
+                  onMouseEnter={() => setHoveredCategory(cat.slug)}
+                  onMouseLeave={() => setHoveredCategory(null)}
                 >
                   <button
-                    onClick={() => setCategory(cat.slug)}
-                    className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium transition-colors rounded-md ${
+                    onClick={() => handleNavClick(cat)}
+                    className={`category-icon-btn flex flex-col items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-300 ${
                       isActive
-                        ? 'bg-amber-900/30 text-amber-300'
-                        : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-300'
+                        ? (isDark
+                          ? 'bg-[var(--luxury-glow,rgba(219,175,54,0.15))] border-[var(--luxury-accent,#dbaf36)]/40 text-amber-300 shadow-[0_0_15px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]'
+                          : 'bg-amber-50 border-[var(--luxury-accent,#dbaf36)] text-amber-700 shadow-[0_0_10px_rgba(var(--luxury-accent-rgb,219,175,54),0.15)]')
+                        : (isDark
+                          ? 'text-amber-200/60 hover:bg-amber-900/10 border border-amber-900/20 hover:border-amber-600/30'
+                          : 'text-stone-500 hover:bg-amber-50 border border-amber-200/30 hover:border-amber-300')
                     }`}
-                    style={{ fontFamily: 'Urbanist, sans-serif' }}
                   >
-                    <Icon className="h-4 w-4" />
-                    {cat.name}
-                    <ChevronDown className="h-3 w-3 text-amber-500/50 transition-transform group-hover:rotate-180" />
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-full border transition-all duration-300 ${
+                      isActive
+                        ? (isDark ? 'border-[var(--luxury-accent,#dbaf36)] bg-amber-900/30' : 'border-[var(--luxury-accent,#dbaf36)] bg-amber-100')
+                        : (isDark ? 'border-amber-800/30 group-hover:border-amber-500/50 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.25)]' : 'border-amber-200 group-hover:border-amber-300 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]')
+                    }`}>
+                      <Icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${isActive ? 'luxury-accent-text' : ''}`} />
+                    </div>
+                    <span className={`text-[11px] font-medium tracking-wide whitespace-nowrap flex items-center gap-0.5 ${isActive ? 'luxury-accent-text' : ''}`}>
+                      {cat.name}
+                      <ChevronDown className={`h-2.5 w-2.5 transition-transform duration-200 ${hoveredCategory === cat.slug ? 'rotate-180' : ''}`} />
+                    </span>
                   </button>
 
-                  {/* Dropdown */}
-                  <div
-                    id={`dropdown-${cat.slug}`}
-                    style={{ visibility: 'hidden', opacity: 0, transition: 'all 0.2s' }}
-                    className="absolute top-full left-0 z-50 mt-0.5 min-w-[200px] rounded-lg border border-amber-900/30 bg-stone-950/98 backdrop-blur-md shadow-xl shadow-black/40 py-2"
-                  >
-                    {/* Parent category "All" link */}
-                    <button
-                      onClick={() => { setCategory(cat.slug); }}
-                      className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-amber-300/90 font-medium transition-colors hover:bg-amber-900/20 hover:text-amber-200"
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      All {cat.name}
-                    </button>
-                    <div className="mx-3 my-1 border-t border-amber-900/20" />
-                    {cat.children.map((child) => (
-                      <button
-                        key={child.slug}
-                        onClick={() => { setCategory(child.slug); }}
-                        className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors hover:bg-amber-900/20 hover:text-amber-300 ${
-                          selectedCategory === child.slug
-                            ? 'text-amber-300 bg-amber-900/20'
-                            : 'text-amber-200/60'
+                  {/* Dropdown Menu */}
+                  <AnimatePresence>
+                    {hoveredCategory === cat.slug && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                        transition={{ duration: 0.15 }}
+                        className={`absolute top-full left-1/2 -translate-x-1/2 z-50 mt-1 min-w-[180px] rounded-xl border py-2 shadow-xl ${isDark
+                          ? 'border-amber-900/30 bg-stone-950/98 backdrop-blur-md shadow-black/40'
+                          : 'border-amber-200 bg-white/98 backdrop-blur-md shadow-amber-200/40'
                         }`}
                       >
-                        <span className={`h-1.5 w-1.5 rounded-full ${
-                          selectedCategory === child.slug ? 'bg-amber-400' : 'bg-amber-600/50'
-                        }`} />
-                        {child.name}
-                      </button>
-                    ))}
-                  </div>
+                        {/* Parent "All" link */}
+                        <button
+                          onClick={() => { setCategory(cat.slug); setHoveredCategory(null); }}
+                          className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm font-medium transition-colors ${isDark
+                            ? 'text-amber-300/90 hover:bg-amber-900/20 hover:text-amber-200'
+                            : 'text-amber-700 hover:bg-amber-50 hover:text-amber-800'
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          All {cat.name}
+                        </button>
+                        <div className={`mx-3 my-1 border-t ${isDark ? 'border-amber-900/20' : 'border-amber-200/40'}`} />
+                        {cat.children.map((child) => (
+                          <button
+                            key={child.slug}
+                            onClick={() => { setCategory(child.slug); setHoveredCategory(null); }}
+                            className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors ${
+                              selectedCategory === child.slug
+                                ? (isDark ? 'text-amber-300 bg-amber-900/20' : 'text-amber-700 bg-amber-50')
+                                : (isDark ? 'text-amber-200/60 hover:bg-amber-900/10 hover:text-amber-300' : 'text-stone-500 hover:bg-amber-50 hover:text-amber-700')
+                            }`}
+                          >
+                            <span className={`h-1.5 w-1.5 rounded-full ${
+                              selectedCategory === child.slug
+                                ? 'bg-[var(--luxury-accent,#dbaf36)]'
+                                : (isDark ? 'bg-amber-600/50' : 'bg-stone-300')
+                            }`} />
+                            {child.name}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               );
             })}
           </nav>
 
-          {/* Mobile: horizontal scrollable row without dropdowns */}
-          <nav className="md:hidden flex items-center gap-1 overflow-x-auto py-2 scrollbar-thin" aria-label="Category navigation" style={{ fontFamily: 'Urbanist, sans-serif' }}>
+          {/* Mobile: Horizontal scrollable icon row */}
+          <nav className="md:hidden flex items-center gap-2 overflow-x-auto py-2 custom-scrollbar" aria-label="Category navigation" style={{ fontFamily: 'Urbanist, sans-serif' }}>
             {CATEGORY_NAV.map((cat) => {
               const Icon = cat.icon;
               const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
-              const handleMobileNavClick = () => {
-                if (cat.viewId) {
-                  setView(cat.viewId as any);
-                } else if (cat.scrollToId) {
-                  setView('home');
-                  setCategory(null);
-                  setTimeout(() => {
-                    const el = document.getElementById(cat.scrollToId!);
-                    if (el) {
-                      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                  }, 100);
-                } else {
-                  setCategory(cat.slug);
-                }
-              };
+
               return (
                 <button
                   key={cat.slug}
-                  onClick={handleMobileNavClick}
-                  className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition-colors rounded-md whitespace-nowrap ${
+                  onClick={() => handleNavClick(cat)}
+                  className={`flex-shrink-0 flex flex-col items-center gap-1 px-2.5 py-1.5 rounded-xl transition-all duration-200 ${
                     isActive
-                      ? 'bg-amber-900/30 text-amber-300'
-                      : 'text-amber-200/70 hover:bg-amber-900/20 hover:text-amber-300'
+                      ? (isDark ? 'bg-[var(--luxury-glow,rgba(219,175,54,0.15))] text-amber-300' : 'bg-amber-50 text-amber-700')
+                      : (isDark ? 'text-amber-200/60 hover:bg-amber-900/10' : 'text-stone-500 hover:bg-amber-50')
                   }`}
                 >
-                  <Icon className="h-3.5 w-3.5" />
-                  {cat.name}
+                  <div className={`flex h-7 w-7 items-center justify-center rounded-full border transition-all duration-200 ${
+                    isActive
+                      ? (isDark ? 'border-[var(--luxury-accent,#dbaf36)] bg-amber-900/30' : 'border-[var(--luxury-accent,#dbaf36)] bg-amber-100')
+                      : (isDark ? 'border-amber-800/30' : 'border-amber-200')
+                  }`}>
+                    <Icon className={`h-3.5 w-3.5 ${isActive ? 'luxury-accent-text' : ''}`} />
+                  </div>
+                  <span className={`text-[9px] font-medium tracking-wide whitespace-nowrap ${isActive ? 'luxury-accent-text' : ''}`}>
+                    {cat.name}
+                  </span>
                 </button>
               );
             })}

@@ -20,7 +20,11 @@ import { CorporateDashboard } from '@/components/corporate-dashboard';
 import { SecurityPolicy } from '@/components/security-policy';
 import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
-import { AboutPortalSection } from '@/components/about-portal-section';
+import { CollectionsSection } from '@/components/collections-section';
+import { BrandStorySection } from '@/components/brand-story-section';
+import { PromoBannerSection } from '@/components/promo-banner-section';
+import { TestimonialsSection } from '@/components/testimonials-section';
+import { NewsletterSection } from '@/components/newsletter-section';
 import { WhyChooseSection } from '@/components/why-choose-section';
 import { AppDownloadBanner } from '@/components/app-download-banner';
 import { FamilyPackSection } from '@/components/family-pack-section';
@@ -90,40 +94,25 @@ class ErrorBoundary extends React.Component<
 
 
 
-// ── Home page sections — Olight-style minimal: Hero, Products, About, Why Choose ──
+// ── Home page sections — Goldish/Alukas-inspired luxury layout ──
 
 function HomeSections() {
   return (
     <>
-      {/* 1. Full-screen hero */}
-      <ErrorBoundary fallback={null}>
-        <HeroSection />
-      </ErrorBoundary>
-
-      {/* 2. Featured Products */}
+      <ErrorBoundary fallback={null}><HeroSection /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><CollectionsSection /></ErrorBoundary>
       <div className="py-12 sm:py-16">
         <div id="products-section">
-          <ErrorBoundary fallback={null}>
-            <FeaturedProductsSection />
-          </ErrorBoundary>
+          <ErrorBoundary fallback={null}><FeaturedProductsSection /></ErrorBoundary>
         </div>
       </div>
-
-      {/* 3. About Portal Section */}
+      <ErrorBoundary fallback={null}><BrandStorySection /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><PromoBannerSection /></ErrorBoundary>
       <div className="py-12 sm:py-16">
-        <div id="about-portal-section">
-          <ErrorBoundary fallback={null}>
-            <AboutPortalSection />
-          </ErrorBoundary>
-        </div>
+        <ErrorBoundary fallback={null}><WhyChooseSection /></ErrorBoundary>
       </div>
-
-      {/* 4. Why Choose Us */}
-      <div className="py-12 sm:py-16">
-        <ErrorBoundary fallback={null}>
-          <WhyChooseSection />
-        </ErrorBoundary>
-      </div>
+      <ErrorBoundary fallback={null}><TestimonialsSection /></ErrorBoundary>
+      <ErrorBoundary fallback={null}><NewsletterSection /></ErrorBoundary>
     </>
   );
 }

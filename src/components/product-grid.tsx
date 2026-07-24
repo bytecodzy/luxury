@@ -50,7 +50,7 @@ const PLATFORM_DOT_COLORS: Record<string, string> = {
   flipkart: 'bg-yellow-500',
 };
 
-const PLATFORM_CHIP_ACTIVE_BG: Record<string, string> = {
+const PLATFORM_CHIP_ACTIVE_BG_DARK: Record<string, string> = {
   caratlane: 'bg-amber-600/20 border-amber-500/50 text-amber-300',
   tanishq: 'bg-rose-600/20 border-rose-500/50 text-rose-300',
   bluestone: 'bg-blue-600/20 border-blue-500/50 text-blue-300',
@@ -59,6 +59,17 @@ const PLATFORM_CHIP_ACTIVE_BG: Record<string, string> = {
   nykaa: 'bg-pink-600/20 border-pink-500/50 text-pink-300',
   amazon: 'bg-orange-600/20 border-orange-500/50 text-orange-300',
   flipkart: 'bg-yellow-600/20 border-yellow-500/50 text-yellow-300',
+};
+
+const PLATFORM_CHIP_ACTIVE_BG_LIGHT: Record<string, string> = {
+  caratlane: 'bg-amber-50 border-amber-400 text-amber-700',
+  tanishq: 'bg-rose-50 border-rose-400 text-rose-700',
+  bluestone: 'bg-blue-50 border-blue-400 text-blue-700',
+  voylla: 'bg-purple-50 border-purple-400 text-purple-700',
+  myntra: 'bg-red-50 border-red-400 text-red-700',
+  nykaa: 'bg-pink-50 border-pink-400 text-pink-700',
+  amazon: 'bg-orange-50 border-orange-400 text-orange-700',
+  flipkart: 'bg-yellow-50 border-yellow-400 text-yellow-700',
 };
 
 const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
@@ -123,38 +134,55 @@ const PRICE_RANGE_OPTIONS = [
   { value: '500+', label: '$500+', min: 500, max: null },
 ];
 
-// Ornamental divider component
-function OrnamentalDivider() {
+// Ornamental divider component — theme-aware
+function OrnamentalDivider({ isDark }: { isDark: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
-      <Diamond className="h-3 w-3 text-amber-500/30" />
-      <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-500/20 to-transparent" />
+      <div className={`flex-1 h-px ${
+        isDark ? 'bg-gradient-to-r from-transparent via-amber-500/20 to-transparent' : 'bg-gradient-to-r from-transparent via-amber-400/25 to-transparent'
+      }`} />
+      <Diamond className="h-3 w-3" style={{ color: 'var(--luxury-accent)', opacity: 0.3 }} />
+      <div className={`flex-1 h-px ${
+        isDark ? 'bg-gradient-to-r from-transparent via-amber-500/20 to-transparent' : 'bg-gradient-to-r from-transparent via-amber-400/25 to-transparent'
+      }`} />
     </div>
   );
 }
 
-// Shimmer skeleton component
-function ShimmerSkeleton() {
+// Shimmer skeleton component — theme-aware with gold shimmer
+function ShimmerSkeleton({ isDark }: { isDark: boolean }) {
   return (
-    <div className="overflow-hidden rounded-2xl" style={{
-      background: 'rgba(28, 25, 23, 0.5)',
-      backdropFilter: 'blur(16px)',
-      border: '1px solid rgba(212, 164, 55, 0.08)',
+    <div className="overflow-hidden rounded-2xl luxury-shimmer" style={{
+      background: isDark ? 'rgba(28, 25, 23, 0.5)' : 'rgba(255, 255, 255, 0.9)',
+      backdropFilter: isDark ? 'blur(16px)' : 'none',
+      border: isDark
+        ? '1px solid rgba(212, 164, 55, 0.08)'
+        : '1px solid rgba(212, 164, 55, 0.15)',
     }}>
-      <div className="luxury-shimmer aspect-square" />
+      <div className="aspect-[3/4]" style={{
+        background: isDark ? 'rgba(41, 37, 36, 0.4)' : 'rgba(245, 245, 244, 0.6)',
+      }} />
       <div className="p-4 space-y-3">
-        <div className="luxury-shimmer h-2.5 w-16 rounded-full" />
-        <div className="luxury-shimmer h-4 w-3/4 rounded-full" />
-        <div className="luxury-shimmer h-5 w-20 rounded-full" />
+        <div className="h-2.5 w-16 rounded-full" style={{
+          background: isDark ? 'rgba(41, 37, 36, 0.5)' : 'rgba(245, 245, 244, 0.6)',
+        }} />
+        <div className="h-4 w-3/4 rounded-full" style={{
+          background: isDark ? 'rgba(41, 37, 36, 0.5)' : 'rgba(245, 245, 244, 0.6)',
+        }} />
+        <div className="h-5 w-20 rounded-full" style={{
+          background: isDark ? 'rgba(41, 37, 36, 0.5)' : 'rgba(245, 245, 244, 0.6)',
+        }} />
       </div>
     </div>
   );
 }
 
 export function ProductGrid() {
-  const { searchQuery, selectedCategory, setCategory } = useStore();
+  const { searchQuery, selectedCategory, setCategory, appTheme } = useStore();
   const { t } = useTranslation();
+  const isDark = appTheme === 'dark';
+  const accentColor = `var(--luxury-accent, #dbaf36)`;
+
   const [sort, setSort] = useState('featured');
   const [showFilters, setShowFilters] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<string>('all');
@@ -226,25 +254,44 @@ export function ProductGrid() {
 
   const hasActiveFilters = selectedCategory || searchQuery || sourceFilter !== 'all' || platformFilter !== 'all' || occasionFilter !== 'all' || recipientFilter !== 'all' || relationshipFilter !== 'all' || priceRangeFilter !== 'all';
 
-  const accentColor = `var(--luxury-accent, #d4a437)`;
+  // Theme-aware select trigger styles
+  const selectTriggerStyle = {
+    background: isDark ? 'rgba(28, 25, 23, 0.4)' : 'rgba(255, 255, 255, 0.9)',
+    borderColor: isDark ? 'rgba(219, 175, 54, 0.12)' : 'rgba(212, 164, 55, 0.2)',
+    color: isDark ? 'rgba(245, 230, 163, 0.6)' : 'rgba(28, 25, 23, 0.6)',
+  };
+
+  const selectContentStyle = {
+    background: isDark ? 'rgba(28, 25, 23, 0.95)' : 'rgba(255, 255, 255, 0.98)',
+    borderColor: isDark ? 'rgba(219, 175, 54, 0.15)' : 'rgba(212, 164, 55, 0.2)',
+  };
 
   return (
     <section className="relative py-8">
-      {/* Subtle background decoration */}
+      {/* Subtle background decoration — theme-aware */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute left-0 top-0 h-32 w-full bg-gradient-to-b from-amber-900/[0.03] to-transparent" />
+        <div className={`absolute left-0 top-0 h-32 w-full ${
+          isDark ? 'bg-gradient-to-b from-amber-900/[0.03] to-transparent' : 'bg-gradient-to-b from-amber-100/30 to-transparent'
+        }`} />
       </div>
 
       <div className="relative">
         {/* Elegant Section Header with Ornamental Dividers */}
         <div className="mb-8">
-          <OrnamentalDivider />
+          <OrnamentalDivider isDark={isDark} />
           <div className="mt-4 mb-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: accentColor, opacity: 0.7 }}>
+              <p className="text-[10px] font-bold uppercase tracking-[0.3em]" style={{ color: accentColor, opacity: isDark ? 0.7 : 0.8 }}>
                 {searchQuery ? 'Search Results' : selectedCategory ? 'Curated For You' : 'Our Collection'}
               </p>
-              <h2 className="mt-1.5 text-2xl font-bold text-amber-100 sm:text-3xl" style={{ letterSpacing: '-0.01em' }}>
+              <h2
+                className="mt-1.5 text-2xl sm:text-3xl font-bold"
+                style={{
+                  color: isDark ? 'rgba(245, 230, 163, 0.95)' : '#1c1917',
+                  letterSpacing: '-0.01em',
+                  fontFamily: 'var(--font-heading, Urbanist)',
+                }}
+              >
                 {searchQuery
                   ? t('products.resultsFor', { query: searchQuery })
                   : selectedCategory
@@ -252,7 +299,9 @@ export function ProductGrid() {
                   : t('products.allProducts')}
               </h2>
               {!isLoading && (
-                <p className="mt-1 text-xs text-amber-200/30 font-medium">
+                <p className="mt-1 text-xs font-medium" style={{
+                  color: isDark ? 'rgba(245, 230, 163, 0.3)' : 'rgba(28, 25, 23, 0.4)',
+                }}>
                   {data?.total ?? 0} {t('categories.items')}
                 </p>
               )}
@@ -265,7 +314,12 @@ export function ProductGrid() {
                   variant="outline"
                   size="sm"
                   onClick={clearFilters}
-                  className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 h-8 text-xs rounded-lg backdrop-blur-sm"
+                  className="h-8 text-xs rounded-lg"
+                  style={{
+                    borderColor: isDark ? 'rgba(219, 175, 54, 0.2)' : 'rgba(212, 164, 55, 0.25)',
+                    color: isDark ? 'rgba(245, 230, 163, 0.6)' : 'rgba(28, 25, 23, 0.6)',
+                    background: isDark ? 'transparent' : 'rgba(255, 255, 255, 0.5)',
+                  }}
                 >
                   <X className="mr-1 h-3 w-3" />
                   {t('common.clear')}
@@ -276,17 +330,28 @@ export function ProductGrid() {
                 variant="outline"
                 size="sm"
                 onClick={() => setShowFilters(!showFilters)}
-                className="border-amber-900/30 text-amber-200/60 hover:border-amber-600/40 hover:text-amber-400 sm:hidden h-8 rounded-lg backdrop-blur-sm"
+                className="sm:hidden h-8 rounded-lg"
+                style={{
+                  borderColor: isDark ? 'rgba(219, 175, 54, 0.2)' : 'rgba(212, 164, 55, 0.25)',
+                  color: isDark ? 'rgba(245, 230, 163, 0.6)' : 'rgba(28, 25, 23, 0.6)',
+                  background: isDark ? 'transparent' : 'rgba(255, 255, 255, 0.5)',
+                }}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" />
               </Button>
 
-              {/* Sort — elegant styling */}
+              {/* Sort dropdown — clean styling with gold accent */}
               <Select value={sort} onValueChange={setSort}>
-                <SelectTrigger className="w-[150px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-8 rounded-lg backdrop-blur-sm">
+                <SelectTrigger
+                  className="w-[150px] text-xs h-8 rounded-lg"
+                  style={selectTriggerStyle}
+                >
                   <SelectValue placeholder="Sort by" />
                 </SelectTrigger>
-                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                <SelectContent
+                  className="backdrop-blur-xl"
+                  style={selectContentStyle}
+                >
                   <SelectItem value="featured">Featured</SelectItem>
                   <SelectItem value="newest">Newest</SelectItem>
                   <SelectItem value="price-asc">Price: Low to High</SelectItem>
@@ -298,7 +363,7 @@ export function ProductGrid() {
           </div>
         </div>
 
-        {/* Filter Panel — Slide-out with luxury styling */}
+        {/* Filter Panel — Slide-out with theme-aware luxury styling */}
         <AnimatePresence>
           {showFilters && (
             <motion.div
@@ -311,9 +376,11 @@ export function ProductGrid() {
               <div
                 className="rounded-2xl p-5 space-y-4"
                 style={{
-                  background: 'rgba(28, 25, 23, 0.6)',
-                  backdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(212, 164, 55, 0.08)',
+                  background: isDark ? 'rgba(28, 25, 23, 0.6)' : 'rgba(255, 255, 255, 0.95)',
+                  backdropFilter: isDark ? 'blur(20px)' : 'none',
+                  border: isDark
+                    ? '1px solid rgba(219, 175, 54, 0.08)'
+                    : '1px solid rgba(212, 164, 55, 0.15)',
                 }}
               >
                 <div className="flex items-center justify-between">
@@ -322,7 +389,8 @@ export function ProductGrid() {
                   </h3>
                   <button
                     onClick={() => setShowFilters(false)}
-                    className="text-amber-200/30 hover:text-amber-200/60 transition-colors"
+                    className="transition-colors"
+                    style={{ color: isDark ? 'rgba(245, 230, 163, 0.3)' : 'rgba(28, 25, 23, 0.4)' }}
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -331,12 +399,17 @@ export function ProductGrid() {
                 <div className="flex flex-wrap items-center gap-3">
                   {/* Source Filter */}
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Source</span>
+                    <span
+                      className="text-[10px] uppercase tracking-[0.15em] font-medium"
+                      style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+                    >
+                      Source
+                    </span>
                     <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                      <SelectTrigger className="w-[130px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                      <SelectTrigger className="w-[130px] text-xs h-7 rounded-lg" style={selectTriggerStyle}>
                         <SelectValue placeholder="All Sources" />
                       </SelectTrigger>
-                      <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                      <SelectContent className="backdrop-blur-xl" style={selectContentStyle}>
                         <SelectItem value="all">All Products</SelectItem>
                         <SelectItem value="own">Our Collection</SelectItem>
                         <SelectItem value="external">External Platforms</SelectItem>
@@ -346,12 +419,17 @@ export function ProductGrid() {
 
                   {/* Occasion Filter */}
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Occasion</span>
+                    <span
+                      className="text-[10px] uppercase tracking-[0.15em] font-medium"
+                      style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+                    >
+                      Occasion
+                    </span>
                     <Select value={occasionFilter} onValueChange={setOccasionFilter}>
-                      <SelectTrigger className="w-[130px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                      <SelectTrigger className="w-[130px] text-xs h-7 rounded-lg" style={selectTriggerStyle}>
                         <SelectValue placeholder="All" />
                       </SelectTrigger>
-                      <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                      <SelectContent className="backdrop-blur-xl" style={selectContentStyle}>
                         <SelectItem value="all">All Occasions</SelectItem>
                         {OCCASION_OPTIONS.map((o) => (
                           <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -362,12 +440,17 @@ export function ProductGrid() {
 
                   {/* Recipient Filter */}
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">For</span>
+                    <span
+                      className="text-[10px] uppercase tracking-[0.15em] font-medium"
+                      style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+                    >
+                      For
+                    </span>
                     <Select value={recipientFilter} onValueChange={setRecipientFilter}>
-                      <SelectTrigger className="w-[110px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                      <SelectTrigger className="w-[110px] text-xs h-7 rounded-lg" style={selectTriggerStyle}>
                         <SelectValue placeholder="All" />
                       </SelectTrigger>
-                      <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                      <SelectContent className="backdrop-blur-xl" style={selectContentStyle}>
                         <SelectItem value="all">All</SelectItem>
                         {RECIPIENT_OPTIONS.map((o) => (
                           <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -378,12 +461,17 @@ export function ProductGrid() {
 
                   {/* Price Range Filter */}
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Price</span>
+                    <span
+                      className="text-[10px] uppercase tracking-[0.15em] font-medium"
+                      style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+                    >
+                      Price
+                    </span>
                     <Select value={priceRangeFilter} onValueChange={setPriceRangeFilter}>
-                      <SelectTrigger className="w-[120px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                      <SelectTrigger className="w-[120px] text-xs h-7 rounded-lg" style={selectTriggerStyle}>
                         <SelectValue placeholder="Any" />
                       </SelectTrigger>
-                      <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                      <SelectContent className="backdrop-blur-xl" style={selectContentStyle}>
                         <SelectItem value="all">Any Price</SelectItem>
                         {PRICE_RANGE_OPTIONS.map((o) => (
                           <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -397,17 +485,22 @@ export function ProductGrid() {
           )}
         </AnimatePresence>
 
-        {/* Compact Filters Row (when panel closed) */}
+        {/* Compact Filters Row (when panel closed) — theme-aware */}
         {!showFilters && (
           <div className="mb-6 flex flex-wrap items-center gap-2">
             {/* Source Filter */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Source</span>
+              <span
+                className="text-[10px] uppercase tracking-[0.15em] font-medium"
+                style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+              >
+                Source
+              </span>
               <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                <SelectTrigger className="w-[120px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                <SelectTrigger className="w-[120px] text-xs h-7 rounded-lg" style={selectTriggerStyle}>
                   <SelectValue placeholder="All Sources" />
                 </SelectTrigger>
-                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                <SelectContent className="backdrop-blur-xl" style={selectContentStyle}>
                   <SelectItem value="all">All Products</SelectItem>
                   <SelectItem value="own">Our Collection</SelectItem>
                   <SelectItem value="external">External Platforms</SelectItem>
@@ -417,12 +510,17 @@ export function ProductGrid() {
 
             {/* Occasion Filter */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Occasion</span>
+              <span
+                className="text-[10px] uppercase tracking-[0.15em] font-medium"
+                style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+              >
+                Occasion
+              </span>
               <Select value={occasionFilter} onValueChange={setOccasionFilter}>
-                <SelectTrigger className="w-[120px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                <SelectTrigger className="w-[120px] text-xs h-7 rounded-lg" style={selectTriggerStyle}>
                   <SelectValue placeholder="All" />
                 </SelectTrigger>
-                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                <SelectContent className="backdrop-blur-xl" style={selectContentStyle}>
                   <SelectItem value="all">All Occasions</SelectItem>
                   {OCCASION_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -433,12 +531,17 @@ export function ProductGrid() {
 
             {/* Recipient Filter */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">For</span>
+              <span
+                className="text-[10px] uppercase tracking-[0.15em] font-medium"
+                style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+              >
+                For
+              </span>
               <Select value={recipientFilter} onValueChange={setRecipientFilter}>
-                <SelectTrigger className="w-[100px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                <SelectTrigger className="w-[100px] text-xs h-7 rounded-lg" style={selectTriggerStyle}>
                   <SelectValue placeholder="All" />
                 </SelectTrigger>
-                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                <SelectContent className="backdrop-blur-xl" style={selectContentStyle}>
                   <SelectItem value="all">All</SelectItem>
                   {RECIPIENT_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -449,12 +552,17 @@ export function ProductGrid() {
 
             {/* Price Range Filter */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium">Price</span>
+              <span
+                className="text-[10px] uppercase tracking-[0.15em] font-medium"
+                style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+              >
+                Price
+              </span>
               <Select value={priceRangeFilter} onValueChange={setPriceRangeFilter}>
-                <SelectTrigger className="w-[110px] border-amber-900/25 bg-stone-900/40 text-amber-200/60 text-xs h-7 rounded-lg">
+                <SelectTrigger className="w-[110px] text-xs h-7 rounded-lg" style={selectTriggerStyle}>
                   <SelectValue placeholder="Any" />
                 </SelectTrigger>
-                <SelectContent className="border-amber-900/30 bg-stone-900/95 backdrop-blur-xl">
+                <SelectContent className="backdrop-blur-xl" style={selectContentStyle}>
                   <SelectItem value="all">Any Price</SelectItem>
                   {PRICE_RANGE_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -465,18 +573,31 @@ export function ProductGrid() {
           </div>
         )}
 
-        {/* Platform Filter Chips — refined look */}
+        {/* Platform Filter Chips — gold accent borders, theme-aware */}
         {availablePlatforms.length > 0 && (
           <div className="mb-6 flex flex-wrap items-center gap-2">
-            <span className="text-[10px] text-amber-200/40 uppercase tracking-[0.15em] font-medium mr-1">Platform</span>
+            <span
+              className="text-[10px] uppercase tracking-[0.15em] font-medium mr-1"
+              style={{ color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.4)' }}
+            >
+              Platform
+            </span>
             <button
               onClick={() => setPlatformFilter('all')}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all duration-300 ${
-                platformFilter === 'all'
-                  ? 'border-amber-500/50 bg-amber-600/15 text-amber-300 shadow-sm'
-                  : 'border-amber-900/15 bg-stone-900/30 text-amber-200/40 hover:border-amber-600/25 hover:text-amber-200/60'
+                isDark
+                  ? platformFilter === 'all'
+                    ? 'border-amber-500/50 bg-amber-600/15 text-amber-300 shadow-sm'
+                    : 'border-amber-900/15 bg-stone-900/30 text-amber-200/40 hover:border-amber-600/25 hover:text-amber-200/60'
+                  : platformFilter === 'all'
+                    ? 'border-amber-400 bg-amber-50 text-amber-700 shadow-sm'
+                    : 'border-stone-200 bg-white text-stone-500 hover:border-amber-300 hover:text-amber-600'
               }`}
-              style={platformFilter === 'all' ? { boxShadow: `0 0 8px rgba(212, 164, 55, 0.1)` } : {}}
+              style={platformFilter === 'all' ? {
+                boxShadow: isDark
+                  ? `0 0 8px rgba(219, 175, 54, 0.1)`
+                  : `0 0 8px rgba(212, 164, 55, 0.1)`,
+              } : {}}
             >
               <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accentColor }} />
               All
@@ -484,16 +605,24 @@ export function ProductGrid() {
             {availablePlatforms.map((p) => {
               const slug = p.value;
               const isActive = platformFilter === slug;
+              const activeClasses = isDark
+                ? (PLATFORM_CHIP_ACTIVE_BG_DARK[slug] || 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300')
+                : (PLATFORM_CHIP_ACTIVE_BG_LIGHT[slug] || 'bg-emerald-50 border-emerald-400 text-emerald-700');
+              const inactiveClasses = isDark
+                ? 'border-amber-900/15 bg-stone-900/30 text-amber-200/40 hover:border-amber-600/25 hover:text-amber-200/60'
+                : 'border-stone-200 bg-white text-stone-500 hover:border-amber-300 hover:text-amber-600';
               return (
                 <button
                   key={slug}
                   onClick={() => setPlatformFilter(isActive ? 'all' : slug)}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all duration-300 ${
-                    isActive
-                      ? PLATFORM_CHIP_ACTIVE_BG[slug] || 'bg-emerald-600/20 border-emerald-500/50 text-emerald-300'
-                      : 'border-amber-900/15 bg-stone-900/30 text-amber-200/40 hover:border-amber-600/25 hover:text-amber-200/60'
+                    isActive ? activeClasses : inactiveClasses
                   }`}
-                  style={isActive ? { boxShadow: `0 0 8px rgba(212, 164, 55, 0.1)` } : {}}
+                  style={isActive ? {
+                    boxShadow: isDark
+                      ? `0 0 8px rgba(219, 175, 54, 0.1)`
+                      : `0 0 6px rgba(212, 164, 55, 0.1)`,
+                  } : {}}
                 >
                   <span className={`h-1.5 w-1.5 rounded-full ${PLATFORM_DOT_COLORS[slug] || 'bg-emerald-500'}`} />
                   {p.label}
@@ -503,11 +632,11 @@ export function ProductGrid() {
           </div>
         )}
 
-        {/* Grid */}
+        {/* Grid — responsive: 2 columns mobile, 3 desktop */}
         {isLoading ? (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <ShimmerSkeleton key={i} />
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <ShimmerSkeleton key={i} isDark={isDark} />
             ))}
           </div>
         ) : products.length === 0 ? (
@@ -520,20 +649,28 @@ export function ProductGrid() {
             <div
               className="mb-6 flex h-20 w-20 items-center justify-center rounded-full"
               style={{
-                background: 'rgba(212, 164, 55, 0.08)',
-                border: '1px solid rgba(212, 164, 55, 0.15)',
+                background: isDark ? 'rgba(219, 175, 54, 0.08)' : 'rgba(212, 164, 55, 0.1)',
+                border: isDark
+                  ? '1px solid rgba(219, 175, 54, 0.15)'
+                  : '1px solid rgba(212, 164, 55, 0.2)',
               }}
             >
               <Diamond className="h-8 w-8" style={{ color: accentColor, opacity: 0.5 }} />
             </div>
-            <h3 className="text-lg font-semibold text-amber-100">{t('products.noProductsFound')}</h3>
-            <p className="mt-2 text-sm text-amber-200/30 max-w-sm">
+            <h3 className="text-lg font-semibold" style={{
+              color: isDark ? 'rgba(245, 230, 163, 0.95)' : '#1c1917',
+            }}>
+              {t('products.noProductsFound')}
+            </h3>
+            <p className="mt-2 text-sm max-w-sm" style={{
+              color: isDark ? 'rgba(245, 230, 163, 0.3)' : 'rgba(28, 25, 23, 0.4)',
+            }}>
               {t('products.tryAdjusting')}
             </p>
             <Button
               onClick={clearFilters}
-              className="mt-6 text-stone-950 font-semibold rounded-lg luxury-sweep"
-              style={{ background: accentColor }}
+              className="mt-6 font-semibold rounded-lg luxury-sweep"
+              style={{ background: accentColor, color: '#1c1917' }}
             >
               {t('products.viewAllProducts')}
             </Button>
@@ -543,7 +680,7 @@ export function ProductGrid() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.4 }}
-            className="grid grid-cols-2 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4"
+            className="grid grid-cols-2 gap-4 md:grid-cols-3"
           >
             {paginatedProducts.map((product, i) => (
               <ProductCard key={product.id} product={product} index={i} />
@@ -551,13 +688,20 @@ export function ProductGrid() {
           </motion.div>
         )}
 
-        {/* Pagination — luxury style */}
+        {/* Pagination — gold accent active state, theme-aware */}
         {totalPages > 1 && (
           <div className="mt-8 flex items-center justify-center gap-2">
             <button
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-900/20 bg-stone-900/40 text-amber-200/40 transition-all hover:border-amber-600/30 hover:text-amber-200/70 disabled:opacity-30 disabled:cursor-not-allowed backdrop-blur-sm"
+              className="flex h-9 w-9 items-center justify-center rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{
+                background: isDark ? 'rgba(28, 25, 23, 0.4)' : 'rgba(255, 255, 255, 0.9)',
+                border: isDark
+                  ? '1px solid rgba(219, 175, 54, 0.15)'
+                  : '1px solid rgba(212, 164, 55, 0.2)',
+                color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.5)',
+              }}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -566,14 +710,19 @@ export function ProductGrid() {
                 key={i}
                 onClick={() => setCurrentPage(i + 1)}
                 className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-all duration-300 ${
-                  currentPage === i + 1
-                    ? 'text-stone-950 shadow-lg'
-                    : 'border border-amber-900/20 bg-stone-900/40 text-amber-200/40 hover:border-amber-600/30 hover:text-amber-200/70'
+                  currentPage === i + 1 ? 'shadow-lg' : ''
                 }`}
                 style={currentPage === i + 1 ? {
                   background: accentColor,
-                  boxShadow: `0 2px 12px rgba(212, 164, 55, 0.2)`,
-                } : {}}
+                  color: '#1c1917',
+                  boxShadow: `0 2px 12px rgba(219, 175, 54, 0.2)`,
+                } : {
+                  background: isDark ? 'rgba(28, 25, 23, 0.4)' : 'rgba(255, 255, 255, 0.9)',
+                  border: isDark
+                    ? '1px solid rgba(219, 175, 54, 0.15)'
+                    : '1px solid rgba(212, 164, 55, 0.2)',
+                  color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.5)',
+                }}
               >
                 {i + 1}
               </button>
@@ -581,7 +730,14 @@ export function ProductGrid() {
             <button
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-900/20 bg-stone-900/40 text-amber-200/40 transition-all hover:border-amber-600/30 hover:text-amber-200/70 disabled:opacity-30 disabled:cursor-not-allowed backdrop-blur-sm"
+              className="flex h-9 w-9 items-center justify-center rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+              style={{
+                background: isDark ? 'rgba(28, 25, 23, 0.4)' : 'rgba(255, 255, 255, 0.9)',
+                border: isDark
+                  ? '1px solid rgba(219, 175, 54, 0.15)'
+                  : '1px solid rgba(212, 164, 55, 0.2)',
+                color: isDark ? 'rgba(245, 230, 163, 0.4)' : 'rgba(28, 25, 23, 0.5)',
+              }}
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -589,7 +745,7 @@ export function ProductGrid() {
         )}
 
         {/* Bottom ornamental divider */}
-        {products.length > 0 && <div className="mt-8"><OrnamentalDivider /></div>}
+        {products.length > 0 && <div className="mt-8"><OrnamentalDivider isDark={isDark} /></div>}
       </div>
     </section>
   );

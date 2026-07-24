@@ -21,6 +21,7 @@ export function HeroSection() {
   const { t } = useTranslation();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const appTheme = useStore((s) => s.appTheme);
 
   const advanceSlide = useCallback(() => {
     setIsTransitioning(true);
@@ -40,14 +41,9 @@ export function HeroSection() {
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const scrollToAbout = () => {
-    const el = document.getElementById('about-portal-section');
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  };
-
   return (
     <section className="relative overflow-hidden" style={{ minHeight: '100vh' }}>
-      {/* Simple slideshow background — no parallax */}
+      {/* Slideshow background */}
       <AnimatePresence mode="wait">
         <motion.div
           key={currentImageIndex}
@@ -60,8 +56,22 @@ export function HeroSection() {
         />
       </AnimatePresence>
 
-      {/* Clean gradient overlay */}
-      <div className="absolute inset-0 bg-gradient-to-b from-stone-950/70 via-stone-950/80 to-stone-950/90" />
+      {/* Gold shimmer/pulse overlay — rotating gold gradient */}
+      <motion.div
+        className="absolute inset-0 pointer-events-none"
+        animate={{
+          background: [
+            'linear-gradient(135deg, transparent 0%, rgba(219,175,54,0.06) 25%, transparent 50%, rgba(219,175,54,0.04) 75%, transparent 100%)',
+            'linear-gradient(225deg, transparent 0%, rgba(219,175,54,0.08) 25%, transparent 50%, rgba(219,175,54,0.05) 75%, transparent 100%)',
+            'linear-gradient(315deg, transparent 0%, rgba(219,175,54,0.06) 25%, transparent 50%, rgba(219,175,54,0.04) 75%, transparent 100%)',
+            'linear-gradient(135deg, transparent 0%, rgba(219,175,54,0.06) 25%, transparent 50%, rgba(219,175,54,0.04) 75%, transparent 100%)',
+          ],
+        }}
+        transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+      />
+
+      {/* Dark gradient overlay */}
+      <div className={`absolute inset-0 ${appTheme === 'light' ? 'bg-gradient-to-b from-stone-100/60 via-stone-200/70 to-stone-100/80' : 'bg-gradient-to-b from-stone-950/70 via-stone-950/80 to-stone-950/90'}`} />
 
       {/* Content — vertically centered */}
       <div className="relative flex min-h-[100vh] flex-col items-center justify-center px-4">
@@ -71,7 +81,7 @@ export function HeroSection() {
           transition={{ duration: 1.2, ease: [0.25, 0.46, 0.45, 0.94] }}
           className="flex flex-col items-center text-center max-w-3xl mx-auto"
         >
-          {/* Curated Luxury Badge — simple thin gold border */}
+          {/* CURATED LUXURY Badge — small uppercase, thin gold border, Sparkles icon */}
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
@@ -87,7 +97,7 @@ export function HeroSection() {
             </span>
           </motion.div>
 
-          {/* Headline — Lora serif, elegant */}
+          {/* Headline — Lora serif, "3 BOXES LUXURY" */}
           <motion.h1
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -95,80 +105,95 @@ export function HeroSection() {
             className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl leading-[1.1] tracking-wide"
             style={{ fontFamily: 'Lora, serif' }}
           >
-            <span className="text-amber-50">3 BOXES</span>
+            <span className={appTheme === 'light' ? 'text-stone-900' : 'text-amber-50'}>3 BOXES</span>
             <br />
-            <span className="text-amber-50/80 font-light tracking-[0.2em]">LUXURY</span>
+            <span className={`font-light tracking-[0.2em] ${appTheme === 'light' ? 'text-stone-700' : 'text-amber-50/80'}`}>LUXURY</span>
           </motion.h1>
 
-          {/* Simple thin gold line divider */}
+          {/* Decorative gold diamond divider (line + rotated square + line) */}
           <motion.div
             initial={{ opacity: 0, scaleX: 0 }}
             animate={{ opacity: 1, scaleX: 1 }}
             transition={{ delay: 0.7, duration: 0.8 }}
-            className="my-6 h-px w-24 sm:w-32 luxury-accent-bg opacity-50"
-          />
+            className="my-6 flex items-center gap-2"
+          >
+            <span className="luxury-accent-bg h-px w-8 sm:w-12 opacity-50" />
+            <span className="luxury-accent-bg h-1.5 w-1.5 rotate-45 rounded-sm opacity-70" />
+            <span className="luxury-accent-bg h-px w-8 sm:w-12 opacity-50" />
+          </motion.div>
 
-          {/* Subtitle — Urbanist body text */}
+          {/* Subtitle — "Where Elegance Meets Craft" */}
           <motion.p
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.85, duration: 0.8 }}
-            className="max-w-xl text-base sm:text-lg md:text-xl leading-relaxed text-amber-100/60 font-light"
+            className={`max-w-xl text-base sm:text-lg md:text-xl leading-relaxed font-light ${appTheme === 'light' ? 'text-stone-600' : 'text-amber-100/60'}`}
             style={{ fontFamily: 'Urbanist, sans-serif' }}
           >
-            {t('hero.subtitle')}
+            Where Elegance Meets Craft
           </motion.p>
 
-          {/* CTA Buttons — clean, no shimmer */}
+          {/* CTA Buttons */}
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 1.05, duration: 0.8 }}
             className="mt-8 flex flex-wrap items-center justify-center gap-4"
           >
+            {/* Explore Collection — gold gradient button */}
             <Button
               onClick={() => {
                 setCategory(null);
                 setView('home');
                 setTimeout(scrollToProducts, 100);
               }}
-              className="group gap-2 h-11 px-8 text-sm font-medium rounded-full bg-[#dbaf36] text-stone-950 hover:bg-[#c9a030] transition-colors duration-300"
-              style={{ fontFamily: 'Urbanist, sans-serif' }}
+              className="group gap-2 h-11 px-8 text-sm font-medium rounded-full transition-all duration-300 hover:shadow-lg hover:shadow-amber-500/20"
+              style={{
+                fontFamily: 'Urbanist, sans-serif',
+                background: 'linear-gradient(135deg, #b8860b, #dbaf36, #f5d063)',
+                color: '#0c0a09',
+              }}
             >
-              {t('hero.shopNow')}
+              {t('hero.shopNow') || 'Explore Collection'}
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
+            {/* Gift Concierge — outline button with Gift icon */}
             <Button
               variant="outline"
               onClick={toggleGiftBuilder}
-              className="group gap-2 h-11 px-7 text-sm font-medium rounded-full border-amber-500/25 text-amber-200/80 hover:bg-amber-500/10 hover:text-amber-100 hover:border-amber-500/40 transition-colors duration-300"
+              className={`group gap-2 h-11 px-7 text-sm font-medium rounded-full transition-all duration-300 ${appTheme === 'light' ? 'border-amber-600/25 text-amber-700/80 hover:bg-amber-500/10 hover:text-amber-800 hover:border-amber-600/40' : 'border-amber-500/25 text-amber-200/80 hover:bg-amber-500/10 hover:text-amber-100 hover:border-amber-500/40'}`}
               style={{ fontFamily: 'Urbanist, sans-serif' }}
             >
               <Gift className="h-4 w-4" />
-              {t('hero.giftBuilder')}
+              Gift Concierge
             </Button>
           </motion.div>
         </motion.div>
 
-        {/* Scroll indicator — simple text + chevron */}
+        {/* Animated scroll-down indicator with bouncing ChevronDown */}
         <motion.button
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.5, duration: 0.6 }}
-          onClick={scrollToAbout}
+          onClick={scrollToProducts}
           className="absolute bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1.5 group"
         >
           <span
-            className="text-[11px] uppercase tracking-[0.2em] text-amber-400/35 group-hover:text-amber-400/60 transition-colors"
+            className={`text-[11px] uppercase tracking-[0.2em] transition-colors ${appTheme === 'light' ? 'text-amber-600/35 group-hover:text-amber-600/60' : 'text-amber-400/35 group-hover:text-amber-400/60'}`}
             style={{ fontFamily: 'Urbanist, sans-serif' }}
           >
             Scroll to explore
           </span>
-          <ChevronDown className="h-4 w-4 text-amber-400/35 group-hover:text-amber-400/60 transition-colors" />
+          <motion.div
+            animate={{ y: [0, 6, 0] }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <ChevronDown className={`h-4 w-4 transition-colors ${appTheme === 'light' ? 'text-amber-600/35 group-hover:text-amber-600/60' : 'text-amber-400/35 group-hover:text-amber-400/60'}`} />
+          </motion.div>
         </motion.button>
       </div>
 
-      {/* Slide indicator dots — simple circles */}
+      {/* Slide indicator dots with gold accent on active */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2">
         {HERO_IMAGES.map((_, i) => (
           <button
@@ -183,8 +208,8 @@ export function HeroSection() {
             }}
             className={`rounded-full transition-all duration-500 ${
               i === currentImageIndex
-                ? 'h-2 w-2 luxury-accent-bg opacity-80'
-                : 'h-1.5 w-1.5 bg-amber-400/25 hover:bg-amber-400/50'
+                ? 'h-2.5 w-2.5 luxury-accent-bg opacity-80 shadow-md shadow-amber-500/30'
+                : `h-2 w-2 ${appTheme === 'light' ? 'bg-amber-600/25 hover:bg-amber-600/50' : 'bg-amber-400/25 hover:bg-amber-400/50'}`
             }`}
             aria-label={`Go to slide ${i + 1}`}
           />
