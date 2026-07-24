@@ -93,7 +93,6 @@ const nextConfig: NextConfig = {
       'public/downloads/**',
       'public/app/**',
       'public/images/products/**',
-      'public/images/categories/**',
       'public/uploads/**',
       'skills/**',
       'investor-assets/**',

@@ -9,7 +9,9 @@ public/app/
 # ESSENTIAL for the virtual try-on (Showcase Composite needs the product
 # image). Without them deployed, Vercel returns 404 → no product image →
 # "Style Preview Unavailable" error.
-public/images/categories/
+# v47: REMOVED public/images/categories/ from ignore — these images are
+# ESSENTIAL for the Collections section on the home page. Without them,
+# the circular category thumbnails show empty/broken images.
 public/uploads/
 skills/
 investor-assets/
