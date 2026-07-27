@@ -6,18 +6,19 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
 import {
-  Search, ShoppingCart, Package, Menu, X, LogIn, LogOut, User, Shield,
-  Gift, Sparkles, Download, Heart, UserCircle, Baby, Home, Briefcase,
-  ChevronDown, Sun, Moon, Users, Crown, Palette, Watch, Gem
+  Search, ShoppingCart, Menu, X, LogIn, LogOut, User,
+  Heart, UserCircle, Baby, Home, Briefcase,
+  ChevronDown, Sun, Moon, Users, Crown, Watch, Gem, Sparkles,
+  Mic, Image as ImageIcon, Package,
+  Box,
+  Gift
 } from 'lucide-react';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import { LocaleSwitcher, LocaleSwitcherMobile } from '@/components/locale-switcher';
-import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { showToast } from '@/hooks/use-toast-notification';
 import type { LucideIcon } from 'lucide-react';
-import type { ThemeColor } from '@/lib/store';
 
 /* ═══════════════════════════════════════════════════════════════════
    CATEGORY NAVIGATION DATA
@@ -70,49 +71,49 @@ const CATEGORY_NAV: CategoryNavItem[] = [
       { name: 'Accessories', slug: 'women-accessories' },
     ],
   },
-  {
-    name: 'Kids',
-    slug: 'kids',
-    icon: Baby,
-    children: [
-      { name: 'Toys & Games', slug: 'kids-toys' },
-      { name: 'Kids Fashion', slug: 'kids-fashion' },
-      { name: 'Shirts (5-18 yrs)', slug: 'kids-shirts' },
-      { name: 'Dresses (5-18 yrs)', slug: 'kids-dresses' },
-    ],
-  },
-  {
-    name: 'Watches',
-    slug: 'watches',
-    icon: Watch,
-    children: [
-      { name: 'Men\'s Watches', slug: 'men-watches' },
-      { name: 'Women\'s Watches', slug: 'women-watches' },
-      { name: 'Couple Watch Sets', slug: 'couple-watches' },
-    ],
-  },
-  {
-    name: 'Jewelry',
-    slug: 'jewelry',
-    icon: Gem,
-    children: [
-      { name: 'Rings', slug: 'jewelry-rings' },
-      { name: 'Earrings', slug: 'jewelry-earrings' },
-      { name: 'Necklaces', slug: 'jewelry-necklaces' },
-      { name: 'Bracelets', slug: 'jewelry-bracelets' },
-      { name: 'Jewelry Sets', slug: 'jewelry-sets' },
-    ],
-  },
-  {
-    name: 'Sarees',
-    slug: 'sarees',
-    icon: Sparkles,
-    children: [
-      { name: 'Silk Sarees', slug: 'sarees-silk' },
-      { name: 'Cotton Sarees', slug: 'sarees-cotton' },
-      { name: 'Designer Sarees', slug: 'sarees-designer' },
-    ],
-  },
+  // {
+  //   name: 'Kids',
+  //   slug: 'kids',
+  //   icon: Baby,
+  //   children: [
+  //     { name: 'Toys & Games', slug: 'kids-toys' },
+  //     { name: 'Kids Fashion', slug: 'kids-fashion' },
+  //     { name: 'Shirts (5-18 yrs)', slug: 'kids-shirts' },
+  //     { name: 'Dresses (5-18 yrs)', slug: 'kids-dresses' },
+  //   ],
+  // },
+  // {
+  //   name: 'Watches',
+  //   slug: 'watches',
+  //   icon: Watch,
+  //   children: [
+  //     { name: 'Men\'s Watches', slug: 'men-watches' },
+  //     { name: 'Women\'s Watches', slug: 'women-watches' },
+  //     { name: 'Couple Watch Sets', slug: 'couple-watches' },
+  //   ],
+  // },
+  // {
+  //   name: 'Jewelry',
+  //   slug: 'jewelry',
+  //   icon: Gem,
+  //   children: [
+  //     { name: 'Rings', slug: 'jewelry-rings' },
+  //     { name: 'Earrings', slug: 'jewelry-earrings' },
+  //     { name: 'Necklaces', slug: 'jewelry-necklaces' },
+  //     { name: 'Bracelets', slug: 'jewelry-bracelets' },
+  //     { name: 'Jewelry Sets', slug: 'jewelry-sets' },
+  //   ],
+  // },
+  // {
+  //   name: 'Sarees',
+  //   slug: 'sarees',
+  //   icon: Sparkles,
+  //   children: [
+  //     { name: 'Silk Sarees', slug: 'sarees-silk' },
+  //     { name: 'Cotton Sarees', slug: 'sarees-cotton' },
+  //     { name: 'Designer Sarees', slug: 'sarees-designer' },
+  //   ],
+  // },
   {
     name: 'Home',
     slug: 'home',
@@ -139,39 +140,37 @@ const CATEGORY_NAV: CategoryNavItem[] = [
     icon: Sparkles,
     children: [],
   },
+//   {
+//     name: 'Family Packs',
+//     slug: 'family-packs',
+//     icon: Package,
+//     children: [],
+//     viewId: 'family-packs',
+//   },
+//   {
+//     name: 'Social',
+//     slug: 'social-connections',
+//     icon: Users,
+//     children: [],
+//     viewId: 'social-connections',
+//   },
+  // {
+  //   name: 'Curate',
+  //   slug: '3boxes-curate',
+  //   icon: Crown,
+  //   children: [],
+  //   viewId: '3boxes-curate',
+  // },
   {
-    name: 'Family Packs',
-    slug: 'family-packs',
-    icon: Package,
-    children: [],
-    viewId: 'family-packs',
+    name: 'Combos',
+    slug: 'combos',
+    icon: Gift,
+    children: [
+      { name: 'Combo Boxes', slug: 'combos-boxes' },
+      { name: 'Custom Boxes', slug: 'custom-boxes' },
+    ],
   },
-  {
-    name: 'Social',
-    slug: 'social-connections',
-    icon: Users,
-    children: [],
-    viewId: 'social-connections',
-  },
-  {
-    name: 'Curate',
-    slug: '3boxes-curate',
-    icon: Crown,
-    children: [],
-    viewId: '3boxes-curate',
-  },
-];
-
-/* ═══════════════════════════════════════════════════════════════════
-   THEME COLOR DEFINITIONS
-   ═══════════════════════════════════════════════════════════════════ */
-const themeColors: { id: ThemeColor; label: string; color: string }[] = [
-  { id: 'royal-gold', label: 'Royal Gold', color: '#dbaf36' },
-  { id: 'rose-elegance', label: 'Rose Elegance', color: '#e11d48' },
-  { id: 'emerald-luxe', label: 'Emerald Luxe', color: '#059669' },
-  { id: 'sapphire-classic', label: 'Sapphire Classic', color: '#2563eb' },
-  { id: 'onyx-noir', label: 'Onyx Noir', color: '#a3a3a3' },
-];
+ ];
 
 /* ═══════════════════════════════════════════════════════════════════
    ANNOUNCEMENT BAR TEXT
@@ -204,25 +203,48 @@ export function Header() {
   const {
     searchQuery, setSearch, setView, cartItems, setCategory,
     selectedCategory, authUser, setAuthView, clearAuth,
-    toggleGiftBuilder, appTheme, setAppTheme, appThemeColor, setAppThemeColor,
+    appTheme, setAppTheme,
   } = useStore();
   const { t } = useTranslation();
-  const { canInstall, promptInstall } = usePWAInstall();
 
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [themeColorPickerOpen, setThemeColorPickerOpen] = useState(false);
   const [searchDropdownOpen, setSearchDropdownOpen] = useState(false);
-  const themeColorPickerRef = useRef<HTMLDivElement>(null);
+  const [voiceListening, setVoiceListening] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
+
+  const [scrolled, setScrolled] = useState(false);
+
+useEffect(() => {
+  let ticking = false;
+
+  const onScroll = () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      const y = window.scrollY;
+      // hysteresis: collapse only past 120, expand only when back under 40
+      setScrolled((prev) => {
+        if (!prev && y > 120) return true;
+        if (prev && y < 40) return false;
+        return prev;
+      });
+      ticking = false;
+    });
+  };
+
+  onScroll();
+  window.addEventListener('scroll', onScroll, { passive: true });
+  return () => window.removeEventListener('scroll', onScroll);
+}, []);
 
   const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
   const isDark = appTheme === 'dark';
   const isLight = appTheme === 'light';
 
   // Theme-aware styling helpers
-  const accentText = isDark ? 'text-[var(--luxury-accent,#dbaf36)]' : 'text-[var(--luxury-accent-dark,#b8860b)]';
   const mutedText = isDark ? 'text-amber-200/70' : 'text-stone-600';
   const mutedTextHover = isDark ? 'hover:text-amber-400' : 'hover:text-amber-700';
   const iconBg = isDark ? 'hover:bg-amber-900/20' : 'hover:bg-amber-50';
@@ -230,19 +252,6 @@ export function Header() {
   const bgSurface95 = isDark ? 'bg-stone-950/95' : 'bg-[#fdf9f1]/95';
   const borderColor = isDark ? 'border-amber-900/30' : 'border-amber-200/50';
   const borderColorLight = isDark ? 'border-amber-900/20' : 'border-amber-200/40';
-
-  // Close theme color picker when clicking outside
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (themeColorPickerRef.current && !themeColorPickerRef.current.contains(e.target as Node)) {
-        setThemeColorPickerOpen(false);
-      }
-    }
-    if (themeColorPickerOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [themeColorPickerOpen]);
 
   // Close search dropdown when clicking outside
   useEffect(() => {
@@ -273,6 +282,78 @@ export function Header() {
     [localSearch, setSearch, setCategory, setView]
   );
 
+  // ── Voice search using Web Speech API ──────────────────────────────
+  // Falls back to a friendly toast if the browser doesn't support it.
+  const handleVoiceSearch = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      showToast(
+        'error',
+        'Voice search is not supported in your browser. Please use Chrome, Edge, or Safari.'
+      );
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    setVoiceListening(true);
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results?.[0]?.[0]?.transcript ?? '';
+      if (transcript) {
+        setLocalSearch(transcript);
+        setSearch(transcript);
+        setCategory(null);
+        setView('home');
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event?.error);
+      if (event?.error === 'not-allowed') {
+        showToast('error', 'Microphone permission was denied. Please allow mic access to use voice search.');
+      } else {
+        showToast('error', 'Voice search failed. Please try again.');
+      }
+    };
+
+    recognition.onend = () => {
+      setVoiceListening(false);
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      setVoiceListening(false);
+      showToast('error', 'Voice search could not start. Please try again.');
+    }
+  }, [setSearch, setCategory, setView]);
+
+  // ── Image search ───────────────────────────────────────────────────
+  // Opens a hidden file picker; the chosen image is logged + toasted for now.
+  // A real image-search backend can be wired in later without touching UI.
+  const handleImageSearch = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleImageSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // For now, just inform the user — image search backend not wired.
+      showToast('info', `Image selected: ${file.name}. Image search will be available soon.`);
+    }
+    // Reset so the same file can be picked again later
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
   const handleDashboard = () => {
     if (!authUser) return;
     switch (authUser.role) {
@@ -302,33 +383,122 @@ export function Header() {
 
   /* ═══════════════════════════════════════════════════════════════════
      ICON BUTTON COMPONENT (reusable for header icons)
+     Slightly bigger icons than before (h-5 w-5 instead of h-[18px]).
      ═══════════════════════════════════════════════════════════════════ */
-  const IconButton = ({ icon: Icon, onClick, ariaLabel, className = '', badge = null }: {
+  const IconButton = ({ icon: Icon, onClick, ariaLabel, className = '', badge = null, active = false }: {
     icon: LucideIcon;
     onClick: () => void;
     ariaLabel: string;
     className?: string;
     badge?: React.ReactNode;
+    active?: boolean;
   }) => (
     <Button
       variant="ghost"
       size="icon"
       onClick={onClick}
-      className={`relative group ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 rounded-full h-10 w-10 hover:shadow-[0_0_12px_rgba(var(--luxury-accent-rgb,219,175,54),0.3)] ${className}`}
+      className={`relative group ${active ? (isDark ? 'text-amber-400' : 'text-amber-600') : mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 rounded-full h-11 w-11 hover:shadow-[0_0_14px_rgba(var(--luxury-accent-rgb,219,175,54),0.3)] ${className}`}
       aria-label={ariaLabel}
     >
-      <Icon className="h-[18px] w-[18px] transition-all duration-300 group-hover:scale-110" />
+      <Icon className="h-5 w-5 transition-all duration-300 group-hover:scale-110" />
       {badge}
     </Button>
   );
 
+  /* ═══════════════════════════════════════════════════════════════════
+     SEARCH BAR — inline form with placeholder + mic + image buttons
+     Shared between desktop (always visible) and mobile (expanded).
+     `compact` triggers a slightly smaller padding for mobile.
+     ═══════════════════════════════════════════════════════════════════ */
+  const SearchBar = ({ compact = false, autoFocus = false }: { compact?: boolean; autoFocus?: boolean }) => (
+    <form onSubmit={handleSearch} className="w-full">
+      <div className="relative">
+        {/* Search icon on the left */}
+        <Search className={`absolute left-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-amber-600/60' : 'text-amber-500/60'} ${compact ? 'h-4 w-4' : 'h-5 w-5'}`} />
+
+        <Input
+          value={localSearch}
+          onChange={(e) => setLocalSearch(e.target.value)}
+          placeholder="Search..."
+          autoFocus={autoFocus}
+          className={`w-full ${compact ? 'pl-9 pr-20 h-10 text-sm' : 'pl-11 pr-24 h-11 text-sm'} rounded-full transition-all duration-200 ${
+            isDark
+              ? 'border-amber-900/40 bg-stone-900/60 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60 focus:bg-stone-900/80'
+              : 'border-amber-200/60 bg-white text-stone-800 placeholder:text-stone-400 focus:border-amber-500 focus:bg-white'
+          }`}
+          aria-label="Search products"
+        />
+
+        {/* Mic + Image buttons on the right (inside the input) */}
+        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={handleVoiceSearch}
+            aria-label="Voice search"
+            title="Voice search"
+            className={`flex items-center justify-center rounded-full transition-all duration-200 ${
+              compact ? 'h-7 w-7' : 'h-8 w-8'
+            } ${
+              voiceListening
+                ? (isDark ? 'bg-red-500/30 text-red-300 animate-pulse' : 'bg-red-100 text-red-600 animate-pulse')
+                : (isDark
+                  ? 'text-amber-300/70 hover:bg-amber-500/15 hover:text-amber-200'
+                  : 'text-amber-600/70 hover:bg-amber-100 hover:text-amber-700')
+            }`}
+          >
+            <Mic className={compact ? 'h-4 w-4' : 'h-[18px] w-[18px]'} />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleImageSearch}
+            aria-label="Image search"
+            title="Image search"
+            className={`flex items-center justify-center rounded-full transition-all duration-200 ${
+              compact ? 'h-7 w-7' : 'h-8 w-8'
+            } ${
+              isDark
+                ? 'text-amber-300/70 hover:bg-amber-500/15 hover:text-amber-200'
+                : 'text-amber-600/70 hover:bg-amber-100 hover:text-amber-700'
+            }`}
+          >
+            <ImageIcon className={compact ? 'h-4 w-4' : 'h-[18px] w-[18px]'} />
+          </button>
+        </div>
+
+        {/* Clear button when there's text */}
+        {localSearch && (
+          <button
+            type="button"
+            onClick={() => { setLocalSearch(''); setSearch(''); }}
+            className={`absolute right-[88px] top-1/2 -translate-y-1/2 ${isDark ? 'text-amber-200/40 hover:text-amber-200' : 'text-stone-400 hover:text-stone-600'}`}
+            aria-label="Clear search"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    </form>
+  );
+
   return (
     <header className={`sticky top-0 z-50 w-full backdrop-blur-md transition-colors duration-500 ${bgSurface95} border-b ${borderColor}`}>
+      {/* Hidden file input for image search */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleImageSelected}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
       {/* ═══════════════════════════════════════════════════════════════
           ROW 1: ANNOUNCEMENT BAR — gold gradient, scrolling marquee,
                  pauses on hover. Same gold gradient for both themes.
           ═══════════════════════════════════════════════════════════════ */}
-      <div className="announcement-bar announcement-marquee relative overflow-hidden">
+      <div className={`announcement-bar announcement-marquee relative overflow-hidden transition-all duration-300 ${scrolled ? 'max-h-0 opacity-0 py-0' : 'max-h-20 opacity-100'}`}>
         {/* Gold gradient background — theme gold (#dbaf36) with champagne edges */}
         <div className="absolute inset-0 bg-gradient-to-r from-[#f5e6a3] via-[#dbaf36] to-[#f5e6a3]" />
         {/* Subtle top/bottom depth lines */}
@@ -348,124 +518,14 @@ export function Header() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════
-          ROW 2: MAIN HEADER — Logo centered, icons flanking
+          ROW 2: MAIN HEADER — Logo centered, search inline, icons flanking
           ═══════════════════════════════════════════════════════════════ */}
-      <div className={`border-b ${borderColorLight}`}>
+      <div className={`border-b ${borderColorLight} transition-all duration-300 overflow-hidden ${scrolled ? 'max-h-0 opacity-0 border-b-0' : 'max-h-[120px] opacity-100'}`}>
         <div className="container mx-auto px-4">
-          {/* Desktop layout: 3-column with centered logo */}
-          <div className="hidden md:flex items-center justify-between h-[88px]">
+          {/* ───────── Desktop layout: 3-column with centered logo ───────── */}
+          <div className="hidden md:flex items-center justify-between h-[88px] gap-4">
 
-            {/* LEFT GROUP: Search, Palette, Locale */}
-            <div className="flex items-center gap-1 min-w-0">
-              {/* Search Icon Button — opens search dropdown */}
-              <div className="relative" ref={searchRef}>
-                <IconButton
-                  icon={Search}
-                  onClick={() => setSearchDropdownOpen(!searchDropdownOpen)}
-                  ariaLabel={t('common.searchPlaceholder')}
-                />
-                <AnimatePresence>
-                  {searchDropdownOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8, width: 0 }}
-                      animate={{ opacity: 1, y: 0, width: 320 }}
-                      exit={{ opacity: 0, y: -8, width: 0 }}
-                      transition={{ duration: 0.25 }}
-                      className="absolute left-0 top-full mt-2 z-[100]"
-                    >
-                      <form onSubmit={handleSearch} className="w-full">
-                        <div className="relative">
-                          <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${isDark ? 'text-amber-600/60' : 'text-amber-500/60'}`} />
-                          <Input
-                            value={localSearch}
-                            onChange={(e) => setLocalSearch(e.target.value)}
-                            placeholder={t('common.searchPlaceholder')}
-                            autoFocus
-                            className={`w-full pl-10 ${isDark
-                              ? 'border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60'
-                              : 'border-amber-200/60 bg-white text-stone-800 placeholder:text-stone-400 focus:border-amber-500'
-                            }`}
-                          />
-                          {localSearch && (
-                            <button
-                              type="button"
-                              onClick={() => { setLocalSearch(''); setSearch(''); }}
-                              className={`absolute right-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-amber-200/40 hover:text-amber-200' : 'text-stone-400 hover:text-stone-600'}`}
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      </form>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-
-              {/* Theme Color Picker */}
-              <div className="relative" ref={themeColorPickerRef}>
-                <IconButton
-                  icon={Palette}
-                  onClick={() => setThemeColorPickerOpen(!themeColorPickerOpen)}
-                  ariaLabel="Change theme color"
-                />
-                <AnimatePresence>
-                  {themeColorPickerOpen && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                      transition={{ duration: 0.15 }}
-                      className={`absolute left-0 top-full mt-2 z-[100] rounded-xl border shadow-2xl p-3 ${isDark
-                        ? 'border-amber-500/20 bg-stone-950/95 shadow-black/40 backdrop-blur-xl'
-                        : 'border-amber-200 bg-white shadow-amber-200/40 backdrop-blur-xl'
-                      }`}
-                      style={{ minWidth: '170px' }}
-                    >
-                      <p className={`text-[10px] uppercase tracking-[0.15em] mb-2 px-1 ${isDark ? 'text-amber-400/60' : 'text-amber-600/60'}`}>
-                        Theme Color
-                      </p>
-                      <div className="space-y-1">
-                        {themeColors.map((tc) => (
-                          <button
-                            key={tc.id}
-                            onClick={() => {
-                              setAppThemeColor(tc.id);
-                              setThemeColorPickerOpen(false);
-                            }}
-                            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-colors ${
-                              appThemeColor === tc.id
-                                ? (isDark ? 'bg-amber-500/15 text-amber-200' : 'bg-amber-100 text-amber-700')
-                                : (isDark ? 'text-amber-200/60 hover:bg-amber-500/10 hover:text-amber-200/90' : 'text-stone-500 hover:bg-amber-50 hover:text-amber-600')
-                            }`}
-                          >
-                            <span
-                              className="h-4 w-4 rounded-full border-2 flex-shrink-0 transition-shadow"
-                              style={{
-                                backgroundColor: tc.color,
-                                borderColor: appThemeColor === tc.id ? (isDark ? '#fff' : '#3d2e0a') : tc.color,
-                                boxShadow: appThemeColor === tc.id ? `0 0 8px ${tc.color}80` : 'none',
-                              }}
-                            />
-                            <span className="text-xs font-medium">{tc.label}</span>
-                            {appThemeColor === tc.id && (
-                              <svg className="ml-auto h-3.5 w-3.5 luxury-accent-text" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-
-              {/* Locale/Currency Switcher */}
-              <LocaleSwitcher />
-            </div>
-
-            {/* CENTER: Logo + Brand Name */}
+            {/* LEFT: Logo */}
             <button
               onClick={() => {
                 setView('home');
@@ -475,13 +535,13 @@ export function Header() {
               }}
               className="flex-shrink-0 flex items-center gap-3 group"
             >
-              <div className="relative flex h-16 w-16 items-center justify-center">
+              <div className="relative flex h-32 w-32 items-center justify-center">
                 <Image
                   src="/images/logo-uploaded.png"
                   alt="3 Boxes Luxury Logo"
-                  width={64}
-                  height={64}
-                  className={`h-16 w-16 object-contain transition-all duration-500 group-hover:scale-105 ${
+                  width={128}
+                  height={128}
+                  className={`h-32 w-32 object-contain transition-all duration-500 group-hover:scale-105 ${
                     isLight
                       ? 'contrast-110 brightness-95 saturate-130'
                       : 'contrast-130 brightness-110 saturate-120'
@@ -490,15 +550,20 @@ export function Header() {
                 />
               </div>
               <h1
-                className="logo-shimmer-text hidden sm:block text-xl font-bold tracking-[0.25em] transition-all duration-500"
+                className="logo-shimmer-text hidden lg:block text-xl font-bold tracking-[0.25em] transition-all duration-500"
                 style={{ fontFamily: 'Lora, serif' }}
               >
                 3 BOXES LUXURY
               </h1>
             </button>
 
-            {/* RIGHT GROUP: Theme toggle, Gift, Orders, Install, Auth, Cart */}
-            <div className="flex items-center gap-1 min-w-0">
+            {/* CENTER: Inline Search Bar */}
+            <div className="flex-1 max-w-xl mx-auto">
+              <SearchBar />
+            </div>
+
+            {/* RIGHT GROUP: Theme toggle, Locale, Auth, Wishlist, Cart */}
+            <div className="flex items-center gap-1 flex-shrink-0">
 
               {/* Theme Toggle (Dark/Light) */}
               <IconButton
@@ -507,29 +572,8 @@ export function Header() {
                 ariaLabel={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
               />
 
-              {/* Gift Builder */}
-              <IconButton
-                icon={Gift}
-                onClick={toggleGiftBuilder}
-                ariaLabel={t('nav.giftBuilder')}
-              />
-
-              {/* Orders */}
-              <IconButton
-                icon={Package}
-                onClick={() => setView('orders')}
-                ariaLabel={t('common.orders')}
-              />
-
-              {/* Install App */}
-              {canInstall && (
-                <IconButton
-                  icon={Download}
-                  onClick={promptInstall}
-                  ariaLabel="Install App"
-                  className="hidden lg:flex"
-                />
-              )}
+              {/* Locale / Currency Switcher (moved here per request) */}
+              <LocaleSwitcher />
 
               {/* Auth Button */}
               {authUser ? (
@@ -538,10 +582,10 @@ export function Header() {
                     variant="ghost"
                     size="icon"
                     onClick={handleDashboard}
-                    className={`relative group ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 rounded-full h-10 w-10 hover:shadow-[0_0_12px_rgba(var(--luxury-accent-rgb,219,175,54),0.3)]`}
-                    ariaLabel={t('common.myDashboard')}
+                    className={`relative group ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 rounded-full h-11 w-11 hover:shadow-[0_0_14px_rgba(var(--luxury-accent-rgb,219,175,54),0.3)]`}
+                    aria-label={t('common.myDashboard')}
                   >
-                    <div className={`flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-bold transition-all duration-300 group-hover:scale-110 ${
+                    <div className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold transition-all duration-300 group-hover:scale-110 ${
                       isDark ? 'bg-amber-600/20 text-amber-400' : 'bg-amber-100 text-amber-700'
                     }`}>
                       {authUser.name.charAt(0).toUpperCase()}
@@ -551,10 +595,10 @@ export function Header() {
                     variant="ghost"
                     size="icon"
                     onClick={() => { clearAuth(); setView('home'); showToast('success', 'You have been signed out successfully.') }}
-                    className={`${isDark ? 'text-amber-200/40 hover:bg-red-900/20 hover:text-red-400' : 'text-stone-400 hover:bg-red-50 hover:text-red-500'} transition-all duration-300 rounded-full h-8 w-8`}
+                    className={`${isDark ? 'text-amber-200/40 hover:bg-red-900/20 hover:text-red-400' : 'text-stone-400 hover:bg-red-50 hover:text-red-500'} transition-all duration-300 rounded-full h-9 w-9`}
                     aria-label={t('common.signOut')}
                   >
-                    <LogOut className="h-3.5 w-3.5" />
+                    <LogOut className="h-4 w-4" />
                   </Button>
                 </div>
               ) : (
@@ -564,6 +608,13 @@ export function Header() {
                   ariaLabel={t('common.signIn')}
                 />
               )}
+
+              {/* Wishlist (Heart) — added before Cart */}
+              <IconButton
+                icon={Heart}
+                onClick={() => setView('wishlist')}
+                ariaLabel="View wishlist"
+              />
 
               {/* Cart with bounce animation */}
               <div className="relative">
@@ -600,7 +651,7 @@ export function Header() {
           </div>
 
           {/* ═══════════════════════════════════════════════════════════════
-              MOBILE LAYOUT: Hamburger + Logo + Search + Cart
+              MOBILE LAYOUT: Hamburger + Logo + Search toggle + Wishlist + Cart
               ═══════════════════════════════════════════════════════════════ */}
           <div className="flex md:hidden items-center justify-between h-[56px]">
             {/* Hamburger */}
@@ -609,7 +660,7 @@ export function Header() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={`${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300`}
+                  className={`${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 h-11 w-11`}
                   aria-label="Open menu"
                 >
                   <Menu className="h-5 w-5" />
@@ -617,13 +668,13 @@ export function Header() {
               </SheetTrigger>
               <SheetContent side="right" className={`border ${borderColor} ${bgSurface}`}>
                 <SheetTitle className="flex items-center gap-2">
-                  <div className="relative flex h-12 w-12 items-center justify-center">
+                  <div className="relative flex h-28 w-28 items-center justify-center">
                     <Image
                       src="/images/logo-uploaded.png"
                       alt="3 Boxes Luxury Logo"
-                      width={48}
-                      height={48}
-                      className={`h-12 w-12 object-contain ${
+                      width={112}
+                      height={112}
+                      className={`h-28 w-28 object-contain ${
                         isLight ? 'contrast-110 brightness-95 saturate-130' : 'contrast-130 brightness-110 saturate-120'
                       }`}
                     />
@@ -633,21 +684,8 @@ export function Header() {
                   </span>
                 </SheetTitle>
                 <div className="mt-8 flex flex-col gap-4 overflow-y-auto max-h-[calc(100vh-120px)] custom-scrollbar">
-                  {/* Search */}
-                  <form onSubmit={(e) => { handleSearch(e); setMobileMenuOpen(false); }}>
-                    <div className="relative">
-                      <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${isDark ? 'text-amber-600/60' : 'text-amber-500/60'}`} />
-                      <Input
-                        value={localSearch}
-                        onChange={(e) => setLocalSearch(e.target.value)}
-                        placeholder={t('common.searchPlaceholder')}
-                        className={`w-full pl-10 ${isDark
-                          ? 'border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30'
-                          : 'border-amber-200/60 bg-white text-stone-800 placeholder:text-stone-400'
-                        }`}
-                      />
-                    </div>
-                  </form>
+                  {/* Search (compact, with mic + image buttons inside) */}
+                  <SearchBar compact />
 
                   {/* Home */}
                   <button
@@ -693,6 +731,15 @@ export function Header() {
                     </button>
                   )}
 
+                  {/* Wishlist */}
+                  <button
+                    onClick={() => { setView('wishlist'); setMobileMenuOpen(false); }}
+                    className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${isDark ? 'text-amber-200/80 hover:bg-amber-900/20 hover:text-amber-400' : 'text-stone-700 hover:bg-amber-50 hover:text-amber-700'}`}
+                  >
+                    <Heart className="h-4 w-4" />
+                    Wishlist
+                  </button>
+
                   {/* Cart */}
                   <button
                     onClick={() => { setView('cart'); setMobileMenuOpen(false); }}
@@ -700,25 +747,6 @@ export function Header() {
                   >
                     <ShoppingCart className="h-4 w-4" />
                     {t('common.cart')} ({totalItems})
-                  </button>
-
-                  {/* Orders */}
-                  <button
-                    onClick={() => { setView('orders'); setMobileMenuOpen(false); }}
-                    className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${isDark ? 'text-amber-200/80 hover:bg-amber-900/20 hover:text-amber-400' : 'text-stone-700 hover:bg-amber-50 hover:text-amber-700'}`}
-                  >
-                    <Package className="h-4 w-4" />
-                    {t('common.orders')}
-                  </button>
-
-                  {/* Gift Builder */}
-                  <button
-                    onClick={() => { toggleGiftBuilder(); setMobileMenuOpen(false); }}
-                    className={`rounded-md px-4 py-2 text-left transition-colors flex items-center gap-2 ${accentText}`}
-                  >
-                    <Gift className="h-4 w-4" />
-                    {t('nav.giftBuilder')}
-                    <Sparkles className="h-3 w-3 opacity-60" />
                   </button>
 
                   {/* Quick Section Links */}
@@ -736,20 +764,6 @@ export function Header() {
                     ))}
                   </div>
 
-                  {/* Install App */}
-                  {canInstall && (
-                    <button
-                      onClick={() => { promptInstall(); setMobileMenuOpen(false); }}
-                      className={`rounded-md px-4 py-3 text-left font-medium transition-colors flex items-center gap-2 ${isDark
-                        ? 'text-amber-100 bg-amber-600/10 border border-amber-500/30 hover:bg-amber-600/20'
-                        : 'text-amber-700 bg-amber-50 border border-amber-300 hover:bg-amber-100'
-                      }`}
-                    >
-                      <Download className="h-5 w-5" />
-                      Install App
-                    </button>
-                  )}
-
                   {/* Theme Toggle */}
                   <button
                     onClick={() => { setAppTheme(isDark ? 'light' : 'dark'); }}
@@ -759,35 +773,8 @@ export function Header() {
                     {isDark ? 'Light Mode' : 'Dark Mode'}
                   </button>
 
-                  {/* Locale Switcher */}
+                  {/* Locale Switcher (mobile drawer) */}
                   <LocaleSwitcherMobile />
-
-                  {/* Theme Color Picker */}
-                  <div className={`my-3 border-t pt-3 ${isDark ? 'border-amber-900/20' : 'border-amber-200/40'}`}>
-                    <p className={`px-4 mb-2 text-[10px] font-semibold uppercase tracking-widest ${isDark ? 'text-amber-400/50' : 'text-amber-600/50'}`}>Theme Color</p>
-                    <div className="flex items-center gap-3 px-4">
-                      {themeColors.map((tc) => (
-                        <button
-                          key={tc.id}
-                          onClick={() => setAppThemeColor(tc.id)}
-                          className="flex flex-col items-center gap-1"
-                          aria-label={tc.label}
-                        >
-                          <span
-                            className="h-6 w-6 rounded-full border-2 transition-shadow"
-                            style={{
-                              backgroundColor: tc.color,
-                              borderColor: appThemeColor === tc.id ? (isDark ? '#fff' : '#3d2e0a') : tc.color,
-                              boxShadow: appThemeColor === tc.id ? `0 0 10px ${tc.color}80` : 'none',
-                            }}
-                          />
-                          <span className={`text-[8px] leading-tight ${isDark ? 'text-amber-200/50' : 'text-stone-500'}`}>
-                            {tc.label.split(' ')[0]}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </SheetContent>
             </Sheet>
@@ -797,34 +784,48 @@ export function Header() {
               onClick={() => { setView('home'); setSearch(''); setLocalSearch(''); setCategory(null); }}
               className="flex items-center gap-2 group"
             >
-              <div className="relative flex h-10 w-10 items-center justify-center">
+              <div className="relative flex h-24 w-24 items-center justify-center">
                 <Image
                   src="/images/logo-uploaded.png"
                   alt="3 Boxes Luxury Logo"
-                  width={40}
-                  height={40}
-                  className={`h-10 w-10 object-contain transition-all duration-300 group-hover:scale-105 ${
+                  width={96}
+                  height={96}
+                  className={`h-24 w-24 object-contain transition-all duration-300 group-hover:scale-105 ${
                     isLight ? 'contrast-110 brightness-95 saturate-130' : 'contrast-130 brightness-110 saturate-120'
                   }`}
                   priority
                 />
               </div>
-              <span className="logo-shimmer-text text-sm font-bold tracking-[0.2em] hidden sm:block" style={{ fontFamily: 'Lora, serif' }}>
+              <span className="logo-shimmer-text text-sm font-bold tracking-[0.2em] hidden xs:block" style={{ fontFamily: 'Lora, serif' }}>
                 3 BOXES
               </span>
             </button>
 
-            {/* Search + Cart (Mobile) */}
-            <div className="flex items-center gap-1">
+            {/* Right side: Search toggle, Wishlist, Cart */}
+            <div className="flex items-center gap-0.5">
+              {/* Search toggle (expands search bar below) */}
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setSearchDropdownOpen(!searchDropdownOpen)}
-                className={`${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300`}
+                className={`relative ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 h-11 w-11 rounded-full`}
                 aria-label="Search"
               >
                 <Search className="h-5 w-5" />
               </Button>
+
+              {/* Wishlist */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setView('wishlist')}
+                className={`relative ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 h-11 w-11 rounded-full`}
+                aria-label="View wishlist"
+              >
+                <Heart className="h-5 w-5" />
+              </Button>
+
+              {/* Cart */}
               <motion.div
                 key={totalItems}
                 initial={totalItems > 0 ? { scale: 1.2 } : { scale: 1 }}
@@ -835,7 +836,7 @@ export function Header() {
                   variant="ghost"
                   size="icon"
                   onClick={() => setView('cart')}
-                  className={`relative ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300`}
+                  className={`relative ${mutedText} ${iconBg} ${mutedTextHover} transition-all duration-300 h-11 w-11 rounded-full`}
                   aria-label={t('common.viewCart')}
                 >
                   <ShoppingCart className="h-5 w-5" />
@@ -845,7 +846,7 @@ export function Header() {
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
                         exit={{ scale: 0 }}
-                        className={`absolute -right-1 -top-1 flex h-4.5 w-4.5 items-center justify-center rounded-full text-[9px] font-bold ${
+                        className={`absolute -right-0.5 -top-0.5 flex h-4.5 w-4.5 items-center justify-center rounded-full text-[9px] font-bold ${
                           isDark ? 'bg-[var(--luxury-accent,#dbaf36)] text-stone-950' : 'bg-[var(--luxury-accent,#dbaf36)] text-white'
                         }`}
                       >
@@ -858,7 +859,7 @@ export function Header() {
             </div>
           </div>
 
-          {/* Mobile Search Dropdown */}
+          {/* Mobile Search Dropdown — uses SearchBar (compact) so mic + image buttons are inside */}
           <AnimatePresence>
             {searchDropdownOpen && (
               <motion.div
@@ -868,30 +869,9 @@ export function Header() {
                 transition={{ duration: 0.2 }}
                 className="md:hidden overflow-hidden"
               >
-                <form onSubmit={(e) => { handleSearch(e); setSearchDropdownOpen(false); }} className="px-4 pb-3">
-                  <div className="relative">
-                    <Search className={`absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 ${isDark ? 'text-amber-600/60' : 'text-amber-500/60'}`} />
-                    <Input
-                      value={localSearch}
-                      onChange={(e) => setLocalSearch(e.target.value)}
-                      placeholder={t('common.searchPlaceholder')}
-                      autoFocus
-                      className={`w-full pl-10 ${isDark
-                        ? 'border-amber-900/40 bg-stone-900/50 text-amber-50 placeholder:text-amber-200/30 focus:border-amber-600/60'
-                        : 'border-amber-200/60 bg-white text-stone-800 placeholder:text-stone-400 focus:border-amber-500'
-                      }`}
-                    />
-                    {localSearch && (
-                      <button
-                        type="button"
-                        onClick={() => { setLocalSearch(''); setSearch(''); }}
-                        className={`absolute right-3 top-1/2 -translate-y-1/2 ${isDark ? 'text-amber-200/40 hover:text-amber-200' : 'text-stone-400 hover:text-stone-600'}`}
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                </form>
+                <div className="px-4 pb-3 pt-1">
+                  <SearchBar compact autoFocus />
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -904,137 +884,183 @@ export function Header() {
       <div className={`${bgSurface}`}>
         <div className="container mx-auto px-4">
           {/* Desktop: Icon circles with labels and dropdowns */}
-          <nav className="hidden md:flex items-center justify-center gap-2 py-3 overflow-x-auto" aria-label="Category navigation" style={{ fontFamily: 'Urbanist, sans-serif' }}>
-            {CATEGORY_NAV.map((cat) => {
-              const Icon = cat.icon;
-              const hasChildren = cat.children.length > 0;
-              const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
+          <div className="hidden md:flex items-center gap-4 py-1.5">
 
-              if (!hasChildren) {
+            {/* Compact logo — only visible when scrolled */}
+            {scrolled && (
+              <button
+                onClick={() => { setView('home'); setSearch(''); setLocalSearch(''); setCategory(null); }}
+                className="flex-shrink-0 flex items-center gap-2"
+                aria-label="Home"
+              >
+                <Image
+                  src="/images/logo-uploaded.png"
+                  alt="3 Boxes Luxury"
+                  width={112}
+                  height={112}
+                  className="h-28 w-28 object-contain"
+                  priority
+                />
+              </button>
+            )}
+
+            {/* Category nav */}
+            <nav
+              className={`flex flex-wrap items-center gap-2 ${scrolled ? 'flex-1 justify-start' : 'flex-1 justify-center'}`}
+              aria-label="Category navigation"
+              style={{ fontFamily: 'Urbanist, sans-serif' }}
+            >
+              {CATEGORY_NAV.map((cat) => {
+                const Icon = cat.icon;
+                const hasChildren = cat.children.length > 0;
+                const isActive = selectedCategory === cat.slug || cat.children.some((c) => c.slug === selectedCategory);
+
+                if (!hasChildren) {
+                  return (
+                    <button
+                      key={cat.slug}
+                      onClick={() => handleNavClick(cat)}
+                      className={`category-icon-btn group flex flex-col items-center gap-1 px-2 py-1 rounded-xl transition-all duration-300 ${
+                        isActive
+                          ? (isDark
+                            ? 'bg-[var(--luxury-glow,rgba(219,175,54,0.15))] border-[var(--luxury-accent,#dbaf36)]/40 text-amber-300 shadow-[0_0_15px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]'
+                            : 'bg-amber-50 border-[var(--luxury-accent,#dbaf36)] text-amber-700 shadow-[0_0_10px_rgba(var(--luxury-accent-rgb,219,175,54),0.15)]')
+                          : (isDark
+                            ? 'text-amber-200/60 hover:bg-amber-900/10 border border-amber-900/20 hover:border-amber-600/30'
+                            : 'text-stone-500 hover:bg-amber-50 border border-amber-200/30 hover:border-amber-300')
+                      } ${cat.slug === 'new-arrivals' || cat.viewId ? 'relative' : ''}`}
+                    >
+                      <div className={`flex h-9 w-9 items-center justify-center rounded-full border transition-all duration-300 ${
+                        isActive
+                          ? (isDark ? 'border-[var(--luxury-accent,#dbaf36)] bg-amber-900/30' : 'border-[var(--luxury-accent,#dbaf36)] bg-amber-100')
+                          : (isDark ? 'border-amber-800/30 group-hover:border-amber-500/50 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.25)]' : 'border-amber-200 group-hover:border-amber-300 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]')
+                      }`}>
+                        <Icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${isActive ? 'luxury-accent-text' : ''}`} />
+                      </div>
+                      <span className={`text-[11px] font-medium tracking-wide whitespace-nowrap ${isActive ? 'luxury-accent-text' : ''}`}>
+                        {cat.name}
+                      </span>
+                      {cat.slug === 'new-arrivals' && (
+                        <span className={`absolute -top-1 -right-1 rounded-full px-1.5 text-[8px] font-bold uppercase tracking-wider ${
+                          isDark ? 'bg-[var(--luxury-accent,#dbaf36)] text-stone-950' : 'bg-[var(--luxury-accent,#dbaf36)] text-white'
+                        }`}>
+                          New
+                        </span>
+                      )}
+                      {cat.viewId && (
+                        <span className={`absolute -top-1 -right-1 rounded-full px-1.5 text-[8px] font-bold uppercase tracking-wider ${
+                          isDark ? 'bg-amber-600/30 text-amber-400' : 'bg-amber-100 text-amber-600'
+                        }`}>
+                          ★
+                        </span>
+                      )}
+                    </button>
+                  );
+                }
+
                 return (
-                  <button
+                  <div
                     key={cat.slug}
-                    onClick={() => handleNavClick(cat)}
-                    className={`category-icon-btn group flex flex-col items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-300 ${
-                      isActive
-                        ? (isDark
-                          ? 'bg-[var(--luxury-glow,rgba(219,175,54,0.15))] border-[var(--luxury-accent,#dbaf36)]/40 text-amber-300 shadow-[0_0_15px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]'
-                          : 'bg-amber-50 border-[var(--luxury-accent,#dbaf36)] text-amber-700 shadow-[0_0_10px_rgba(var(--luxury-accent-rgb,219,175,54),0.15)]')
-                        : (isDark
-                          ? 'text-amber-200/60 hover:bg-amber-900/10 border border-amber-900/20 hover:border-amber-600/30'
-                          : 'text-stone-500 hover:bg-amber-50 border border-amber-200/30 hover:border-amber-300')
-                    } ${cat.slug === 'new-arrivals' || cat.viewId ? 'relative' : ''}`}
+                    className="group relative"
+                    onMouseEnter={() => setHoveredCategory(cat.slug)}
+                    onMouseLeave={() => setHoveredCategory(null)}
                   >
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-full border transition-all duration-300 ${
-                      isActive
-                        ? (isDark ? 'border-[var(--luxury-accent,#dbaf36)] bg-amber-900/30' : 'border-[var(--luxury-accent,#dbaf36)] bg-amber-100')
-                        : (isDark ? 'border-amber-800/30 group-hover:border-amber-500/50 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.25)]' : 'border-amber-200 group-hover:border-amber-300 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]')
-                    }`}>
-                      <Icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${isActive ? 'luxury-accent-text' : ''}`} />
-                    </div>
-                    <span className={`text-[11px] font-medium tracking-wide whitespace-nowrap ${isActive ? 'luxury-accent-text' : ''}`}>
-                      {cat.name}
-                    </span>
-                    {cat.slug === 'new-arrivals' && (
-                      <span className={`absolute -top-1 -right-1 rounded-full px-1.5 text-[8px] font-bold uppercase tracking-wider ${
-                        isDark ? 'bg-[var(--luxury-accent,#dbaf36)] text-stone-950' : 'bg-[var(--luxury-accent,#dbaf36)] text-white'
+                    <button
+                      onClick={() => handleNavClick(cat)}
+                      className={`category-icon-btn flex flex-col items-center gap-1 px-2 py-1 rounded-xl transition-all duration-300 ${
+                        isActive
+                          ? (isDark
+                            ? 'bg-[var(--luxury-glow,rgba(219,175,54,0.15))] border-[var(--luxury-accent,#dbaf36)]/40 text-amber-300 shadow-[0_0_15px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]'
+                            : 'bg-amber-50 border-[var(--luxury-accent,#dbaf36)] text-amber-700 shadow-[0_0_10px_rgba(var(--luxury-accent-rgb,219,175,54),0.15)]')
+                          : (isDark
+                            ? 'text-amber-200/60 hover:bg-amber-900/10 border border-amber-900/20 hover:border-amber-600/30'
+                            : 'text-stone-500 hover:bg-amber-50 border border-amber-200/30 hover:border-amber-300')
+                      }`}
+                    >
+                      <div className={`flex h-9 w-9 items-center justify-center rounded-full border transition-all duration-300 ${
+                        isActive
+                          ? (isDark ? 'border-[var(--luxury-accent,#dbaf36)] bg-amber-900/30' : 'border-[var(--luxury-accent,#dbaf36)] bg-amber-100')
+                          : (isDark ? 'border-amber-800/30 group-hover:border-amber-500/50 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.25)]' : 'border-amber-200 group-hover:border-amber-300 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]')
                       }`}>
-                        New
+                        <Icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${isActive ? 'luxury-accent-text' : ''}`} />
+                      </div>
+                      <span className={`text-[11px] font-medium tracking-wide whitespace-nowrap flex items-center gap-0.5 ${isActive ? 'luxury-accent-text' : ''}`}>
+                        {cat.name}
+                        <ChevronDown className={`h-2.5 w-2.5 transition-transform duration-200 ${hoveredCategory === cat.slug ? 'rotate-180' : ''}`} />
                       </span>
-                    )}
-                    {cat.viewId && (
-                      <span className={`absolute -top-1 -right-1 rounded-full px-1.5 text-[8px] font-bold uppercase tracking-wider ${
-                        isDark ? 'bg-amber-600/30 text-amber-400' : 'bg-amber-100 text-amber-600'
-                      }`}>
-                        ★
-                      </span>
-                    )}
-                  </button>
-                );
-              }
+                    </button>
 
-              return (
-                <div
-                  key={cat.slug}
-                  className="group relative"
-                  onMouseEnter={() => setHoveredCategory(cat.slug)}
-                  onMouseLeave={() => setHoveredCategory(null)}
-                >
-                  <button
-                    onClick={() => handleNavClick(cat)}
-                    className={`category-icon-btn flex flex-col items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-300 ${
-                      isActive
-                        ? (isDark
-                          ? 'bg-[var(--luxury-glow,rgba(219,175,54,0.15))] border-[var(--luxury-accent,#dbaf36)]/40 text-amber-300 shadow-[0_0_15px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]'
-                          : 'bg-amber-50 border-[var(--luxury-accent,#dbaf36)] text-amber-700 shadow-[0_0_10px_rgba(var(--luxury-accent-rgb,219,175,54),0.15)]')
-                        : (isDark
-                          ? 'text-amber-200/60 hover:bg-amber-900/10 border border-amber-900/20 hover:border-amber-600/30'
-                          : 'text-stone-500 hover:bg-amber-50 border border-amber-200/30 hover:border-amber-300')
-                    }`}
-                  >
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-full border transition-all duration-300 ${
-                      isActive
-                        ? (isDark ? 'border-[var(--luxury-accent,#dbaf36)] bg-amber-900/30' : 'border-[var(--luxury-accent,#dbaf36)] bg-amber-100')
-                        : (isDark ? 'border-amber-800/30 group-hover:border-amber-500/50 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.25)]' : 'border-amber-200 group-hover:border-amber-300 group-hover:shadow-[0_0_8px_rgba(var(--luxury-accent-rgb,219,175,54),0.2)]')
-                    }`}>
-                      <Icon className={`h-4 w-4 transition-all duration-300 group-hover:scale-110 ${isActive ? 'luxury-accent-text' : ''}`} />
-                    </div>
-                    <span className={`text-[11px] font-medium tracking-wide whitespace-nowrap flex items-center gap-0.5 ${isActive ? 'luxury-accent-text' : ''}`}>
-                      {cat.name}
-                      <ChevronDown className={`h-2.5 w-2.5 transition-transform duration-200 ${hoveredCategory === cat.slug ? 'rotate-180' : ''}`} />
-                    </span>
-                  </button>
-
-                  {/* Dropdown Menu */}
-                  <AnimatePresence>
-                    {hoveredCategory === cat.slug && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -4, scale: 0.97 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -4, scale: 0.97 }}
-                        transition={{ duration: 0.15 }}
-                        className={`absolute top-full left-1/2 -translate-x-1/2 z-50 mt-1 min-w-[180px] rounded-xl border py-2 shadow-xl ${isDark
-                          ? 'border-amber-900/30 bg-stone-950/98 backdrop-blur-md shadow-black/40'
-                          : 'border-amber-200 bg-white/98 backdrop-blur-md shadow-amber-200/40'
-                        }`}
-                      >
-                        {/* Parent "All" link */}
-                        <button
-                          onClick={() => { setCategory(cat.slug); setHoveredCategory(null); }}
-                          className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm font-medium transition-colors ${isDark
-                            ? 'text-amber-300/90 hover:bg-amber-900/20 hover:text-amber-200'
-                            : 'text-amber-700 hover:bg-amber-50 hover:text-amber-800'
+                    {/* Dropdown Menu */}
+                    <AnimatePresence>
+                      {hoveredCategory === cat.slug && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                          transition={{ duration: 0.15 }}
+                          className={`absolute top-full left-1/2 -translate-x-1/2 z-50 mt-1 min-w-[180px] rounded-xl border py-2 shadow-xl ${isDark
+                            ? 'border-amber-900/30 bg-stone-950/98 backdrop-blur-md shadow-black/40'
+                            : 'border-amber-200 bg-white/98 backdrop-blur-md shadow-amber-200/40'
                           }`}
                         >
-                          <Icon className="h-3.5 w-3.5" />
-                          All {cat.name}
-                        </button>
-                        <div className={`mx-3 my-1 border-t ${isDark ? 'border-amber-900/20' : 'border-amber-200/40'}`} />
-                        {cat.children.map((child) => (
+                          {/* Parent "All" link */}
                           <button
-                            key={child.slug}
-                            onClick={() => { setCategory(child.slug); setHoveredCategory(null); }}
-                            className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors ${
-                              selectedCategory === child.slug
-                                ? (isDark ? 'text-amber-300 bg-amber-900/20' : 'text-amber-700 bg-amber-50')
-                                : (isDark ? 'text-amber-200/60 hover:bg-amber-900/10 hover:text-amber-300' : 'text-stone-500 hover:bg-amber-50 hover:text-amber-700')
+                            onClick={() => { setCategory(cat.slug); setHoveredCategory(null); }}
+                            className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm font-medium transition-colors ${isDark
+                              ? 'text-amber-300/90 hover:bg-amber-900/20 hover:text-amber-200'
+                              : 'text-amber-700 hover:bg-amber-50 hover:text-amber-800'
                             }`}
                           >
-                            <span className={`h-1.5 w-1.5 rounded-full ${
-                              selectedCategory === child.slug
-                                ? 'bg-[var(--luxury-accent,#dbaf36)]'
-                                : (isDark ? 'bg-amber-600/50' : 'bg-stone-300')
-                            }`} />
-                            {child.name}
+                            <Icon className="h-3.5 w-3.5" />
+                            All {cat.name}
                           </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                          <div className={`mx-3 my-1 border-t ${isDark ? 'border-amber-900/20' : 'border-amber-200/40'}`} />
+                          {cat.children.map((child) => (
+                            <button
+                              key={child.slug}
+                              onClick={() => { setCategory(child.slug); setHoveredCategory(null); }}
+                              className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors ${
+                                selectedCategory === child.slug
+                                  ? (isDark ? 'text-amber-300 bg-amber-900/20' : 'text-amber-700 bg-amber-50')
+                                  : (isDark ? 'text-amber-200/60 hover:bg-amber-900/10 hover:text-amber-300' : 'text-stone-500 hover:bg-amber-50 hover:text-amber-700')
+                              }`}
+                            >
+                              <span className={`h-1.5 w-1.5 rounded-full ${
+                                selectedCategory === child.slug
+                                  ? 'bg-[var(--luxury-accent,#dbaf36)]'
+                                  : (isDark ? 'bg-amber-600/50' : 'bg-stone-300')
+                              }`} />
+                              {child.name}
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </nav>
+
+            {/* Right-side compact toolbar — only when scrolled */}
+            {scrolled && (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="w-56">
+                  <SearchBar compact />
                 </div>
-              );
-            })}
-          </nav>
+                <IconButton
+                  icon={Heart}
+                  label="Wishlist"
+                  onClick={() => setView('wishlist')}
+                />
+                <IconButton
+                  icon={ShoppingCart}
+                  label="Cart"
+                  onClick={() => setView('cart')}
+                />
+              </div>
+            )}
+
+          </div>
 
           {/* Mobile: Horizontal scrollable icon row */}
           <nav className="md:hidden flex items-center gap-2 overflow-x-auto py-2 custom-scrollbar" aria-label="Category navigation" style={{ fontFamily: 'Urbanist, sans-serif' }}>

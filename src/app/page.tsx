@@ -11,6 +11,7 @@ import { CartView } from '@/components/cart-view';
 import { CheckoutView } from '@/components/checkout-view';
 import { OrderConfirmation } from '@/components/order-confirmation';
 import { OrderHistory } from '@/components/order-history';
+import { WishlistView } from '@/components/wishlist-view';
 import { AuthDialog } from '@/components/auth-dialog';
 import { AdminDashboard } from '@/components/admin-dashboard';
 import { UserDashboard } from '@/components/user-dashboard';
@@ -180,6 +181,8 @@ function AppContent() {
         return <OrderConfirmation />;
       case 'orders':
         return <OrderHistory />;
+      case 'wishlist':
+        return <WishlistView />;
       case 'admin-dashboard':
         return <AdminDashboard />;
       case 'user-dashboard':

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'corporate-dashboard' | 'wiki' | 'downloads' | 'security-policy' | 'shop' | 'contact' | 'about' | 'divisions' | 'careers' | 'press' | 'sustainability' | 'shipping' | 'faq' | 'size-guide' | 'track-order' | 'privacy-policy' | 'terms-of-service' | 'cookie-policy' | 'refund-policy' | 'family-packs' | 'social-connections' | '3boxes-curate'
+export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'corporate-dashboard' | 'wiki' | 'downloads' | 'security-policy' | 'shop' | 'contact' | 'about' | 'divisions' | 'careers' | 'press' | 'sustainability' | 'shipping' | 'faq' | 'size-guide' | 'track-order' | 'privacy-policy' | 'terms-of-service' | 'cookie-policy' | 'refund-policy' | 'family-packs' | 'social-connections' | '3boxes-curate' | 'wishlist'
 
 export type ThemeColor = 'royal-gold' | 'rose-elegance' | 'emerald-luxe' | 'sapphire-classic' | 'onyx-noir'
 

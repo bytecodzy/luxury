@@ -30,22 +30,20 @@ export function Footer() {
           {/* Brand */}
           <div className="sm:col-span-2">
             <div className="flex items-center gap-3">
-              <div className="relative flex h-16 w-16 items-center justify-center">
+              <div className="relative flex h-64 w-64 items-center justify-center">
                 <Image
                   src="/images/logo-uploaded.png"
                   alt="3 Boxes Luxury Logo"
-                  width={64}
-                  height={64}
-                  className={`h-16 w-16 object-contain ${
+                  width={256}
+                  height={256}
+                  className={`h-64 w-64 object-contain ${
                     isLight
                       ? 'contrast-110 brightness-95 saturate-130'
                       : 'contrast-150 brightness-130 saturate-130 mix-blend-lighten drop-shadow-[0_0_14px_rgba(255,215,0,0.7)] drop-shadow-[0_0_6px_rgba(245,230,163,0.5)]'
                   }`}
                 />
               </div>
-              <h3 className="gold-shimmer text-lg font-bold tracking-widest">
-                3 BOXES LUXURY
-              </h3>
+             
             </div>
             <p className="mt-2 text-sm text-amber-200/50">
               {t('footer.description')}
