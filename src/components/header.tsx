@@ -325,20 +325,25 @@ export function Header() {
   return (
     <header className={`sticky top-0 z-50 w-full backdrop-blur-md transition-colors duration-500 ${bgSurface95} border-b ${borderColor}`}>
       {/* ═══════════════════════════════════════════════════════════════
-          ROW 1: ANNOUNCEMENT BAR
+          ROW 1: ANNOUNCEMENT BAR — gold gradient, scrolling marquee,
+                 pauses on hover. Same gold gradient for both themes.
           ═══════════════════════════════════════════════════════════════ */}
-      <div className="announcement-bar relative overflow-hidden">
-        {/* Gold/champagne gradient background with shimmer */}
-        <div className={`absolute inset-0 ${isDark
-          ? 'bg-gradient-to-r from-[#1a1407] via-[#2a1f0a] to-[#1a1407]'
-          : 'bg-gradient-to-r from-[#f5e6a3] via-[#dbaf36] to-[#f5e6a3]'
-        }`} />
+      <div className="announcement-bar announcement-marquee relative overflow-hidden">
+        {/* Gold gradient background — theme gold (#dbaf36) with champagne edges */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#f5e6a3] via-[#dbaf36] to-[#f5e6a3]" />
+        {/* Subtle top/bottom depth lines */}
+        <div className="absolute inset-x-0 top-0 h-px bg-[#92700c]/40" />
+        <div className="absolute inset-x-0 bottom-0 h-px bg-[#92700c]/40" />
         <div className="announcement-shimmer absolute inset-0" />
-        <div className={`relative text-center py-2 px-4 text-xs font-medium tracking-wide ${isDark
-          ? 'text-amber-200/80'
-          : 'text-[#3d2e0a]'
-        }`} style={{ fontFamily: 'Urbanist, sans-serif' }}>
-          {ANNOUNCEMENT_TEXT}
+
+        {/* Scrolling track — two identical copies for seamless left-to-right loop.
+            Hover on the bar pauses the animation via CSS. */}
+        <div
+          className="announcement-marquee-track relative py-2 text-xs font-semibold tracking-wide text-black"
+          style={{ fontFamily: 'Urbanist, sans-serif' }}
+        >
+          <span>{ANNOUNCEMENT_TEXT}</span>
+          <span aria-hidden="true">{ANNOUNCEMENT_TEXT}</span>
         </div>
       </div>
 

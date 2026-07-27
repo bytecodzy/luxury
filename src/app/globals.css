@@ -202,6 +202,60 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   HEADER — ANNOUNCEMENT BAR MARQUEE
+   Slow left-to-right scrolling text. Pauses on hover.
+   Track holds two identical copies so the loop is visually seamless.
+   ═══════════════════════════════════════════════════════════════════ */
+.announcement-marquee {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.announcement-marquee-track {
+  display: flex;
+  flex-shrink: 0;
+  white-space: nowrap;
+  will-change: transform;
+  /* -50% → 0% moves the track to the RIGHT, so the text scrolls left-to-right.
+     Two copies make the loop seamless (copy 2 lands exactly where copy 1 was). */
+  animation: announcementMarquee 8s linear infinite;
+}
+
+.announcement-marquee-track > span {
+  padding-right: 3rem;          /* breathing space between copies */
+  letter-spacing: 0.02em;
+  display: inline-block;
+}
+
+.announcement-marquee:hover .announcement-marquee-track {
+  animation-play-state: paused;
+}
+
+@keyframes announcementMarquee {
+  0%   { transform: translateX(-50%); }
+  100% { transform: translateX(0%); }
+}
+
+/* Respect reduced-motion preference: stop animation, show static centered text */
+@media (prefers-reduced-motion: reduce) {
+  .announcement-marquee-track {
+    animation: none;
+    justify-content: center;
+    width: 100%;
+  }
+  .announcement-marquee-track > span:not(:first-child) {
+    display: none;
+  }
+  .announcement-marquee-track > span:first-child {
+    display: inline-block;
+    margin: 0 auto;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    HEADER — LOGO SHIMMER HOVER
    ═══════════════════════════════════════════════════════════════════ */
 .logo-shimmer-text {
