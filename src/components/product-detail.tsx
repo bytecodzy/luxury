@@ -565,7 +565,7 @@ export function ProductDetail() {
               <span
                 className="rounded-full border border-emerald-600/30 bg-emerald-600/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-400"
               >
-                {t('productDetail.save')} {format(product.compareAtPrice! - product.price)}
+                {t('save')} {format(product.compareAtPrice! - product.price)}
               </span>
             )}
           </div>
