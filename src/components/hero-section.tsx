@@ -42,14 +42,7 @@ export function HeroSection() {
   };
 
   return (
-    <section
-  className="relative overflow-hidden w-screen"
-  style={{
-    minHeight: '70vh',
-    marginLeft: 'calc(50% - 50vw)',
-    marginRight: 'calc(50% - 50vw)',
-  }}
->
+    <section className="relative overflow-hidden" style={{ minHeight: '100vh' }}>
       {/* Slideshow background */}
       <AnimatePresence mode="wait">
         <motion.div
@@ -81,7 +74,7 @@ export function HeroSection() {
       <div className={`absolute inset-0 ${appTheme === 'light' ? 'bg-gradient-to-b from-stone-100/60 via-stone-200/70 to-stone-100/80' : 'bg-gradient-to-b from-stone-950/70 via-stone-950/80 to-stone-950/90'}`} />
 
       {/* Content — vertically centered */}
-      <div className="relative flex min-h-[70vh] flex-col items-center justify-center px-4">
+      <div className="relative flex min-h-[100vh] flex-col items-center justify-center px-4">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -172,13 +165,13 @@ export function HeroSection() {
               style={{ fontFamily: 'Urbanist, sans-serif' }}
             >
               <Gift className="h-4 w-4" />
-              Gift Builder
+              Gift Concierge
             </Button>
           </motion.div>
         </motion.div>
 
         {/* Animated scroll-down indicator with bouncing ChevronDown */}
-        {/* <motion.button
+        <motion.button
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 1.5, duration: 0.6 }}
@@ -197,11 +190,11 @@ export function HeroSection() {
           >
             <ChevronDown className={`h-4 w-4 transition-colors ${appTheme === 'light' ? 'text-amber-600/35 group-hover:text-amber-600/60' : 'text-amber-400/35 group-hover:text-amber-400/60'}`} />
           </motion.div>
-        </motion.button> */}
+        </motion.button>
       </div>
 
       {/* Slide indicator dots with gold accent on active */}
-      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 flex items-center gap-2">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2">
         {HERO_IMAGES.map((_, i) => (
           <button
             key={i}
