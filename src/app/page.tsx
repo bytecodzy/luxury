@@ -167,6 +167,11 @@ function AppContent() {
     }
   }, [appTheme]);
 
+  // Scroll to top whenever the view changes (fixes footer-first bug when opening product details)
+  React.useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [view]);
+
   const renderView = () => {
     switch (view) {
       case 'home':

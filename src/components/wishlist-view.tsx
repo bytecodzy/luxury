@@ -39,7 +39,9 @@ export function WishlistView() {
       });
       if (res.ok) {
         const data = await res.json();
-        setItems(Array.isArray(data.items) ? data.items : []);
+        // API returns { wishlist: [...] } — also accept items[] for backwards compat
+        const list = Array.isArray(data.wishlist) ? data.wishlist : (Array.isArray(data.items) ? data.items : []);
+        setItems(list);
       }
     } catch (err) {
       console.error('Failed to fetch wishlist:', err);

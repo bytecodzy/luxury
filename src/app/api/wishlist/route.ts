@@ -33,13 +33,30 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/wishlist - Add item to wishlist
+// Accepts an optional product snapshot in the body so external / Shopify / static
+// products (which don't have a row in the local Product table) can still be wishlisted.
+// If the product isn't in the DB, we upsert it under an 'Uncategorized' fallback category.
 export async function POST(request: NextRequest) {
   try {
     const { user, error } = await authenticate(request)
     if (error) return error
 
     const body = await request.json()
-    const { productId } = body
+    const {
+      productId,
+      // Optional product snapshot (used when the product isn't in the local DB)
+      name,
+      slug,
+      description,
+      price,
+      image,
+      images,
+      category,
+      categorySlug,
+      platform,
+      sourceUrl,
+      affiliateUrl,
+    } = body
 
     if (!productId) {
       return NextResponse.json(
@@ -48,21 +65,107 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if product exists
-    const product = await db.product.findUnique({ where: { id: productId } })
+    // ── Resolve product: try by id, then by shopifyId, then upsert using snapshot ──
+    let product = await db.product.findUnique({ where: { id: productId } })
+
     if (!product) {
-      return NextResponse.json(
-        { error: 'Product not found' },
-        { status: 404 }
-      )
+      // Maybe productId is a Shopify GID stored in shopifyId field
+      try {
+        product = await db.product.findFirst({ where: { shopifyId: productId } })
+      } catch {
+        // shopifyId column may not exist on all schemas — ignore
+      }
     }
 
-    // Check if already in wishlist
+    if (!product) {
+      // Maybe productId is a slug
+      try {
+        product = await db.product.findFirst({ where: { slug: productId } })
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!product) {
+      // Product not in DB — upsert using the snapshot from the client
+      // (Required for Shopify / external / static products)
+      if (!name || typeof price !== 'number') {
+        return NextResponse.json(
+          { error: 'Product not found in DB and no snapshot provided' },
+          { status: 404 }
+        )
+      }
+
+      // Find or create an 'Uncategorized' fallback category
+      let fallbackCategoryId: string
+      try {
+        const existingCat = await db.category.findFirst({ where: { slug: categorySlug || 'uncategorized' } })
+        if (existingCat) {
+          fallbackCategoryId = existingCat.id
+        } else {
+          const newCat = await db.category.create({
+            data: {
+              name: category || 'Uncategorized',
+              slug: categorySlug || 'uncategorized',
+              description: 'Products imported from external platforms',
+            },
+          })
+          fallbackCategoryId = newCat.id
+        }
+      } catch (catErr) {
+        console.error('Wishlist upsert: failed to resolve fallback category:', catErr)
+        return NextResponse.json(
+          { error: 'Unable to resolve product category' },
+          { status: 500 }
+        )
+      }
+
+      // Build images array (JSON-stringified for Prisma)
+      const imageList = Array.isArray(images) && images.length > 0
+        ? images
+        : (image ? [image] : [])
+      const imagesJson = JSON.stringify(imageList)
+
+      const productSlug = slug || `${productId}-${Date.now()}`
+
+      try {
+        product = await db.product.create({
+          data: {
+            productNumber: `WISH-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name,
+            slug: productSlug,
+            description: description || '',
+            price,
+            images: imagesJson,
+            categoryId: fallbackCategoryId,
+            stock: 999, // External products always considered in-stock
+            featured: false,
+            tags: JSON.stringify([]),
+            platform: platform || null,
+            sourceUrl: sourceUrl || null,
+            isExternal: true,
+            affiliateUrl: affiliateUrl || null,
+          },
+          include: { category: { select: { id: true, name: true, slug: true } } },
+        })
+      } catch (createErr) {
+        console.error('Wishlist upsert: failed to create product:', createErr)
+        return NextResponse.json(
+          { error: 'Failed to create product record for wishlist' },
+          { status: 500 }
+        )
+      }
+    }
+
+    // Use the resolved product.id (may differ from the original productId for external products)
+    const resolvedProductId = product!.id
+
+    // Check if already in wishlist (by resolved id)
     const existing = await db.wishlistItem.findUnique({
       where: {
         userId_productId: {
           userId: user!.id,
-          productId,
+          productId: resolvedProductId,
         },
       },
     })
@@ -77,7 +180,7 @@ export async function POST(request: NextRequest) {
     const wishlistItem = await db.wishlistItem.create({
       data: {
         userId: user!.id,
-        productId,
+        productId: resolvedProductId,
       },
       include: {
         product: {

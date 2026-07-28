@@ -3,7 +3,7 @@
 import { useStore } from '@/lib/store';
 import { useCurrency } from '@/lib/currency';
 import { useTranslation } from '@/hooks/useTranslation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle, Truck, Heart, MessageSquare } from 'lucide-react';
@@ -20,8 +20,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send, AlertTriangle, Clock, Share2, X, ChevronRight, Diamond } from 'lucide-react';
+import { Loader2, RotateCcw, Download, ImageIcon, AlertCircle, Crown, ExternalLink as ExternalLinkIcon, Send, AlertTriangle, Clock, Share2, X, ChevronRight, ChevronLeft, Maximize2, Diamond } from 'lucide-react';
 import { useAffiliateClick } from '@/hooks/useAffiliateClick';
+import { showToast } from '@/hooks/use-toast-notification';
 import { AIInfluencerSection } from '@/components/ai-influencer-section';
 import { TryOnDialog } from '@/components/try-on-dialog';
 
@@ -95,6 +96,13 @@ const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
 // ── Product Detail Component ───────────────────────────────────
 export function ProductDetail() {
   const { selectedProductId, setView, addItem, setCategory, authUser, authToken } = useStore();
+  const queryClient = useQueryClient();
+
+  // Scroll to top when the selected product changes (fixes footer-first bug)
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [selectedProductId]);
+
   const { trackClick } = useAffiliateClick();
   const { format } = useCurrency();
   const { t } = useTranslation();
@@ -113,6 +121,8 @@ export function ProductDetail() {
   const [isZoomed, setIsZoomed] = useState(false);
   const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
   const [shareAnimating, setShareAnimating] = useState(false);
+  const [hasAddedToCart, setHasAddedToCart] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const influencerSectionRef = useRef<{ handleShareFromTryOn: (imageDataUrl: string) => void } | null>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
 
@@ -159,26 +169,58 @@ export function ProductDetail() {
   const reviews: Review[] = Array.isArray(reviewsData?.reviews) ? reviewsData.reviews : [];
 
   const handleToggleWishlist = async () => {
-    if (!authToken || !selectedProductId) return;
+    if (!authToken || !selectedProductId || !product) return;
     setWishlistLoading(true);
     try {
       if (isWishlisted) {
-        await fetch('/api/wishlist', {
+        // ── Remove from wishlist ──
+        const res = await fetch('/api/wishlist', {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
           body: JSON.stringify({ productId: selectedProductId }),
         });
-        setIsWishlisted(false);
+        if (res.ok) {
+          setIsWishlisted(false);
+          showToast('success', 'Removed from wishlist');
+          queryClient.invalidateQueries({ queryKey: ['wishlist-check'] });
+          queryClient.invalidateQueries({ queryKey: ['wishlist'] });
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast('error', err.error || 'Failed to remove from wishlist');
+        }
       } else {
-        await fetch('/api/wishlist', {
+        // ── Add to wishlist (pass full product data so the API can upsert external products) ──
+        const res = await fetch('/api/wishlist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
-          body: JSON.stringify({ productId: selectedProductId }),
+          body: JSON.stringify({
+            productId: selectedProductId,
+            // Product snapshot — used by the API when the product isn't in the local DB
+            name: product.name,
+            slug: product.slug || selectedProductId,
+            description: product.description || '',
+            price: product.price,
+            image: Array.isArray(product.images) ? product.images[0] : null,
+            images: Array.isArray(product.images) ? product.images : [],
+            category: product.category || 'Uncategorized',
+            categorySlug: product.categorySlug || 'uncategorized',
+            platform: product.platform || null,
+            sourceUrl: product.sourceUrl || null,
+            affiliateUrl: product.affiliateUrl || null,
+          }),
         });
-        setIsWishlisted(true);
+        if (res.ok) {
+          setIsWishlisted(true);
+          showToast('success', 'Added to wishlist ♥');
+          queryClient.invalidateQueries({ queryKey: ['wishlist-check'] });
+          queryClient.invalidateQueries({ queryKey: ['wishlist'] });
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast('error', err.error || 'Failed to add to wishlist');
+        }
       }
-    } catch {
-      // ignore
+    } catch (e) {
+      showToast('error', 'Network error — please try again');
     } finally {
       setWishlistLoading(false);
     }
@@ -221,7 +263,15 @@ export function ProductDetail() {
         image: getProxiedImageUrl(safeImages[0] || '/images/placeholder.jpg', product.platform),
       });
     }
+    setHasAddedToCart(true);
+    showToast('success', `${product.name} added to cart`);
     setTimeout(() => setIsAdding(false), 800);
+  };
+
+  // Buy Now: navigate directly to checkout (item already in cart from Add to Cart)
+  const handleBuyNow = () => {
+    if (!product) return;
+    setView('checkout');
   };
 
   const handleBackgroundJob = useCallback((step: 'generating' | 'result') => {
@@ -347,13 +397,49 @@ export function ProductDetail() {
         </Button>
       </motion.div>
 
-      <div className="grid gap-10 md:grid-cols-2">
-        {/* Image Gallery */}
-        <div className="space-y-4">
-          {/* Main image with zoom on hover */}
+      <div className="grid gap-6 md:gap-10 md:grid-cols-2">
+        {/* Image Gallery — thumbnails on LEFT, main image on RIGHT (mobile responsive) */}
+        <div className="flex gap-2 sm:gap-3 md:gap-4 items-start">
+          {/* Thumbnails — vertical column on the LEFT (always visible, even with 1 image) */}
+          <div className="flex flex-col gap-2 sm:gap-3 flex-shrink-0 py-1">
+            {safeImages.map((img, i) => (
+              <button
+                key={i}
+                onClick={() => setSelectedImage(i)}
+                className={`relative h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16 flex-shrink-0 overflow-hidden rounded-xl transition-all duration-300 ${
+                  i === selectedImage
+                    ? 'ring-2 ring-amber-400 scale-105 opacity-100'
+                    : 'opacity-60 hover:opacity-100 hover:scale-105'
+                }`}
+                style={{
+                  border: i === selectedImage ? `2px solid var(--luxury-accent, #d4a437)` : '1px solid rgba(212, 164, 55, 0.2)',
+                  boxShadow: i === selectedImage ? '0 0 12px rgba(212, 164, 55, 0.35)' : 'none',
+                }}
+                aria-label={`View image ${i + 1}`}
+              >
+                {!imageErrors.has(i) ? (
+                  <img
+                    src={getProxiedImageUrl(img, product.platform)}
+                    alt={`${product.name} ${i + 1}`}
+                    className="absolute inset-0 h-full w-full object-cover"
+                    onError={() => {
+                      setImageErrors((prev) => new Set(prev).add(i));
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-stone-800">
+                    <span className="text-lg text-amber-600/40">&#x1F48E;</span>
+                  </div>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Main image with zoom on hover — tap to open full-size lightbox */}
           <div
             ref={imageContainerRef}
-            className="relative aspect-square overflow-hidden rounded-2xl luxury-glass"
+            className="relative flex-1 min-w-0 aspect-[4/5] sm:aspect-square md:aspect-[4/5] lg:aspect-square overflow-hidden rounded-2xl luxury-glass max-h-[70vh] md:max-h-[75vh] cursor-zoom-in"
+            onClick={() => setLightboxOpen(true)}
             onMouseEnter={() => setIsZoomed(true)}
             onMouseLeave={() => setIsZoomed(false)}
             onMouseMove={handleImageMouseMove}
@@ -404,55 +490,13 @@ export function ProductDetail() {
               </div>
             )}
 
-            {/* Zoom indicator */}
-            <AnimatePresence>
-              {isZoomed && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="absolute bottom-4 left-4 rounded-full bg-stone-950/70 px-3 py-1.5 text-[10px] font-medium text-amber-200/40 backdrop-blur-md border border-white/5 flex items-center gap-1"
-                >
-                  <Info className="h-3 w-3" />
-                  Move to zoom
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {/* Tap to enlarge hint — always visible (so mobile users know the image is tappable) */}
+            <div className="absolute bottom-4 left-4 rounded-full bg-stone-950/70 px-3 py-1.5 text-[10px] font-medium text-amber-200/60 backdrop-blur-md border border-white/5 flex items-center gap-1 pointer-events-none">
+              <Maximize2 className="h-3 w-3" />
+              {isZoomed ? 'Move to zoom • Click to enlarge' : 'Tap to enlarge'}
+            </div>
           </div>
 
-          {/* Thumbnails — elegant style */}
-          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin">
-            {safeImages.map((img, i) => (
-              <button
-                key={i}
-                onClick={() => setSelectedImage(i)}
-                className={`relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-xl transition-all duration-300 ${
-                  i === selectedImage
-                    ? 'ring-2 scale-105'
-                    : 'opacity-50 hover:opacity-90 hover:scale-102'
-                }`}
-                style={{
-                  border: i === selectedImage ? `2px solid var(--luxury-accent, #d4a437)` : '1px solid rgba(212, 164, 55, 0.1)',
-                  ringColor: i === selectedImage ? accentColor : undefined,
-                }}
-              >
-                {!imageErrors.has(i) ? (
-                  <img
-                    src={getProxiedImageUrl(img, product.platform)}
-                    alt={`${product.name} ${i + 1}`}
-                    className="absolute inset-0 h-full w-full object-cover"
-                    onError={() => {
-                      setImageErrors((prev) => new Set(prev).add(i));
-                    }}
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-stone-800">
-                    <span className="text-lg text-amber-600/40">&#x1F48E;</span>
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Product Info */}
@@ -588,41 +632,45 @@ export function ProductDetail() {
             </span>
           </div>
 
-          {/* AI Try-On Button — Prominent & Elegant */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-          >
-            <button
-              onClick={() => setTryOnOpen(true)}
-              className="group relative flex w-full items-center gap-4 rounded-2xl p-5 transition-all duration-300 overflow-hidden luxury-sweep"
-              style={{
-                background: 'linear-gradient(135deg, rgba(212, 164, 55, 0.12) 0%, rgba(180, 83, 9, 0.08) 50%, rgba(212, 164, 55, 0.12) 100%)',
-                border: '1px solid rgba(212, 164, 55, 0.2)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(212, 164, 55, 0.4)';
-                e.currentTarget.style.boxShadow = '0 0 30px rgba(212, 164, 55, 0.1), 0 8px 24px rgba(0,0,0,0.2)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = 'rgba(212, 164, 55, 0.2)';
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <div
-                className="rounded-xl p-3 transition-all duration-300 group-hover:scale-110"
-                style={{ background: 'rgba(212, 164, 55, 0.15)' }}
-              >
-                <Crown className="h-6 w-6" style={{ color: accentColor }} />
-              </div>
-              <div className="flex-1 text-left">
-                <p className="text-sm font-bold text-amber-100">Virtual Style Preview</p>
-                <p className="text-xs text-amber-200/35 mt-0.5">See how it looks on you with 3 BOXES AI</p>
-              </div>
-              <Sparkles className="h-5 w-5 text-amber-400/40 transition-all duration-300 group-hover:text-amber-400 group-hover:scale-110" />
-            </button>
-          </motion.div>
+          {/* [HIDDEN per request] Virtual Style Preview — feature commented out
+              Original block preserved below for easy re-enable:
+              (inner JSX comment markers stripped to avoid nesting)
+                [was JSX comment]: AI Try-On Button — Prominent & Elegant
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.2 }}
+                        >
+                          <button
+                            onClick={() => setTryOnOpen(true)}
+                            className="group relative flex w-full items-center gap-4 rounded-2xl p-5 transition-all duration-300 overflow-hidden luxury-sweep"
+                            style={{
+                              background: 'linear-gradient(135deg, rgba(212, 164, 55, 0.12) 0%, rgba(180, 83, 9, 0.08) 50%, rgba(212, 164, 55, 0.12) 100%)',
+                              border: '1px solid rgba(212, 164, 55, 0.2)',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = 'rgba(212, 164, 55, 0.4)';
+                              e.currentTarget.style.boxShadow = '0 0 30px rgba(212, 164, 55, 0.1), 0 8px 24px rgba(0,0,0,0.2)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = 'rgba(212, 164, 55, 0.2)';
+                              e.currentTarget.style.boxShadow = 'none';
+                            }}
+                          >
+                            <div
+                              className="rounded-xl p-3 transition-all duration-300 group-hover:scale-110"
+                              style={{ background: 'rgba(212, 164, 55, 0.15)' }}
+                            >
+                              <Crown className="h-6 w-6" style={{ color: accentColor }} />
+                            </div>
+                            <div className="flex-1 text-left">
+                              <p className="text-sm font-bold text-amber-100">Virtual Style Preview</p>
+                              <p className="text-xs text-amber-200/35 mt-0.5">See how it looks on you with 3 BOXES AI</p>
+                            </div>
+                            <Sparkles className="h-5 w-5 text-amber-400/40 transition-all duration-300 group-hover:text-amber-400 group-hover:scale-110" />
+                          </button>
+                        </motion.div>
+          */}
 
           {/* External Product Notice */}
           {product.isExternal && product.platform && (
@@ -749,14 +797,43 @@ export function ProductDetail() {
                 </motion.button>
               </div>
 
-              {/* Share button */}
+              {/* Buy Now button — visible only after the product has been added to cart */}
+              {hasAddedToCart && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  transition={{ duration: 0.3, ease: 'easeOut' }}
+                  className="overflow-hidden"
+                >
+                  <Button
+                    onClick={handleBuyNow}
+                    disabled={product.stock === 0}
+                    className="w-full h-12 transition-all duration-300 rounded-xl font-bold luxury-sweep text-white hover:shadow-lg"
+                    style={{
+                      background: 'linear-gradient(135deg, #b8860b 0%, #8b6508 100%)',
+                      boxShadow: '0 4px 16px rgba(184, 134, 11, 0.3)',
+                    }}
+                  >
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Buy Now — {format(product.price * quantity)}
+                  </Button>
+                </motion.div>
+              )}
+
+              {/* Share button — highlighted for better visibility */}
               <motion.button
                 whileTap={{ scale: 0.97 }}
+                whileHover={{ scale: 1.01 }}
                 onClick={handleShare}
-                className="flex items-center gap-2 text-xs text-amber-200/30 hover:text-amber-200/60 transition-colors duration-200 py-2"
+                className="flex items-center justify-center gap-2 text-sm font-semibold text-amber-100 hover:text-white transition-all duration-200 py-3 px-4 rounded-xl w-full luxury-sweep"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(212, 164, 55, 0.18) 0%, rgba(180, 83, 9, 0.12) 50%, rgba(212, 164, 55, 0.18) 100%)',
+                  border: '1px solid rgba(212, 164, 55, 0.35)',
+                  boxShadow: '0 4px 14px rgba(212, 164, 55, 0.12)',
+                }}
               >
                 <motion.div animate={shareAnimating ? { scale: [1, 1.2, 1], rotate: [0, 15, 0] } : {}} transition={{ duration: 0.3 }}>
-                  <Share2 className="h-3.5 w-3.5" />
+                  <Share2 className="h-4 w-4" />
                 </motion.div>
                 Share this product
               </motion.button>
@@ -874,7 +951,9 @@ export function ProductDetail() {
         )}
       </div>
 
-      {/* AI Style Gallery (Influencer Section) */}
+      {/* [HIDDEN per request] AI Style Gallery (Influencer Section) — feature commented out
+          Original block preserved below for easy re-enable:
+          [was JSX comment]: AI Style Gallery (Influencer Section)
       {product && (
         <div id="ai-influencer-section">
           <AIInfluencerSection
@@ -885,6 +964,7 @@ export function ProductDetail() {
           />
         </div>
       )}
+      */}
 
       {/* Review Dialog */}
       <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
@@ -1011,6 +1091,66 @@ export function ProductDetail() {
           )}
         </motion.div>
       )}
+
+      {/* Image Lightbox — full-size image viewer with prev/next navigation */}
+      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+        <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 border-amber-900/30 bg-stone-950/98 rounded-2xl overflow-hidden flex items-center justify-center" style={{ width: '95vw', height: '95vh' }}>
+          <DialogTitle className="sr-only">{product.name} — Image {selectedImage + 1} of {safeImages.length}</DialogTitle>
+          <DialogDescription className="sr-only">Full size product image view. Use arrow buttons to navigate between images.</DialogDescription>
+          <div className="relative flex items-center justify-center w-full h-full p-4">
+            {/* Previous image button */}
+            {safeImages.length > 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedImage((prev) => (prev - 1 + safeImages.length) % safeImages.length);
+                }}
+                className="absolute left-3 top-1/2 -translate-y-1/2 z-20 flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/80 backdrop-blur-sm text-amber-200 hover:bg-stone-800 hover:text-amber-100 transition-all duration-200 border border-amber-900/30"
+                aria-label="Previous image"
+              >
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+            )}
+
+            {/* Full-size image */}
+            {!imageErrors.has(selectedImage) ? (
+              <img
+                src={getProxiedImageUrl(safeImages[selectedImage] || '/images/hero.png', product.platform)}
+                alt={product.name}
+                className="max-w-full max-h-full object-contain rounded-lg"
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <span className="text-6xl text-amber-600/40">&#x1F48E;</span>
+              </div>
+            )}
+
+            {/* Next image button */}
+            {safeImages.length > 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedImage((prev) => (prev + 1) % safeImages.length);
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex h-11 w-11 items-center justify-center rounded-full bg-stone-900/80 backdrop-blur-sm text-amber-200 hover:bg-stone-800 hover:text-amber-100 transition-all duration-200 border border-amber-900/30"
+                aria-label="Next image"
+              >
+                <ChevronRight className="h-5 w-5" />
+              </button>
+            )}
+
+            {/* Image counter + close hint */}
+            {safeImages.length > 1 && (
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 rounded-full bg-stone-950/85 px-4 py-2 text-xs font-medium text-amber-200/80 backdrop-blur-md border border-amber-900/30 flex items-center gap-2">
+                <span>{selectedImage + 1} / {safeImages.length}</span>
+                <span className="text-amber-200/30">•</span>
+                <span className="text-amber-200/50">Click outside or press ESC to close</span>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }
