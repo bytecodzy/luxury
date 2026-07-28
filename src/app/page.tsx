@@ -102,7 +102,7 @@ function HomeSections() {
     <>
       <ErrorBoundary fallback={null}><HeroSection /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CollectionsSection /></ErrorBoundary>
-      <div className="py-12 sm:py-16">
+      <div className="py-6 sm:py-8">
         <div id="products-section">
           <ErrorBoundary fallback={null}><FeaturedProductsSection /></ErrorBoundary>
         </div>

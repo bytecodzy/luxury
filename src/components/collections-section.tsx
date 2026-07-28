@@ -60,7 +60,7 @@ export function CollectionsSection() {
         </motion.div>
 
         {/* Circular Category Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-8 sm:gap-10 lg:gap-12 max-w-4xl mx-auto">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-6 sm:gap-8 lg:gap-10 max-w-6xl mx-auto">
           {CATEGORIES.map((cat, i) => (
             <motion.div
               key={cat.id}
@@ -100,8 +100,8 @@ export function CollectionsSection() {
 
                 {/* Inner circle — image */}
                 <div
-                  className={`relative h-20 w-20 sm:h-24 sm:w-24 lg:h-28 lg:w-28 rounded-full overflow-hidden ${isLight ? 'ring-3 ring-stone-200/80' : 'ring-3 ring-stone-800/80'} z-10`}
-                >
+  className={`relative h-24 w-24 sm:h-36 sm:w-36 lg:h-48 lg:w-48 rounded-full overflow-hidden ${isLight ? 'ring-3 ring-stone-200/80' : 'ring-3 ring-stone-800/80'} z-10`}
+>
                   <img
                     src={cat.image}
                     alt={cat.label}
@@ -115,7 +115,7 @@ export function CollectionsSection() {
 
               {/* Category name below */}
               <span
-                className={`mt-3 text-xs sm:text-sm font-medium uppercase tracking-wider transition-colors duration-200 ${
+                className={`mt-4 text-xs sm:text-sm lg:text-base font-medium uppercase tracking-wider transition-colors duration-200 ${
                   isLight ? 'text-stone-600 group-hover:text-amber-700' : 'text-amber-200/60 group-hover:luxury-accent-text'
                 }`}
                 style={{ fontFamily: "'Urbanist', sans-serif" }}

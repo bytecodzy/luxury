@@ -108,7 +108,7 @@ export function FeaturedProductsSection() {
   const textSecondary = isLight ? 'text-stone-500' : 'text-amber-100/60';
 
   return (
-    <section className="py-12 sm:py-16 lg:py-20">
+    <section className="py-12 sm:py-8 lg:py-10">
       {/* Section Header — "Curated Collections" with gold accent diamond divider */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -201,7 +201,7 @@ export function FeaturedProductsSection() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.4 }}
-          className="grid gap-4 sm:gap-5 lg:gap-6 sm:grid-cols-2 lg:grid-cols-3"
+          className="grid gap-3 sm:gap-4 lg:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
         >
           {products.map((product, i) => (
             <motion.div
@@ -213,7 +213,7 @@ export function FeaturedProductsSection() {
               onClick={() => selectProduct(product.id)}
             >
               {/* Product image — aspect-[3/4] with hover overlay */}
-              <div className="aspect-[3/4] relative overflow-hidden bg-stone-800/30">
+              <div className="aspect-[4/5] relative overflow-hidden bg-stone-800/30">
                 <img
                   src={getProxiedImageUrl(product.images?.[0] || '/images/placeholder.jpg', product.platform)}
                   alt={product.name}
