@@ -52,7 +52,7 @@ export function AboutPage() {
       </PolicySection>
 
       {/* Our Divisions */}
-      <PolicySection icon={Globe} title="Our Divisions" badge="4 Verticles" index={1}>
+      <PolicySection icon={Globe} title="Our Divisions" badge="Group Companies" index={1}>
         <p className="text-amber-200/60">
           We operate across four strategic divisions, each designed to serve a distinct need while 
           maintaining the luxury experience that defines our brand.
@@ -200,15 +200,11 @@ export function AboutPage() {
           We'd love to hear from you. Reach out to us through any of the channels below.
         </p>
         <div className="rounded-lg border border-amber-900/15 bg-stone-800/30 p-4 space-y-2">
-          <PolicyBullet icon={Phone}>
-            <strong className="text-amber-200/80">Phone:</strong> +91 9611533511
-          </PolicyBullet>
           <PolicyBullet icon={Mail}>
             <strong className="text-amber-200/80">Email:</strong> info@3boxes.in
           </PolicyBullet>
           <PolicyBullet icon={MapPin}>
-            <strong className="text-amber-200/80">Address:</strong> 338/14, Sri Nilyam, 3rd A Main, 4th A Cross, 
-            A Sector, Yelahanka New Town, Bengaluru - 560064
+            <strong className="text-amber-200/80">Address:</strong> Bengaluru, Karnataka, India
           </PolicyBullet>
         </div>
       </PolicySection>
@@ -218,8 +214,8 @@ export function AboutPage() {
         <div className="flex items-start gap-2">
           <Sparkles className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-400" />
           <span>
-            <strong className="text-emerald-300">Elegant Gifting • Strategic Staffing • Business Technology • AI Job Search</strong> — 
-            3 Boxes Luxury Curations is where luxury meets purpose.
+            <strong className="text-emerald-300">Elegant Gifting • Strategic Staffing • Business Technology • AI Job Search 
+            3 Boxes Luxury Curations is where luxury meets purpose.</strong>
           </span>
         </div>
       </PolicyCallout>

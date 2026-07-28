@@ -113,17 +113,28 @@ export function Footer() {
               {[
                 { label: t('footer.aboutUs'), view: 'about' },
                 { label: t('footer.ourDivisions'), view: 'divisions' },
-                { label: t('footer.careers'), view: 'careers' },
+                { label: t('footer.careers'), url: 'https://3boxesjobs.com/' },
                 { label: t('footer.press'), view: 'press' },
                 { label: t('footer.sustainability'), view: 'sustainability' },
               ].map((item, i) => (
                 <li key={i}>
-                  <span
-                    className="text-sm text-amber-200/50 transition-colors hover:text-amber-400 cursor-pointer"
-                    onClick={() => setView(item.view)}
-                  >
-                    {item.label}
-                  </span>
+                  {item.url ? (
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-amber-200/50 transition-colors hover:text-amber-400"
+                    >
+                      {item.label}
+                    </a>
+                  ) : (
+                    <span
+                      className="text-sm text-amber-200/50 transition-colors hover:text-amber-400 cursor-pointer"
+                      onClick={() => setView(item.view)}
+                    >
+                      {item.label}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -143,7 +154,7 @@ export function Footer() {
                   {t('footer.contactUs')}
                 </span>
                 <p className="mt-0.5 text-xs text-amber-200/30">
-                  info@3boxes.in · +91 9611533511
+                  info@3boxes.in
                 </p>
               </li>
               {[
@@ -216,14 +227,14 @@ export function Footer() {
                 <Download className="h-4 w-4" />
                 Flutter Web App
               </button>
-              <div className="flex items-center gap-1.5">
+              {/* <div className="flex items-center gap-1.5">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-stone-800/50">
                   <span className="text-lg">📱</span>
                 </div>
-                <div className="text-[10px] text-amber-200/30">
+                 <div className="text-[10px] text-amber-200/30">
                   Progressive Web App<br />Works offline &amp; fullscreen
                 </div>
-              </div>
+              </div> */}
             </div>
           </div>
         </div>
@@ -235,7 +246,7 @@ export function Footer() {
               &copy; 2024 3 Boxes Luxury Curations. {t('footer.rights')} {t('footer.crafted')}
             </p>
             <p className="text-xs text-amber-200/30">
-              Bengaluru, India | info@3boxes.in | +91 9611533511
+              Bengaluru, India | info@3boxes.in
             </p>
           </div>
         </div>

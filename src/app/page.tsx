@@ -31,6 +31,8 @@ import { AppDownloadBanner } from '@/components/app-download-banner';
 import { FamilyPackSection } from '@/components/family-pack-section';
 import { SocialConnectionsSection } from '@/components/social-connections-section';
 import { ThreeboxesCurateSection } from '@/components/threeboxes-curate-section';
+import { AboutPage } from '@/components/about-page';
+import { ContactPage } from '@/components/contact-page';
 import { ToastContainer } from '@/hooks/use-toast-notification';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
@@ -102,7 +104,7 @@ function HomeSections() {
     <>
       <ErrorBoundary fallback={null}><HeroSection /></ErrorBoundary>
       <ErrorBoundary fallback={null}><CollectionsSection /></ErrorBoundary>
-      <div className="py-6 sm:py-8">
+      <div className="py-12 sm:py-16">
         <div id="products-section">
           <ErrorBoundary fallback={null}><FeaturedProductsSection /></ErrorBoundary>
         </div>
@@ -167,11 +169,6 @@ function AppContent() {
     }
   }, [appTheme]);
 
-  // Scroll to top whenever the view changes (fixes footer-first bug when opening product details)
-  React.useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [view]);
-
   const renderView = () => {
     switch (view) {
       case 'home':
@@ -200,6 +197,10 @@ function AppContent() {
         return <CorporateDashboard />;
       case 'security-policy':
         return <SecurityPolicy />;
+      case 'about':
+        return <AboutPage />;
+      case 'contact':
+        return <ContactPage />;
       case 'family-packs':
         return (
           <StandalonePageWrapper title="Family Gift Packs" subtitle="Pre-curated luxury gift bundles for every member of your family. Save up to 30%.">
