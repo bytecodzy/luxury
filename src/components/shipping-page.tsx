@@ -41,8 +41,8 @@ export function ShippingPage() {
           We deliver across India and to select international destinations. Delivery timelines are 
           estimated from the date of dispatch, not the date of order placement.
         </p>
-        <div className="rounded-lg border border-amber-900/15 bg-stone-800/30 overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-lg border border-amber-900/15 bg-stone-800/30">
+          <table className="w-full min-w-[520px] text-sm">
             <thead>
               <tr className="border-b border-amber-900/15 bg-stone-900/80">
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-amber-400/80">Zone</th>
@@ -85,8 +85,8 @@ export function ShippingPage() {
         <p className="text-amber-200/60">
           We offer competitive shipping rates and free delivery on qualifying orders.
         </p>
-        <div className="rounded-lg border border-amber-900/15 bg-stone-800/30 overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-lg border border-amber-900/15 bg-stone-800/30">
+          <table className="w-full min-w-[480px] text-sm">
             <thead>
               <tr className="border-b border-amber-900/15 bg-stone-900/80">
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-amber-400/80">Order Value</th>

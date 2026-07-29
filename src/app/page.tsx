@@ -19,6 +19,15 @@ import { AgentDashboard } from '@/components/agent-dashboard';
 import { TeamDashboard } from '@/components/team-dashboard';
 import { CorporateDashboard } from '@/components/corporate-dashboard';
 import { SecurityPolicy } from '@/components/security-policy';
+import { ShippingPage } from '@/components/shipping-page';
+import { FAQPage } from '@/components/faq-page';
+import { SizeGuidePage } from '@/components/size-guide-page';
+import { PressPage } from '@/components/press-page';
+import { OrderTracking } from '@/components/order-tracking';
+import { PrivacyPolicy } from '@/components/privacy-policy';
+import { TermsOfService } from '@/components/terms-of-service';
+import { CookiePolicy } from '@/components/cookie-policy';
+import { RefundPolicy } from '@/components/refund-policy';
 import { GiftAssistant } from '@/components/gift-assistant';
 import { GiftBuilder } from '@/components/gift-builder';
 import { CollectionsSection } from '@/components/collections-section';
@@ -169,6 +178,13 @@ function AppContent() {
     }
   }, [appTheme]);
 
+  React.useEffect(() => {
+  if (typeof window === 'undefined') return;
+  window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+}, [view]);
+
   const renderView = () => {
     switch (view) {
       case 'home':
@@ -197,6 +213,24 @@ function AppContent() {
         return <CorporateDashboard />;
       case 'security-policy':
         return <SecurityPolicy />;
+      case 'shipping':
+        return <ShippingPage />;
+      case 'faq':
+        return <FAQPage />;
+      case 'size-guide':
+        return <SizeGuidePage />;
+      case 'press':
+        return <PressPage />;
+      case 'track-order':
+        return <OrderTracking />;
+      case 'privacy-policy':
+        return <PrivacyPolicy />;
+      case 'terms-of-service':
+        return <TermsOfService />;
+      case 'cookie-policy':
+        return <CookiePolicy />;
+      case 'refund-policy':
+        return <RefundPolicy />;
       case 'about':
         return <AboutPage />;
       case 'contact':

@@ -112,10 +112,8 @@ export function Footer() {
             <ul className="mt-3 space-y-2">
               {[
                 { label: t('footer.aboutUs'), view: 'about' },
-                { label: t('footer.ourDivisions'), view: 'divisions' },
                 { label: t('footer.careers'), url: 'https://3boxesjobs.com/' },
                 { label: t('footer.press'), view: 'press' },
-                { label: t('footer.sustainability'), view: 'sustainability' },
               ].map((item, i) => (
                 <li key={i}>
                   {item.url ? (
