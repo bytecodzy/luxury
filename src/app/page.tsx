@@ -42,6 +42,7 @@ import { SocialConnectionsSection } from '@/components/social-connections-sectio
 import { ThreeboxesCurateSection } from '@/components/threeboxes-curate-section';
 import { AboutPage } from '@/components/about-page';
 import { ContactPage } from '@/components/contact-page';
+import { CategoryShopPage } from '@/components/category-shop-page';
 import { ToastContainer } from '@/hooks/use-toast-notification';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
@@ -231,6 +232,8 @@ function AppContent() {
         return <CookiePolicy />;
       case 'refund-policy':
         return <RefundPolicy />;
+      case 'shop':
+        return <CategoryShopPage />;
       case 'about':
         return <AboutPage />;
       case 'contact':

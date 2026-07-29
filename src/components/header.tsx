@@ -378,6 +378,7 @@ useEffect(() => {
       }, 100);
     } else {
       setCategory(cat.slug);
+      setView('shop');
     }
   };
 
@@ -1005,7 +1006,7 @@ useEffect(() => {
                         >
                           {/* Parent "All" link */}
                           <button
-                            onClick={() => { setCategory(cat.slug); setHoveredCategory(null); }}
+                            onClick={() => { setCategory(cat.slug); setView('shop'); setHoveredCategory(null); }}
                             className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm font-medium transition-colors ${isDark
                               ? 'text-amber-300/90 hover:bg-amber-900/20 hover:text-amber-200'
                               : 'text-amber-700 hover:bg-amber-50 hover:text-amber-800'
@@ -1018,7 +1019,7 @@ useEffect(() => {
                           {cat.children.map((child) => (
                             <button
                               key={child.slug}
-                              onClick={() => { setCategory(child.slug); setHoveredCategory(null); }}
+                              onClick={() => { setCategory(child.slug); setView('shop'); setHoveredCategory(null); }}
                               className={`flex w-full items-center gap-2.5 px-4 py-2 text-sm transition-colors ${
                                 selectedCategory === child.slug
                                   ? (isDark ? 'text-amber-300 bg-amber-900/20' : 'text-amber-700 bg-amber-50')
