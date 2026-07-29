@@ -377,9 +377,9 @@ useEffect(() => {
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 100);
     } else {
-      setCategory(cat.slug);
-      setView('shop');
-    }
+  setCategory(cat.slug);
+  setView('shop');              // ← now navigates to the shop page
+}
   };
 
   /* ═══════════════════════════════════════════════════════════════════
