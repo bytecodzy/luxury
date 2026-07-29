@@ -6,7 +6,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle, Truck, Heart, MessageSquare } from 'lucide-react';
+import { Star, ShoppingCart, ArrowLeft, Minus, Plus, Package, Sparkles, ExternalLink, Globe, Info, CheckCircle, Truck, Heart, MessageSquare, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { getProxiedImageUrl } from '@/lib/image-utils';
@@ -25,6 +25,7 @@ import { useAffiliateClick } from '@/hooks/useAffiliateClick';
 import { showToast } from '@/hooks/use-toast-notification';
 import { AIInfluencerSection } from '@/components/ai-influencer-section';
 import { TryOnDialog } from '@/components/try-on-dialog';
+import { QuickViewDialog } from '@/components/quick-view-dialog';
 
 interface ProductDetail {
   id: string;
@@ -95,7 +96,8 @@ const PLATFORM_DISPLAY_NAMES: Record<string, string> = {
 
 // ── Product Detail Component ───────────────────────────────────
 export function ProductDetail() {
-  const { selectedProductId, setView, addItem, setCategory, authUser, authToken } = useStore();
+  const { selectedProductId, setView, addItem, setCategory, authUser, authToken, selectProduct } = useStore();
+  const appTheme = useStore((s) => s.appTheme);
   const queryClient = useQueryClient();
 
   // Scroll to top when the selected product changes (fixes footer-first bug)
@@ -123,6 +125,9 @@ export function ProductDetail() {
   const [shareAnimating, setShareAnimating] = useState(false);
   const [hasAddedToCart, setHasAddedToCart] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [quickViewProduct, setQuickViewProduct] = useState<any>(null);
+  const [quickViewOpen, setQuickViewOpen] = useState(false);
+  const [similarAdding, setSimilarAdding] = useState<string | null>(null);
   const influencerSectionRef = useRef<{ handleShareFromTryOn: (imageDataUrl: string) => void } | null>(null);
   const imageContainerRef = useRef<HTMLDivElement>(null);
 
@@ -167,6 +172,24 @@ export function ProductDetail() {
   });
 
   const reviews: Review[] = Array.isArray(reviewsData?.reviews) ? reviewsData.reviews : [];
+
+  // ── Similar Products query ────────────────────────────────────
+  // Fetches products in the same category as the current product,
+  // then filters out the current product and caps at 8 for the grid.
+  const { data: similarData, isLoading: similarLoading } = useQuery({
+    queryKey: ['similar-products', product?.categorySlug, selectedProductId],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set('category', product!.categorySlug);
+      params.set('limit', '13');
+      return fetch(`/api/products?${params}`).then((r) => r.json());
+    },
+    enabled: !!product?.categorySlug,
+  });
+
+  const similarProducts: any[] = (Array.isArray(similarData?.products) ? similarData.products : [])
+    .filter((p: any) => p.id !== selectedProductId)
+    .slice(0, 12);
 
   const handleToggleWishlist = async () => {
     if (!authToken || !selectedProductId || !product) return;
@@ -266,6 +289,26 @@ export function ProductDetail() {
     setHasAddedToCart(true);
     showToast('success', `${product.name} added to cart`);
     setTimeout(() => setIsAdding(false), 800);
+  };
+
+  // ── Similar Products handlers ──────────────────────────────────
+  const handleSimilarAddToCart = (e: React.MouseEvent, p: any) => {
+    e.stopPropagation();
+    setSimilarAdding(p.id);
+    addItem({
+      productId: p.id,
+      name: p.name,
+      price: p.price,
+      image: getProxiedImageUrl(p.images?.[0] || '/images/placeholder.jpg', p.platform),
+    });
+    showToast('success', `${p.name} added to cart`);
+    setTimeout(() => setSimilarAdding(null), 800);
+  };
+
+  const handleSimilarQuickView = (e: React.MouseEvent, p: any) => {
+    e.stopPropagation();
+    setQuickViewProduct(p);
+    setQuickViewOpen(true);
   };
 
   // Buy Now: navigate directly to checkout (item already in cart from Add to Cart)
@@ -849,6 +892,170 @@ export function ProductDetail() {
         <div className="flex-1 h-px bg-gradient-to-r from-transparent via-amber-500/15 to-transparent" />
       </div>
 
+      {/* ── Similar Products Section ───────────────────────────────
+          Displays products in the same category as the current product.
+          Theme-aware (light/dark), responsive grid (2 / 3 / 4 cols),
+          matches the home page "Curated Collections" card aesthetic. */}
+      <div className="mt-2 mb-10">
+        {/* Section header — Lora serif + gold accent diamond divider */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.7 }}
+          className="mb-6 sm:mb-8 text-center"
+        >
+          <h3
+            className={`text-xl sm:text-2xl lg:text-3xl font-medium ${appTheme === 'light' ? 'text-stone-900' : 'text-amber-50'}`}
+            style={{ fontFamily: "'Lora', serif" }}
+          >
+            Similar Products
+          </h3>
+          <div className="mt-3 flex items-center justify-center gap-2">
+            <span className="luxury-accent-bg h-px w-8 opacity-60" />
+            <span className="luxury-accent-bg h-1.5 w-1.5 rotate-45 rounded-sm opacity-70" />
+            <span className="luxury-accent-bg h-px w-8 opacity-60" />
+          </div>
+        </motion.div>
+
+        {/* Loading skeletons */}
+        {similarLoading ? (
+          <div className="grid gap-2 sm:gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div
+                key={i}
+                className={`rounded-xl animate-pulse ${appTheme === 'light' ? 'bg-white/80 border border-stone-200/60' : 'bg-stone-900/50 border border-amber-500/8'}`}
+              >
+                <div className="aspect-square rounded-t-xl bg-stone-800/40" />
+                <div className="p-2 sm:p-2.5 space-y-1.5">
+                  <div className={`h-2.5 w-12 rounded ${appTheme === 'light' ? 'bg-stone-200/60' : 'bg-stone-800/40'}`} />
+                  <div className={`h-3 w-3/4 rounded ${appTheme === 'light' ? 'bg-stone-200/60' : 'bg-stone-800/40'}`} />
+                  <div className={`h-3 w-16 rounded ${appTheme === 'light' ? 'bg-stone-200/60' : 'bg-stone-800/40'}`} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : similarProducts.length === 0 ? (
+          /* Empty state */
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className={`flex flex-col items-center justify-center rounded-xl border border-dashed ${appTheme === 'light' ? 'border-stone-300/40 bg-stone-100/20' : 'border-amber-500/10 bg-stone-900/20'} py-12 px-6`}
+          >
+            <p
+              className={`text-sm font-medium mb-1 ${appTheme === 'light' ? 'text-stone-500' : 'text-amber-100/60'}`}
+              style={{ fontFamily: "'Urbanist', sans-serif" }}
+            >
+              No similar products found
+            </p>
+            <p
+              className={`text-xs text-center ${appTheme === 'light' ? 'text-stone-400' : 'text-amber-100/25'}`}
+              style={{ fontFamily: "'Urbanist', sans-serif" }}
+            >
+              We couldn't find related items in this category right now.
+            </p>
+          </motion.div>
+        ) : (
+          /* Responsive product grid — 2 cols mobile, 3 cols tablet, 4 cols desktop */
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.4 }}
+            className="grid gap-2 sm:gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6"
+          >
+            {similarProducts.map((p, i) => {
+              const isLight = appTheme === 'light';
+              const cardBg = isLight ? 'bg-white/80' : 'bg-stone-900/50';
+              const cardBorder = isLight ? 'border-stone-200/60' : 'border-amber-500/8';
+              const cardHoverBorder = isLight ? 'hover:border-amber-400/40' : 'hover:border-amber-500/20';
+              const textPrimary = isLight ? 'text-stone-800' : 'text-amber-50';
+              return (
+                <motion.div
+                  key={p.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05, duration: 0.35 }}
+                  className={`group cursor-pointer rounded-xl ${cardBg} border ${cardBorder} ${cardHoverBorder} transition-all duration-300 overflow-hidden relative`}
+                  onClick={() => selectProduct(p.id)}
+                >
+                  {/* Product image — aspect-square (compact) with hover overlay */}
+                  <div className="aspect-square relative overflow-hidden bg-stone-800/30">
+                    <img
+                      src={getProxiedImageUrl(p.images?.[0] || '/images/placeholder.jpg', p.platform)}
+                      alt={p.name}
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                      loading="lazy"
+                    />
+                    {/* Hover overlay with Quick View + Add to Cart (compact buttons) */}
+                    <div className={`absolute inset-0 flex flex-col items-center justify-center gap-2 transition-opacity duration-300 ${isLight ? 'bg-stone-900/40' : 'bg-stone-950/50'} opacity-0 group-hover:opacity-100`}>
+                      <Button
+                        onClick={(e) => handleSimilarQuickView(e, p)}
+                        className="gap-1.5 h-8 px-4 text-[11px] font-medium rounded-full bg-white/90 text-stone-900 hover:bg-white transition-all duration-200 backdrop-blur-sm"
+                        style={{ fontFamily: "'Urbanist', sans-serif" }}
+                      >
+                        <Eye className="h-3 w-3" />
+                        Quick View
+                      </Button>
+                      <Button
+                        onClick={(e) => handleSimilarAddToCart(e, p)}
+                        disabled={p.stock === 0}
+                        className={`gap-1.5 h-8 px-4 text-[11px] font-medium rounded-full transition-all duration-200 ${
+                          similarAdding === p.id
+                            ? 'bg-emerald-600 text-white scale-[0.97]'
+                            : 'luxury-accent-gradient-bg text-stone-950 hover:opacity-90'
+                        }`}
+                        style={{ fontFamily: "'Urbanist', sans-serif" }}
+                      >
+                        <ShoppingCart className="h-3 w-3" />
+                        {similarAdding === p.id ? 'Added!' : p.stock === 0 ? 'Sold Out' : 'Add to Cart'}
+                      </Button>
+                    </div>
+                    {/* Gold shimmer border effect on hover */}
+                    <motion.div
+                      className="absolute inset-0 rounded-t-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                      style={{
+                        boxShadow: 'inset 0 0 0 1px rgba(219,175,54,0.3), inset 0 0 20px rgba(219,175,54,0.05)',
+                      }}
+                    />
+                  </div>
+                  {/* Card info — compact padding & smaller text for 6-up grid */}
+                  <div className="p-2 sm:p-2.5">
+                    <p
+                      className="text-[9px] uppercase tracking-[0.15em] luxury-accent-text opacity-60 font-medium"
+                      style={{ fontFamily: "'Urbanist', sans-serif" }}
+                    >
+                      {p.category}
+                    </p>
+                    <h4
+                      className={`mt-1 text-xs sm:text-sm font-normal ${textPrimary} line-clamp-1 transition-colors`}
+                      style={{ fontFamily: "'Urbanist', sans-serif" }}
+                    >
+                      {p.name}
+                    </h4>
+                    <div className="mt-1.5 flex items-baseline gap-1.5">
+                      <span
+                        className="text-xs sm:text-sm font-semibold luxury-accent-text"
+                        style={{ fontFamily: "'Urbanist', sans-serif" }}
+                      >
+                        {format(p.price)}
+                      </span>
+                      {p.compareAtPrice && (
+                        <span
+                          className={`text-[10px] ${isLight ? 'text-stone-400' : 'text-amber-100/25'} line-through`}
+                          style={{ fontFamily: "'Urbanist', sans-serif" }}
+                        >
+                          {format(p.compareAtPrice)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </motion.div>
+        )}
+      </div>
+
       {/* Reviews Section */}
       <div id="reviews-section" className="mt-4">
         <div className="flex items-center justify-between mb-6">
@@ -1151,6 +1358,13 @@ export function ProductDetail() {
           </div>
         </DialogContent>
       </Dialog>
-    </motion.div>
+
+      {/* Quick View Dialog — used by Similar Products section */}
+      <QuickViewDialog
+        open={quickViewOpen}
+        onOpenChange={setQuickViewOpen}
+        product={quickViewProduct}
+      />
+     </motion.div>
   );
 }
