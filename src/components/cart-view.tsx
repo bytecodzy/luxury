@@ -353,7 +353,7 @@ export function CartView() {
 
           {/* ── Order Summary ── */}
           <div
-            className="rounded-xl p-6 lg:sticky lg:top-24 lg:self-start z-10"
+            className="rounded-xl p-6 lg:sticky lg:top-40 lg:self-start z-10"
             style={{
               background: summaryBg,
               border: `1px solid ${summaryBorder}`,
