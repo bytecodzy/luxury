@@ -6,10 +6,9 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Minus, Plus, Trash2, ShoppingBag, ArrowLeft, Truck, CheckCircle, AlertTriangle, X, Sparkles } from 'lucide-react';
+import { Minus, Plus, Trash2, ShoppingBag, ArrowLeft, Truck, CheckCircle, AlertTriangle, X, Sparkles, Eye, ShoppingCart } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { getProxiedImageUrl } from '@/lib/image-utils';
-import { ProductCard } from '@/components/product-card';
 import React from 'react';
 
 interface Product {
@@ -80,7 +79,7 @@ export function CartView() {
       // If we have categories from cart, use them; otherwise use 'featured'
       const category = cartCategories.length > 0 ? cartCategories[0] : '';
       const params = new URLSearchParams();
-      params.set('limit', '8');
+      params.set('limit', '12');
       if (category) params.set('category', category);
       else params.set('sort', 'featured');
       return fetch(`/api/products?${params}`).then((r) => r.json());
@@ -93,7 +92,7 @@ export function CartView() {
       Array.isArray(recData?.products)
         ? recData.products
             .filter((p: Product) => !cartItems.some((ci) => ci.productId === p.id))
-            .slice(0, 8)
+            .slice(0, 12)
         : [],
     [recData, cartItems]
   );
@@ -175,7 +174,7 @@ export function CartView() {
           </Button>
         </div>
       ) : (
-        <div className="mt-6 grid gap-8 lg:grid-cols-3">
+        <div className="mt-6 grid gap-8 lg:grid-cols-3 lg:items-start">
           {/* ── Cart Items ── */}
           <div className="lg:col-span-2 space-y-4">
             <AnimatePresence>
@@ -354,7 +353,7 @@ export function CartView() {
 
           {/* ── Order Summary ── */}
           <div
-            className="rounded-xl p-6 h-fit"
+            className="rounded-xl p-6 lg:sticky lg:top-24 lg:self-start z-10"
             style={{
               background: summaryBg,
               border: `1px solid ${summaryBorder}`,
@@ -505,17 +504,13 @@ export function CartView() {
 
           {/* Loading skeleton */}
           {recLoading ? (
-            <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, i) => (
+            <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              {Array.from({ length: 6 }).map((_, i) => (
                 <div
                   key={i}
-                  className="rounded-xl animate-pulse overflow-hidden"
-                  style={{
-                    background: cardBg,
-                    border: `1px solid ${cardBorder}`,
-                  }}
+                  className={`rounded-xl animate-pulse ${isDark ? 'bg-stone-900/50' : 'bg-white/80'} ${isDark ? 'border border-amber-500/8' : 'border border-stone-200/60'}`}
                 >
-                  <div className="aspect-[3/4] rounded-t-xl" style={{ background: isDark ? 'rgba(12, 10, 9, 0.4)' : 'rgba(245, 240, 230, 0.6)' }} />
+                  <div className="aspect-[4/5] rounded-t-xl" style={{ background: isDark ? 'rgba(12, 10, 9, 0.4)' : 'rgba(245, 240, 230, 0.6)' }} />
                   <div className="p-4 space-y-2">
                     <div className="h-3 w-16 rounded" style={{ background: isDark ? 'rgba(12, 10, 9, 0.4)' : 'rgba(245, 240, 230, 0.6)' }} />
                     <div className="h-4 w-3/4 rounded" style={{ background: isDark ? 'rgba(12, 10, 9, 0.4)' : 'rgba(245, 240, 230, 0.6)' }} />
@@ -526,11 +521,7 @@ export function CartView() {
             </div>
           ) : recommendedProducts.length === 0 ? (
             <div
-              className="flex flex-col items-center justify-center py-12 rounded-xl"
-              style={{
-                background: cardBg,
-                border: `1px dashed ${cardBorder}`,
-              }}
+              className={`flex flex-col items-center justify-center py-12 rounded-xl border border-dashed ${isDark ? 'border-amber-500/10 bg-stone-900/20' : 'border-stone-300/40 bg-stone-100/20'}`}
             >
               <Sparkles className="h-8 w-8" style={{ color: accentColor, opacity: 0.3 }} />
               <p className="mt-3 text-sm font-medium" style={{ color: textSecondary }}>
@@ -538,10 +529,151 @@ export function CartView() {
               </p>
             </div>
           ) : (
-            <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-              {recommendedProducts.map((product, i) => (
-                <ProductCard key={product.id} product={product} index={i} />
-              ))}
+            <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+              {recommendedProducts.map((product, i) => {
+                const isExternal = product.isExternal && product.platform;
+                const platformSlug = product.platform?.toLowerCase() || '';
+                const discount = product.compareAtPrice
+                  ? Math.round(((product.compareAtPrice - product.price) / product.compareAtPrice) * 100)
+                  : 0;
+
+                return (
+                  <motion.div
+                    key={product.id}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05, duration: 0.35 }}
+                    className={`group cursor-pointer rounded-xl ${isDark ? 'bg-stone-900/50' : 'bg-white/80'} border ${isDark ? 'border-amber-500/8' : 'border-stone-200/60'} ${isDark ? 'hover:border-amber-500/20' : 'hover:border-amber-400/40'} transition-all duration-300 overflow-hidden relative`}
+                    onClick={() => selectProduct(product.id)}
+                  >
+                    {/* Product image — aspect-[4/5] with hover overlay (same as home page) */}
+                    <div className="aspect-[4/5] relative overflow-hidden bg-stone-800/30">
+                      <img
+                        src={getProxiedImageUrl(product.images?.[0] || '/images/placeholder.jpg', product.platform)}
+                        alt={product.name}
+                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/images/placeholder.jpg';
+                        }}
+                      />
+                      {/* Hover overlay with Quick View + Add to Cart (same as home page) */}
+                      <div className={`absolute inset-0 flex flex-col items-center justify-center gap-3 transition-opacity duration-300 ${isDark ? 'bg-stone-950/50' : 'bg-stone-900/40'} opacity-0 group-hover:opacity-100`}>
+                        <Button
+                          onClick={(e) => { e.stopPropagation(); selectProduct(product.id); }}
+                          className="gap-2 h-9 px-6 text-xs font-medium rounded-full bg-white/90 text-stone-900 hover:bg-white transition-all duration-200 backdrop-blur-sm"
+                          style={{ fontFamily: "'Urbanist', sans-serif" }}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          Quick View
+                        </Button>
+                        <Button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addItem({
+                              productId: product.id,
+                              name: product.name,
+                              price: product.price,
+                              image: product.images?.[0] || '/images/placeholder.jpg',
+                            });
+                          }}
+                          disabled={product.stock === 0}
+                          className="gap-2 h-9 px-6 text-xs font-medium rounded-full transition-all duration-200 luxury-accent-gradient-bg text-stone-950 hover:opacity-90"
+                          style={{ fontFamily: "'Urbanist', sans-serif" }}
+                        >
+                          <ShoppingCart className="h-3.5 w-3.5" />
+                          {product.stock === 0 ? 'Sold Out' : 'Add to Cart'}
+                        </Button>
+                      </div>
+
+                      {/* Gold shimmer border effect on hover (same as home page) */}
+                      <div
+                        className="absolute inset-0 rounded-t-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                        style={{
+                          boxShadow: 'inset 0 0 0 1px rgba(219,175,54,0.3), inset 0 0 20px rgba(219,175,54,0.05)',
+                        }}
+                      />
+
+                      {/* Discount badge */}
+                      {discount > 0 && (
+                        <span
+                          className="absolute left-2.5 top-2.5 rounded-full px-2.5 py-1 text-[9px] font-bold backdrop-blur-md"
+                          style={{
+                            background: 'rgba(5, 150, 105, 0.9)',
+                            color: '#ffffff',
+                          }}
+                        >
+                          -{discount}%
+                        </span>
+                      )}
+
+                      {/* Featured badge */}
+                      {product.featured && (
+                        <span
+                          className="absolute left-2.5 top-2.5 rounded-full px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider backdrop-blur-md"
+                          style={{
+                            background: isDark ? 'rgba(212, 164, 55, 0.85)' : 'rgba(212, 164, 55, 0.9)',
+                            color: isDark ? '#ffffff' : '#1c1917',
+                            boxShadow: '0 0 8px rgba(212, 164, 55, 0.2)',
+                          }}
+                        >
+                          {t('common.featured')}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Card info (same as home page) */}
+                    <div className="p-4">
+                      {/* Category label — small uppercase gold */}
+                      <p
+                        className="text-[10px] uppercase tracking-[0.2em] font-medium"
+                        style={{
+                          color: accentColor,
+                          opacity: isDark ? 0.6 : 0.7,
+                          fontFamily: "'Urbanist', sans-serif",
+                        }}
+                      >
+                        {product.category}
+                      </p>
+
+                      {/* Product name — Urbanist */}
+                      <h3
+                        className="mt-1.5 text-sm sm:text-base font-normal line-clamp-1 transition-colors"
+                        style={{
+                          color: isDark ? 'rgba(245, 230, 163, 0.9)' : '#1c1917',
+                          fontFamily: "'Urbanist', sans-serif",
+                        }}
+                      >
+                        {product.name}
+                      </h3>
+
+                      {/* Price in luxury-accent-text gold color */}
+                      <div className="mt-2 flex items-baseline gap-2">
+                        <span
+                          className="text-sm sm:text-base font-semibold"
+                          style={{
+                            color: accentColor,
+                            fontFamily: "'Urbanist', sans-serif",
+                          }}
+                        >
+                          {format(product.price)}
+                        </span>
+                        {product.compareAtPrice && (
+                          <span
+                            className="text-xs line-through"
+                            style={{
+                              color: isDark ? 'rgba(245, 230, 163, 0.2)' : 'rgba(28, 25, 23, 0.3)',
+                              fontFamily: "'Urbanist', sans-serif",
+                            }}
+                          >
+                            {format(product.compareAtPrice)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </motion.div>
