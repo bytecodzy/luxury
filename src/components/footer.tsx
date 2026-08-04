@@ -5,6 +5,59 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { Smartphone, Download, Phone, Mail, MessageCircle } from 'lucide-react';
 import { useStore } from '@/lib/store';
 
+/**
+ * Footer  —  Task 4m (footer "We are also available" — full width + real logos)
+ * ────────────────────────────────────────────────────────────────────────
+ * CHANGES IN THIS VERSION (per user spec):
+ *
+ *  1. BLOCK WIDTH — 100%
+ *     • Old (Task 4l): `col-span-2 lg:col-span-2 lg:col-start-5`
+ *       (sat in the bottom-right corner, cols 5–6 on desktop).
+ *     • New (Task 4m): `col-span-2 lg:col-span-6`
+ *       (full width on ALL breakpoints — block now spans the entire
+ *        footer container width and sits on its own row below the
+ *        Shop/Company/Support/Policies columns).
+ *
+ *  2. BRAND LOGOS — REAL UPLOADED IMAGES
+ *     • Old (Task 4l): inline SVG wordmark approximations.
+ *     • New (Task 4m): actual brand logo PNGs uploaded by the user,
+ *       served from `/public/images/marketplaces/`:
+ *         /images/marketplaces/amazon.png   (960×720)
+ *         /images/marketplaces/flipkart.png (1200×800)
+ *         /images/marketplaces/meesho.png   (256×256)
+ *         /images/marketplaces/snapdeal.png (4673×1177)
+ *         /images/marketplaces/myntra.png   (3840×2160)
+ *     • Rendered via `next/image` with intrinsic width/height (so Next
+ *       can compute aspect ratio and prevent layout shift), then
+ *       constrained to a uniform display height of 40px (`h-10 w-auto`)
+ *       so all 5 logos line up visually regardless of source dimensions.
+ *
+ *  3. PRESERVED
+ *     • Quick-links grid: grid-cols-2 lg:grid-cols-6 (mobile 2×2 layout
+ *       for Shop/Company/Support/Policies — kept from Task 4k).
+ *     • Brand block (logo + description + social icons) — unchanged.
+ *     • Shop / Company / Support / Policies column contents — unchanged.
+ *     • Install App section — unchanged.
+ *     • Copyright bar — unchanged.
+ *     • Block internals: centered heading + tagline + horizontal flex-
+ *       wrap row of logos, flat (no chips/borders/shadows) — kept from
+ *       Task 4l.
+ */
+
+// ── Marketplace registry — order matches user spec ──
+// Amazon → Flipkart → Meesho → Snapdeal → Myntra
+// `width` / `height` are the INTRINSIC source dimensions (used by
+// next/image for aspect-ratio + layout-shift prevention). The actual
+// display size is controlled by the `h-10 w-auto` className on the
+// rendered <Image>, so all 5 logos render at a uniform 40px height.
+const MARKETPLACES = [
+  { name: 'Amazon',   url: 'https://www.amazon.in',    logo: '/images/marketplaces/amazon.png',   width: 960,  height: 720  },
+  { name: 'Flipkart', url: 'https://www.flipkart.com', logo: '/images/marketplaces/flipkart.png', width: 1200, height: 800  },
+  { name: 'Meesho',   url: 'https://www.meesho.com',   logo: '/images/marketplaces/meesho.png',   width: 256,  height: 256  },
+  { name: 'Snapdeal', url: 'https://www.snapdeal.com', logo: '/images/marketplaces/snapdeal.png', width: 4673, height: 1177 },
+  { name: 'Myntra',   url: 'https://www.myntra.com',   logo: '/images/marketplaces/myntra.png',   width: 3840, height: 2160 },
+] as const
+
 export function Footer() {
   const { t } = useTranslation();
   const setView = useStore((s) => s.setView);
@@ -26,9 +79,20 @@ export function Footer() {
   return (
     <footer className="mt-auto border-t border-amber-900/30 bg-stone-950">
       <div className="container mx-auto px-4 py-8">
-        <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-6">
+        {/*
+          ───────────────────────────────────────────────────────────────
+          QUICK LINKS GRID
+          ───────────────────────────────────────────────────────────────
+          Mobile + tablet: 2 cols  →  Brand (full width)
+                                     Shop | Company
+                                     Support | Policies
+                                     We are also available (full width)
+          Desktop (lg+):     6 cols →  Brand (cols 1–2) | Shop | Company | Support | Policies
+                                     We are also available (cols 5–6, row 2 — bottom-right)
+        */}
+        <div className="grid grid-cols-2 gap-8 lg:grid-cols-6">
           {/* Brand */}
-          <div className="sm:col-span-2">
+          <div className="col-span-2 lg:col-span-2">
             <div className="flex items-center gap-3">
               <div className="relative flex h-64 w-64 items-center justify-center">
                 <Image
@@ -193,6 +257,49 @@ export function Footer() {
                   >
                     {item.label}
                   </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/*
+            "WE ARE ALSO AVAILABLE" BLOCK
+            ────────────────────────────────────────────────────────────
+            Full-width row (col-span-2 on mobile/tablet, lg:col-span-6
+            on desktop) → spans the entire footer container width and
+            sits on its own row below the Shop/Company/Support/Policies
+            columns.
+
+            Layout matches the reference image: centered heading,
+            centered tagline, horizontal flex-wrap row of brand logo
+            images. Flat — no chip backgrounds, no borders, no shadows.
+            Subtle opacity dim + scale on hover.
+          */}
+          <div className="col-span-2 lg:col-span-6">
+            <h4 className="text-center text-sm font-semibold uppercase tracking-wider text-amber-400/80">
+              We are also available
+            </h4>
+            <p className="mt-1.5 text-center text-xs text-amber-200/40">
+              Find us on your favorite marketplaces
+            </p>
+            <ul className="mt-4 flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
+              {MARKETPLACES.map((mp) => (
+                <li key={mp.name}>
+                  <a
+                    href={mp.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Visit 3 Boxes Luxury on ${mp.name}`}
+                    className="inline-flex items-center justify-center opacity-80 transition-all duration-200 hover:opacity-100 hover:scale-105"
+                  >
+                    <Image
+                      src={mp.logo}
+                      alt={mp.name}
+                      width={mp.width}
+                      height={mp.height}
+                      className="h-10 w-auto object-contain"
+                    />
+                  </a>
                 </li>
               ))}
             </ul>

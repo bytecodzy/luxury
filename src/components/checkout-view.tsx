@@ -58,7 +58,7 @@ interface SavedAddress {
 }
 
 export function CheckoutView() {
-  const { cartItems, setView, setLastOrderId, authUser } = useStore();
+  const { cartItems, setView, authUser, setPendingOrder } = useStore();
   const { format } = useCurrency();
   const { t } = useTranslation();
   const appTheme = useStore((s) => s.appTheme);
@@ -299,9 +299,60 @@ export function CheckoutView() {
       return res.json();
     },
     onSuccess: (data) => {
-      setLastOrderId(data.orderNumber);
-      useStore.getState().clearCart();
-      setView('order-confirmation');
+      // Stash the pending order + total so the payment gateway knows what to charge.
+      // The gateway will setLastOrderId + clear pending + switch to order-confirmation
+      // once payment is verified. (Cart is cleared here since the order is already created.)
+      //
+      // We ALSO stash a full order snapshot (items + breakdown) so the order-confirmation
+      // page can render WITHOUT calling /api/orders/[id] (which requires auth and would
+      // 401 for guest checkouts). The snapshot is built from the checkout API response,
+      // which now includes items[], subtotal, shipping, tax, discount, total, etc.
+      //
+      // IMPORTANT: useStore.getState() is used for ALL updates (not the destructured
+      // hooks) because React Query mutation onSuccess callbacks can capture stale closures
+      // if the component re-renders between mutate() and the response. getState() always
+      // reads the live store. This is the recommended pattern for mutation side-effects.
+      const store = useStore.getState();
+      // Reset the payment-failure flag so this fresh checkout starts the simulation
+      // from the beginning (processing → failed → success). The flag may be true
+      // if the user previously clicked "View Failure Details" on an earlier order
+      // and then came back to checkout a new order.
+      store.setHasFailedPayment(false);
+      store.setFailureReason(null);
+      store.setPendingOrder(data.orderId, data.total);
+      store.setLastOrderSnapshot({
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        status: data.status,
+        subtotal: data.subtotal,
+        shipping: data.shipping,
+        tax: data.tax,
+        discount: data.discount,
+        total: data.total,
+        estimatedDelivery: data.estimatedDelivery,
+        createdAt: data.createdAt,
+        items: (data.items ?? []).map((item: {
+          id?: string;
+          productId: string;
+          name: string;
+          price: number;
+          image: string | null;
+          quantity: number;
+          variantId?: string | null;
+          variantName?: string | null;
+        }) => ({
+          id: item.id,
+          productId: item.productId,
+          name: item.name,
+          price: item.price,
+          image: item.image,
+          quantity: item.quantity,
+          variantId: item.variantId ?? null,
+          variantName: item.variantName ?? null,
+        })),
+      });
+      store.clearCart();
+      store.setView('payment-gateway');
     },
   });
 
@@ -1140,7 +1191,7 @@ export function CheckoutView() {
                           </svg>
                           <span className="text-[10px] font-semibold" style={{ color: textSecondary }}>Net Banking</span>
                         </div>
-                        {/* Wallets
+                        {/* Wallets */}
                         <div
                           className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5"
                           style={{
@@ -1153,7 +1204,7 @@ export function CheckoutView() {
                             <circle cx="12" cy="8" r="2" fill={isDark ? 'rgba(245,230,163,0.3)' : 'rgba(28,25,23,0.2)'} />
                           </svg>
                           <span className="text-[10px] font-semibold" style={{ color: textSecondary }}>Wallets</span>
-                        </div> */}
+                        </div>
                       </div>
                     </div>
 
@@ -1211,7 +1262,7 @@ export function CheckoutView() {
 
           {/* ── Order Summary Sidebar ── */}
           <div
-            className="lg:sticky lg:top-40 h-fit rounded-xl p-6"
+            className="lg:sticky lg:top-45 h-fit rounded-xl p-6"
             style={{
               background: isDark ? 'rgba(28, 25, 23, 0.8)' : 'rgba(255, 255, 255, 0.95)',
               border: isDark ? '1px solid rgba(212, 164, 55, 0.15)' : '1px solid rgba(212, 164, 55, 0.2)',
@@ -1219,7 +1270,26 @@ export function CheckoutView() {
               WebkitBackdropFilter: isDark ? 'blur(16px) saturate(1.2)' : 'none',
             }}
           >
-            <h3 className="text-lg font-semibold" style={{ color: textPrimary, fontFamily: "'Urbanist', sans-serif" }}>{t('checkout.orderSummary')}</h3>
+            <div className="flex items-center justify-between">
+  <h3
+    className="text-lg font-semibold"
+    style={{
+      color: textPrimary,
+      fontFamily: "'Urbanist', sans-serif",
+      letterSpacing: '-0.01em',
+    }}
+  >
+    {t('cart.orderSummary')}
+  </h3>
+  <video
+    src="/images/check-out.mp4"
+    autoPlay
+    loop
+    muted
+    playsInline
+    className="h-30 w-45 object-contain"
+  />
+</div>
 
             <div className="mt-4 space-y-3 max-h-64 overflow-y-auto">
               {cartItems.map((item) => (

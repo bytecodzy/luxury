@@ -10,6 +10,7 @@ import { ProductDetail } from '@/components/product-detail';
 import { CartView } from '@/components/cart-view';
 import { CheckoutView } from '@/components/checkout-view';
 import { OrderConfirmation } from '@/components/order-confirmation';
+import { OrderFailedView } from '@/components/order-failed';
 import { OrderHistory } from '@/components/order-history';
 import { WishlistView } from '@/components/wishlist-view';
 import { AuthDialog } from '@/components/auth-dialog';
@@ -43,6 +44,9 @@ import { ThreeboxesCurateSection } from '@/components/threeboxes-curate-section'
 import { AboutPage } from '@/components/about-page';
 import { CategoryShopPage } from '@/components/category-shop-page';
 import { ContactPage } from '@/components/contact-page';
+import { ForgotPasswordView } from '@/components/forgot-password-view';
+import { PaymentGatewayView } from '@/components/payment-gateway-view';
+import { FeedbackView } from '@/components/feedback-view';
 import { ToastContainer } from '@/hooks/use-toast-notification';
 import { AnimatePresence, motion } from 'framer-motion';
 import React from 'react';
@@ -198,6 +202,8 @@ function AppContent() {
         return <CheckoutView />;
       case 'order-confirmation':
         return <OrderConfirmation />;
+      case 'order-failed':
+        return <OrderFailedView />;
       case 'orders':
         return <OrderHistory />;
       case 'wishlist':
@@ -256,10 +262,21 @@ function AppContent() {
             <ThreeboxesCurateSection />
           </StandalonePageWrapper>
         );
+      case 'forgot-password':
+        return <ForgotPasswordView />;
+      case 'payment-gateway':
+        return <PaymentGatewayView />;
+      case 'feedback':
+        return <FeedbackView />;
       default:
         return <HomeSections />;
     }
   };
+
+  // Some views are "full-screen" — they render their own complete layout
+  // (logo, back button, etc.) and should NOT show the global Header / Footer
+  // / max-width container. Add such views here.
+  const isFullScreenView = view === 'forgot-password' || view === 'payment-gateway';
 
   return (
     <div
@@ -267,9 +284,9 @@ function AppContent() {
       data-theme={appTheme}
       data-theme-color={appThemeColor}
     >
-      <Header />
+      {!isFullScreenView && <Header />}
       <main className="flex-1">
-        <div className="container mx-auto px-4">
+        {isFullScreenView ? (
           <AnimatePresence mode="wait">
             <motion.div
               key={view}
@@ -281,9 +298,23 @@ function AppContent() {
               {renderView()}
             </motion.div>
           </AnimatePresence>
-        </div>
+        ) : (
+          <div className="container mx-auto px-4">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={view}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.25 }}
+              >
+                {renderView()}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        )}
       </main>
-      <Footer />
+      {!isFullScreenView && <Footer />}
       <ErrorBoundary fallback={null}>
         <AuthDialog />
       </ErrorBoundary>

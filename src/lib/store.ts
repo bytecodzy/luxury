@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'corporate-dashboard' | 'wiki' | 'downloads' | 'security-policy' | 'shop' | 'contact' | 'about' | 'divisions' | 'careers' | 'press' | 'sustainability' | 'shipping' | 'faq' | 'size-guide' | 'track-order' | 'privacy-policy' | 'terms-of-service' | 'cookie-policy' | 'refund-policy' | 'family-packs' | 'social-connections' | '3boxes-curate' | 'wishlist'
+export type View = 'home' | 'product' | 'cart' | 'checkout' | 'orders' | 'order-confirmation' | 'order-failed' | 'user-dashboard' | 'admin-dashboard' | 'agent-dashboard' | 'team-dashboard' | 'corporate-dashboard' | 'wiki' | 'downloads' | 'security-policy' | 'shop' | 'contact' | 'about' | 'divisions' | 'careers' | 'press' | 'sustainability' | 'shipping' | 'faq' | 'size-guide' | 'track-order' | 'privacy-policy' | 'terms-of-service' | 'cookie-policy' | 'refund-policy' | 'family-packs' | 'social-connections' | '3boxes-curate' | 'wishlist' | 'forgot-password' | 'payment-gateway' | 'feedback'
 
 export type ThemeColor = 'royal-gold' | 'rose-elegance' | 'emerald-luxe' | 'sapphire-classic' | 'onyx-noir'
 
@@ -49,6 +49,36 @@ export interface CartItem {
   quantity: number
 }
 
+// ── Snapshot of the last completed order ──
+// Stashed in the store at checkout time so the order-confirmation page can render
+// WITHOUT fetching /api/orders/[id] (which requires auth and would 401 for guest
+// checkouts). The snapshot has the same shape as the relevant subset of the
+// /api/checkout response.
+export interface OrderSnapshotItem {
+  id?: string
+  productId: string
+  name: string
+  price: number
+  image: string | null
+  quantity: number
+  variantId?: string | null
+  variantName?: string | null
+}
+
+export interface OrderSnapshot {
+  orderId: string
+  orderNumber: string
+  status: string
+  subtotal: number
+  shipping: number
+  tax: number
+  discount?: number | null
+  total: number
+  estimatedDelivery: string | null
+  createdAt: string
+  items: OrderSnapshotItem[]
+}
+
 export interface CurrencyInfo {
   code: string
   name: string
@@ -71,6 +101,21 @@ interface AppState {
   selectedCategory: string | null
   cartItems: CartItem[]
   lastOrderId: string | null
+  lastOrderSnapshot: OrderSnapshot | null
+  pendingOrderId: string | null
+  pendingOrderTotal: number | null
+  // ── Payment failure tracking ──
+  // `failureReason` is set when the user navigates to the order-failed view so the
+  // order-failed page can display the bank / gateway reason. In the simulation this
+  // is a sensible default string; in production it will come from the Razorpay
+  // handler's response.error.description.
+  failureReason: string | null
+  // `hasFailedPayment` is set to true when the user clicks "View Failure Details"
+  // on the payment-gateway's failed stage. On the next visit to payment-gateway
+  // (i.e. a retry from order-failed), the simulation reads this flag and skips
+  // the failed stage entirely — so the retry succeeds. Reset to false when the
+  // payment-gateway reaches the success stage OR when a fresh checkout starts.
+  hasFailedPayment: boolean
   authUser: AuthUser | null
   authToken: string | null
   authView: 'login' | 'register' | null
@@ -114,6 +159,12 @@ interface AppState {
   updateQuantity: (productId: string, quantity: number) => void
   clearCart: () => void
   setLastOrderId: (orderId: string) => void
+  setLastOrderSnapshot: (snapshot: OrderSnapshot) => void
+  clearLastOrderSnapshot: () => void
+  setPendingOrder: (orderId: string, total: number) => void
+  clearPendingOrder: () => void
+  setFailureReason: (reason: string | null) => void
+  setHasFailedPayment: (val: boolean) => void
   setAuth: (user: AuthUser, token: string) => void
   clearAuth: () => void
   setAuthView: (view: 'login' | 'register' | null) => void
@@ -210,6 +261,11 @@ export const useStore = create<AppState>((set, get) => ({
   selectedCategory: null,
   cartItems: [],
   lastOrderId: null,
+  lastOrderSnapshot: null,
+  pendingOrderId: null,
+  pendingOrderTotal: null,
+  failureReason: null,
+  hasFailedPayment: false,
   authUser: withUserIdAlias(initialAuth.user),
   authToken: initialAuth.token,
   authView: null,
@@ -275,6 +331,12 @@ export const useStore = create<AppState>((set, get) => ({
     })),
   clearCart: () => set({ cartItems: [] }),
   setLastOrderId: (orderId) => set({ lastOrderId: orderId }),
+  setLastOrderSnapshot: (snapshot) => set({ lastOrderSnapshot: snapshot }),
+  clearLastOrderSnapshot: () => set({ lastOrderSnapshot: null }),
+  setPendingOrder: (orderId, total) => set({ pendingOrderId: orderId, pendingOrderTotal: total }),
+  clearPendingOrder: () => set({ pendingOrderId: null, pendingOrderTotal: null }),
+  setFailureReason: (reason) => set({ failureReason: reason }),
+  setHasFailedPayment: (val) => set({ hasFailedPayment: val }),
   setAuth: (user, token) => {
     try {
       localStorage.setItem('3boxes_auth', JSON.stringify({ user, token }))

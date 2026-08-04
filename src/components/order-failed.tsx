@@ -1,47 +1,53 @@
 'use client';
 
 /**
- * OrderConfirmation
+ * OrderFailedView
  * ──────────────────
- * Redesigned (Task 4e) order confirmation view for 3 Boxes Luxury.
+ * Order-failure page for 3 Boxes Luxury — visual sibling of OrderConfirmation.
  *
  * Layout (top → bottom):
- *   1. Brand video block          — `/images/order-confirmed.mp4` (user uploads this asset)
- *   2. "Order Confirmed!" heading + "Thank you for your purchase" subheading
+ *   1. Brand video block          — `/images/order-failed.mp4` (user uploads this asset,
+ *                                    different from the order-confirmed.mp4 used on
+ *                                    the success page)
+ *   2. "Order Failed!" heading + "Your payment could not be completed" subheading
  *   3. Order info card:
  *        • Product image (large, first item)
  *        • Product name (BIG, gold)
  *        • Order ID (mono, gold)
- *        • Order date + Estimated delivery date (two-column row)
+ *        • Order date + Reason for failure (two-column row)
  *        • "Shipping & Returns" link → setView('shipping')
  *        • Order summary (Subtotal / Shipping / Tax / Total)
  *   4. Action button row (4 buttons):
- *        • Download Invoice   — generates a PDF client-side via jsPDF
- *        • View Orders        — setView('orders')
- *        • Continue Shopping  — setView('home')
- *        • Feedback           — setView('feedback')
+ *        • Try Again           — setView('payment-gateway')  (re-runs the simulation;
+ *                                 the retry succeeds because hasFailedPayment is true)
+ *        • View Orders         — setView('orders')
+ *        • Continue Shopping   — setView('home')
+ *        • Contact Support     — setView('contact')
  *
  * Data sourcing:
- *   The cart is cleared by the checkout flow before we arrive here, so we
- *   re-fetch the order from the API using `lastOrderId` (which the payment
- *   gateway stashes in the store on success). The order response includes
- *   `items[]` with `name` + `image`, plus `orderNumber`, `createdAt`,
- *   `estimatedDelivery`, `subtotal`, `shipping`, `tax`, `total`, `discount`.
+ *   Same strategy as OrderConfirmation — uses `lastOrderSnapshot` from the store
+ *   (set at checkout time) so the page renders instantly for both logged-in AND
+ *   guest users without an API call. The `failureReason` is also pulled from the
+ *   store; it's set by payment-gateway-view when the user clicks "View Failure
+ *   Details". If no reason was stashed, a sensible default is shown.
+ *
+ * Theme: matches the rest of the app — gold accent (#dbaf36), Lora headings,
+ * Urbanist body, dark/light adaptive, `luxury-accent-gradient-bg` for primary
+ * actions. Failure indicators use a muted red (not the gold accent) so the user
+ * instantly recognizes the page is an error state.
  */
 
 import { useStore, type OrderSnapshot } from '@/lib/store';
-import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
 import {
-  CheckCircle2, ShoppingBag, Package, Download, MessageSquare,
-  Truck, Calendar, ArrowRight, Loader2, ImageIcon, AlertCircle, Home,
+  XCircle, ShoppingBag, Package, RefreshCw,
+  Calendar, ArrowRight, Loader2, ImageIcon, AlertCircle, Home, LifeBuoy,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { useState, useMemo, useCallback } from 'react';
-import jsPDF from 'jspdf';
+import { useMemo } from 'react';
 
-// ── Types matching the /api/orders/[id] response ──
+// ── Types matching the /api/orders/[id] response (fallback path) ──
 interface OrderItem {
   id: string;
   productId: string;
@@ -73,6 +79,13 @@ interface OrderResponse {
   order: Order;
 }
 
+// ── Default failure reason ──
+// Used if the store doesn't have a `failureReason` stashed (e.g., user navigated
+// here directly via URL, or the payment-gateway didn't set one). In production
+// this will always be the Razorpay error.description.
+const DEFAULT_FAILURE_REASON =
+  'Your payment was declined by the bank. This often happens due to insufficient funds, incorrect card details, or a bank security check. Please try again with a different payment method or contact your bank.';
+
 // ── Helper: format currency in INR ──
 const formatINR = (n: number) =>
   new Intl.NumberFormat('en-IN', {
@@ -96,14 +109,23 @@ const formatDate = (iso: string | null | undefined) => {
   }
 };
 
-export function OrderConfirmation() {
-  const { lastOrderId, lastOrderSnapshot, setView, appTheme } = useStore();
-  const { t } = useTranslation();
+export function OrderFailedView() {
+  const {
+    lastOrderId,
+    lastOrderSnapshot,
+    failureReason,
+    setView,
+    appTheme,
+  } = useStore();
 
   const isDark = appTheme === 'dark';
   const accent = 'var(--luxury-accent, #dbaf36)';
+  // Failure-themed color: muted red. Distinct from the gold accent so the user
+  // instantly recognizes this is an error state, not a success state.
+  const failColor = isDark ? '#f87171' : '#dc2626';
+  const failColorMuted = isDark ? 'rgba(248, 113, 113, 0.7)' : 'rgba(220, 38, 38, 0.7)';
 
-  // Theme tokens (match auth-dialog / payment-gateway palette)
+  // Theme tokens (match order-confirmation palette)
   const cardBg = isDark ? 'rgba(20, 16, 14, 0.7)' : 'rgba(255, 255, 255, 0.85)';
   const cardBorder = isDark ? 'rgba(212, 164, 55, 0.18)' : 'rgba(212, 164, 55, 0.22)';
   const inputBorder = isDark ? 'rgba(212, 164, 55, 0.15)' : 'rgba(28, 25, 23, 0.12)';
@@ -116,15 +138,13 @@ export function OrderConfirmation() {
   // PRIMARY: use the `lastOrderSnapshot` stashed in the store at checkout time.
   // This works for BOTH logged-in AND guest users — no API call needed.
   //
-  // FALLBACK: only if the snapshot is missing (e.g., user navigated directly to
-  // /order-confirmation via URL, or refreshed the page and lost the in-memory
-  // store), do we try fetching /api/orders/[id]. This route requires auth, so it
-  // will 401 for guests — in that case we show a friendly error state instead of
-  // looping on a loading spinner forever.
+  // FALLBACK: only if the snapshot is missing do we try fetching /api/orders/[id].
+  // The route requires auth, so it will 401 for guests — in that case we show a
+  // friendly error state instead of looping on a loading spinner forever.
   const snapshot = lastOrderSnapshot as OrderSnapshot | null;
   const shouldFetch = !snapshot && !!lastOrderId;
-  const { data: fetchedData, isLoading: fetching, isError: fetchError } = useQuery<OrderResponse>({
-    queryKey: ['order', lastOrderId],
+  const { data: fetchedData, isLoading: fetching } = useQuery<OrderResponse>({
+    queryKey: ['order', lastOrderId, 'failed'],
     queryFn: () =>
       fetch(`/api/orders/${lastOrderId}`).then((r) => {
         if (!r.ok) throw new Error('Failed to load order');
@@ -136,7 +156,6 @@ export function OrderConfirmation() {
   });
 
   // Build a unified `order` object from either source.
-  // Snapshot is preferred; fetched data is the fallback.
   const order: Order | null = useMemo(() => {
     if (snapshot) {
       return {
@@ -172,131 +191,10 @@ export function OrderConfirmation() {
   const heroItem = order?.items?.[0] ?? null;
   const itemCount = order?.items?.length ?? 0;
 
-  // ── Download invoice (client-side PDF via jsPDF) ──
-  const [invoiceLoading, setInvoiceLoading] = useState(false);
-  const handleDownloadInvoice = useCallback(async () => {
-    if (!order) return;
-    setInvoiceLoading(true);
-    try {
-      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const margin = 40;
-
-      // Header band
-      doc.setFillColor(20, 16, 14);
-      doc.rect(0, 0, pageWidth, 80, 'F');
-      doc.setTextColor(219, 175, 54);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(20);
-      doc.text('3 BOXES LUXURY', margin, 35);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.setTextColor(245, 230, 163);
-      doc.text('Where luxury meets personalization', margin, 52);
-      doc.setFontSize(12);
-      doc.setTextColor(219, 175, 54);
-      doc.text('INVOICE', pageWidth - margin, 35, { align: 'right' });
-
-      // Invoice metadata
-      let y = 110;
-      doc.setTextColor(40, 40, 40);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.text(`Order ${order.orderNumber}`, margin, y);
-
-      y += 20;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`Order Date: ${formatDate(order.createdAt)}`, margin, y);
-      if (order.estimatedDelivery) {
-        doc.text(`Estimated Delivery: ${formatDate(order.estimatedDelivery)}`, margin, y + 14);
-        y += 14;
-      }
-      doc.text(`Status: ${order.status}`, margin, y + 14);
-      y += 30;
-
-      // Items table header
-      doc.setDrawColor(212, 164, 55);
-      doc.setLineWidth(0.5);
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 16;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(40, 40, 40);
-      doc.text('Item', margin, y);
-      doc.text('Qty', pageWidth - 200, y, { align: 'right' });
-      doc.text('Price', pageWidth - 130, y, { align: 'right' });
-      doc.text('Total', pageWidth - margin, y, { align: 'right' });
-      y += 8;
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 16;
-
-      // Items
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(10);
-      doc.setTextColor(60, 60, 60);
-      for (const item of order.items) {
-        const itemTotal = (item.price || 0) * (item.quantity || 1);
-        const name = item.name.length > 60 ? item.name.slice(0, 57) + '...' : item.name;
-        doc.text(name, margin, y);
-        doc.text(String(item.quantity || 1), pageWidth - 200, y, { align: 'right' });
-        doc.text(formatINR(item.price || 0), pageWidth - 130, y, { align: 'right' });
-        doc.text(formatINR(itemTotal), pageWidth - margin, y, { align: 'right' });
-        y += 16;
-        if (y > 720) {
-          doc.addPage();
-          y = 60;
-        }
-      }
-
-      // Totals
-      y += 10;
-      doc.line(margin, y, pageWidth - margin, y);
-      y += 16;
-      const drawTotal = (label: string, value: string, bold = false) => {
-        doc.setFont('helvetica', bold ? 'bold' : 'normal');
-        doc.setTextColor(bold ? 40 : 100, bold ? 40 : 100, bold ? 40 : 100);
-        doc.text(label, pageWidth - 200, y);
-        doc.text(value, pageWidth - margin, y, { align: 'right' });
-        y += 16;
-      };
-      drawTotal('Subtotal', formatINR(order.subtotal));
-      drawTotal('Shipping', formatINR(order.shipping));
-      drawTotal('Tax', formatINR(order.tax));
-      if (order.discount && order.discount > 0) {
-        drawTotal('Discount', `- ${formatINR(order.discount)}`);
-      }
-      y += 4;
-      doc.setDrawColor(212, 164, 55);
-      doc.setLineWidth(1);
-      doc.line(pageWidth - 200, y, pageWidth - margin, y);
-      y += 16;
-      drawTotal('Total', formatINR(order.total), true);
-
-      // Footer
-      const pageHeight = doc.internal.pageSize.getHeight();
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(150, 150, 150);
-      doc.text(
-        'Thank you for your purchase. This invoice was generated electronically and is valid without signature.',
-        margin,
-        pageHeight - 30
-      );
-
-      doc.save(`Invoice-${order.orderNumber}.pdf`);
-    } catch (err) {
-      console.error('Invoice generation failed:', err);
-      alert('Sorry, we could not generate the invoice. Please try again.');
-    } finally {
-      setInvoiceLoading(false);
-    }
-  }, [order]);
+  // The failure reason from the store, falling back to a sensible default.
+  const displayReason = failureReason ?? DEFAULT_FAILURE_REASON;
 
   // ── Loading state ──
-  // Only show the spinner when we're actually fetching AND don't have a snapshot yet.
-  // (If we have a snapshot, we render immediately — no loading flash.)
   if (!order && shouldFetch && fetching) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -312,9 +210,6 @@ export function OrderConfirmation() {
   }
 
   // ── Error state ──
-  // If we have no snapshot AND the fetch failed (likely 401 for guest users who
-  // navigated here directly without going through checkout), show a friendly
-  // error instead of looping on a loading spinner forever.
   if (!order) {
     return (
       <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
@@ -325,7 +220,7 @@ export function OrderConfirmation() {
             border: `1px solid ${isDark ? 'rgba(239, 68, 68, 0.3)' : 'rgba(239, 68, 68, 0.25)'}`,
           }}
         >
-          <AlertCircle className="h-8 w-8" style={{ color: isDark ? '#f87171' : '#dc2626' }} />
+          <AlertCircle className="h-8 w-8" style={{ color: failColor }} />
         </div>
         <h2
           className="text-xl font-bold"
@@ -333,13 +228,9 @@ export function OrderConfirmation() {
         >
           We couldn&apos;t load your order
         </h2>
-        <p
-          className="mt-2 text-sm max-w-md"
-          style={{ color: textSecondary }}
-        >
-          {fetchError
-            ? 'This usually happens if you refreshed the page or navigated here directly. Please return home and place your order again.'
-            : 'No order was found. If you just completed checkout, please wait a moment and refresh.'}
+        <p className="mt-2 text-sm max-w-md" style={{ color: textSecondary }}>
+          This usually happens if you refreshed the page or navigated here directly.
+          Please return home and place your order again.
         </p>
         <Button
           onClick={() => setView('home')}
@@ -361,7 +252,8 @@ export function OrderConfirmation() {
     >
       <div className="w-full max-w-2xl">
         {/* ── Brand video block (top) ── */}
-        {/* The user uploads their video to /public/images/order-confirmed.mp4 */}
+        {/* The user uploads their video to /public/images/order-failed.mp4
+            (different from order-confirmed.mp4 used on the success page) */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -369,14 +261,18 @@ export function OrderConfirmation() {
           className="mb-8 flex flex-col items-center"
         >
           <video
-            src="/images/order-confirmed.mp4"
+            src="/images/order-failed.mp4"
             autoPlay
             loop
             muted
             playsInline
             className="h-70 w-140 object-contain mx-auto rounded-xl"
           />
-          
+          <div className="mt-3 flex items-center justify-center gap-3">
+            <span className="luxury-accent-bg h-px w-10 opacity-60" />
+            <span className="luxury-accent-bg h-1.5 w-1.5 rotate-45 rounded-sm opacity-70" />
+            <span className="luxury-accent-bg h-px w-10 opacity-60" />
+          </div>
         </motion.div>
 
         {/* ── Heading + subheading ── */}
@@ -386,18 +282,29 @@ export function OrderConfirmation() {
           transition={{ duration: 0.5, delay: 0.3 }}
           className="text-center"
         >
-          
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: 0.4, type: 'spring', stiffness: 200 }}
+            className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
+            style={{
+              background: isDark ? 'rgba(239, 68, 68, 0.12)' : 'rgba(239, 68, 68, 0.08)',
+              border: `2px solid ${failColor}`,
+            }}
+          >
+            <XCircle className="h-8 w-8" style={{ color: failColor }} />
+          </motion.div>
           <h2
             className="text-3xl font-bold sm:text-4xl"
-            style={{ color: accent, fontFamily: "'Urbanist', sans-serif" }}
+            style={{ color: failColor, fontFamily: "'Urbanist', sans-serif" }}
           >
-            {t('orderConfirmation.title')}
+            Order Failed!
           </h2>
           <p
             className="mt-2 text-base"
             style={{ color: textSecondary, fontFamily: "'Urbanist', sans-serif" }}
           >
-            {t('orderConfirmation.thankYou')}
+            Your payment could not be completed.
           </p>
         </motion.div>
 
@@ -474,14 +381,14 @@ export function OrderConfirmation() {
             </div>
           </div>
 
-          {/* ── Dates row ── */}
+          {/* ── Dates + Reason row ── */}
           <div
             className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-xl p-4"
             style={{
               background: isDark
-                ? 'linear-gradient(135deg, rgba(212, 164, 55, 0.06) 0%, rgba(184, 134, 11, 0.03) 100%)'
-                : 'linear-gradient(135deg, rgba(212, 164, 55, 0.10) 0%, rgba(184, 134, 11, 0.05) 100%)',
-              border: `1px solid ${isDark ? 'rgba(212, 164, 55, 0.15)' : 'rgba(212, 164, 55, 0.2)'}`,
+                ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.06) 0%, rgba(220, 38, 38, 0.03) 100%)'
+                : 'linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 38, 0.04) 100%)',
+              border: `1px solid ${isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.2)'}`,
             }}
           >
             <div className="flex items-start gap-3">
@@ -499,16 +406,19 @@ export function OrderConfirmation() {
               </div>
             </div>
             <div className="flex items-start gap-3">
-              <Truck className="h-4 w-4 mt-0.5 shrink-0" style={{ color: accent }} />
-              <div>
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" style={{ color: failColor }} />
+              <div className="min-w-0">
                 <p
                   className="text-[10px] uppercase tracking-[0.2em] font-semibold"
                   style={{ color: textMuted, fontFamily: "'Urbanist', sans-serif" }}
                 >
-                  Estimated Delivery
+                  Reason for Failure
                 </p>
-                <p className="mt-0.5 text-sm font-semibold" style={{ color: textPrimary }}>
-                  {formatDate(order.estimatedDelivery)}
+                <p
+                  className="mt-0.5 text-sm font-medium leading-snug"
+                  style={{ color: failColorMuted }}
+                >
+                  {displayReason}
                 </p>
               </div>
             </div>
@@ -561,7 +471,7 @@ export function OrderConfirmation() {
                 className="text-sm font-bold uppercase tracking-wider"
                 style={{ color: textPrimary, fontFamily: "'Urbanist', sans-serif" }}
               >
-                Total Paid
+                Total
               </span>
               <span
                 className="text-xl font-bold"
@@ -580,17 +490,13 @@ export function OrderConfirmation() {
           transition={{ duration: 0.5, delay: 0.7 }}
           className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
         >
-          {/* Download Invoice */}
+          {/* Try Again — primary action (gold gradient) */}
           <Button
-            onClick={handleDownloadInvoice}
-            disabled={invoiceLoading}
-            className="h-12 luxury-accent-gradient-bg text-stone-950 font-semibold hover:opacity-90 disabled:opacity-50 transition-all duration-200"
+            onClick={() => setView('payment-gateway')}
+            className="h-12 luxury-accent-gradient-bg text-stone-950 font-semibold hover:opacity-90 transition-all duration-200"
           >
-            {invoiceLoading ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Generating…</>
-            ) : (
-              <><Download className="mr-2 h-4 w-4" />Download Invoice</>
-            )}
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Try Again
           </Button>
 
           {/* View Orders */}
@@ -621,20 +527,32 @@ export function OrderConfirmation() {
             Continue Shopping
           </Button>
 
-          {/* Feedback */}
+          {/* Contact Support */}
           <Button
             variant="outline"
-            onClick={() => setView('feedback')}
+            onClick={() => setView('contact')}
             className="h-12 border-2 transition-all duration-200"
             style={{
               borderColor: isDark ? 'rgba(212, 164, 55, 0.3)' : 'rgba(184, 134, 11, 0.35)',
               color: textPrimary,
             }}
           >
-            <MessageSquare className="mr-2 h-4 w-4" style={{ color: accent }} />
-            Feedback
+            <LifeBuoy className="mr-2 h-4 w-4" style={{ color: accent }} />
+            Contact Support
           </Button>
         </motion.div>
+
+        {/* ── Helper note ── */}
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, delay: 0.9 }}
+          className="mt-6 text-center text-xs"
+          style={{ color: textMuted, fontFamily: "'Urbanist', sans-serif" }}
+        >
+          Your cart items have been reserved. Clicking &quot;Try Again&quot; will retry the payment
+          — no need to re-enter your details.
+        </motion.p>
       </div>
     </motion.div>
   );

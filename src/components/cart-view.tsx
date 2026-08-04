@@ -353,7 +353,7 @@ export function CartView() {
 
           {/* ── Order Summary ── */}
           <div
-            className="rounded-xl p-6 lg:sticky lg:top-40 lg:self-start z-10"
+            className="rounded-xl p-6 lg:sticky lg:top-45 lg:self-start z-10"
             style={{
               background: summaryBg,
               border: `1px solid ${summaryBorder}`,
@@ -362,16 +362,26 @@ export function CartView() {
               WebkitBackdropFilter: isDark ? 'blur(16px) saturate(1.2)' : 'none',
             }}
           >
-            <h3
-              className="text-lg font-semibold"
-              style={{
-                color: textPrimary,
-                fontFamily: "'Urbanist', sans-serif",
-                letterSpacing: '-0.01em',
-              }}
-            >
-              {t('cart.orderSummary')}
-            </h3>
+            <div className="flex items-center justify-between">
+  <h3
+    className="text-lg font-semibold"
+    style={{
+      color: textPrimary,
+      fontFamily: "'Urbanist', sans-serif",
+      letterSpacing: '-0.01em',
+    }}
+  >
+    {t('cart.orderSummary')}
+  </h3>
+  <video
+    src="/images/order-summary.mp4"
+    autoPlay
+    loop
+    muted
+    playsInline
+    className="h-30 w-45 object-contain"
+  />
+</div>
 
             {/* ── Free Shipping Banner (visible in both themes) ── */}
             <div
