@@ -61,10 +61,13 @@ export async function GET(request: NextRequest) {
       itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
       items: order.items.map((item) => ({
         id: item.id,
+        productId: item.productId,
         name: item.name,
         price: item.price,
         quantity: item.quantity,
         image: item.image,
+        variantId: item.variantId,
+        variantName: item.variantName,
       })),
     }))
 

@@ -19,15 +19,15 @@
  *       │                                                             │
  *       │        [ Cancel Order ]  [ Return Order ]                   │
  *       ├─────────────────────────────────────────────────────────────┤
- *       │ [Buy it again]  [View your item]            [status badge]  │
+ *       │ [Buy it again]  [View this item]            [status badge]  │
  *       └─────────────────────────────────────────────────────────────┘
  *
  * ACTION WIRING (per user spec — every button must work its function):
  *   • Cancel Order   → opens dialog → DELETE /api/orders/[id]
- *   • Return Order   → opens dialog → POST /api/support-tickets (category: 'return')
+ *   • Return Order   → opens dialog → POST /api/support-tickets (category: 'returns')
  *   • Invoice        → fetches /api/orders/[id]/invoice, generates PDF via jsPDF, downloads
  *   • Buy it again   → addItem() + setView('checkout')
- *   • View your item → selectProduct(item.id) → product detail page
+ *   • View this item → selectProduct(firstItem.productId) → product detail page
  *   • View order details → expands an inline list of all items in the order
  *
  * THEME: matches the home page (dark luxury by default with gold #dbaf36 accent,
@@ -46,11 +46,17 @@ import { Label } from '@/components/ui/label';
 import { motion } from 'framer-motion';
 import {
   Search, ArrowLeft, Truck, ExternalLink, Gift, Tag, XCircle, Loader2,
-  Clock, Package, ChevronDown, Download, RotateCcw, RefreshCw, Eye,
+  Clock, Package, Download, RotateCcw, RefreshCw, Eye, FileText,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import jsPDF from 'jspdf';
+import { CancelOrderPage } from '@/components/cancel-order-page';
+import { CancelConfirmationPage } from '@/components/cancel-confirmation-page';
+import { ReturnOrderPage, type ReturnDraft } from '@/components/return-order-page';
+import { ReturnMethodPage, type ReturnMethodData } from '@/components/return-method-page';
+import { ConfirmReturnPage } from '@/components/confirm-return-page';
+import { ReturnSummaryPage } from '@/components/return-summary-page';
 
 interface OrderItem {
   id: string;
@@ -89,9 +95,11 @@ interface Order {
 // ── Theme tokens (matches user-dashboard.tsx pattern) ──
 interface Theme {
   isDark: boolean;
+  pageBg: string;
   cardBg: string;
   cardBgSoft: string;
   cardBorder: string;
+  cardBorderHover: string;
   textPrimary: string;
   textSecondary: string;
   textMuted: string;
@@ -107,9 +115,11 @@ function useTheme(): Theme {
   const isDark = appTheme === 'dark';
   return {
     isDark,
+    pageBg: isDark ? 'bg-stone-950' : 'bg-[#fdf9f1]',
     cardBg: isDark ? 'bg-stone-900/70' : 'bg-white',
     cardBgSoft: isDark ? 'bg-stone-800/40' : 'bg-amber-50/40',
     cardBorder: isDark ? 'border-amber-500/15' : 'border-amber-200',
+    cardBorderHover: isDark ? 'hover:border-amber-500/35' : 'hover:border-amber-400',
     textPrimary: isDark ? 'text-amber-50' : 'text-stone-900',
     textSecondary: isDark ? 'text-amber-100/70' : 'text-stone-600',
     textMuted: isDark ? 'text-amber-100/40' : 'text-stone-500',
@@ -140,6 +150,7 @@ const statusColor = (s: string, isDark: boolean) => {
     shipped: 'bg-purple-100 text-purple-700 border-purple-200',
     delivered: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     cancelled: 'bg-red-100 text-red-700 border-red-200',
+    return: 'bg-orange-100 text-orange-700 border-orange-200',
   };
   const dark = {
     pending: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
@@ -147,6 +158,7 @@ const statusColor = (s: string, isDark: boolean) => {
     shipped: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
     delivered: 'bg-emerald-600/20 text-emerald-400 border-emerald-600/30',
     cancelled: 'bg-red-600/20 text-red-400 border-red-600/30',
+    return: 'bg-orange-600/20 text-orange-400 border-orange-600/30',
   };
   const map = isDark ? dark : light;
   return map[s] || (isDark ? dark.pending : light.pending);
@@ -158,10 +170,93 @@ export function OrderHistory() {
   const [email, setEmail] = useState(authUser?.email ?? '');
   const [searchEmail, setSearchEmail] = useState(authUser?.email ?? '');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
-  const [cancelLoading, setCancelLoading] = useState(false);
+  // ── Cancel order full-page view (Task 4p) ──
+  // When set, the OrderHistory page switches from the orders list to the
+  // dedicated CancelOrderPage for this specific order. Replaces the old
+  // small modal dialog.
+  const [cancelTargetOrder, setCancelTargetOrder] = useState<Order | null>(null);
+
+  // ── Cancel confirmation full-page view (Task 4q) ──
+  // When set, the OrderHistory page switches to the CancelConfirmationPage
+  // showing the user a "Your item has been cancelled" success message.
+  // Set after the DELETE succeeds (from handleCancelOrderSuccess).
+  const [cancelledOrder, setCancelledOrder] = useState<Order | null>(null);
+  const [cancelledAt, setCancelledAt] = useState<string | undefined>(undefined);
+
+  // ── Return order full-page view (Task 4r) ──
+  // When set, the OrderHistory page switches from the orders list to the
+  // dedicated ReturnOrderPage for this specific order. Replaces the old
+  // small modal dialog. The page handles its own item-selection + reason +
+  // comments + file upload state.
+  const [returnTargetOrder, setReturnTargetOrder] = useState<Order | null>(null);
+
+  // ── Return method full-page view (Task 4s — Step 2 of 4) ──
+  // When set, the OrderHistory page switches to the ReturnMethodPage for this
+  // specific order. Set by handleReturnContinue when the user clicks Continue
+  // on Step 1 (ReturnOrderPage). The draft carries the Step 1 selections
+  // (selectedItemIds + reason + comments + files) so Step 2 can include them
+  // in the final API submission. Clearing this state returns the user to Step 1.
+  const [returnMethodTargetOrder, setReturnMethodTargetOrder] = useState<Order | null>(null);
+  const [returnDraft, setReturnDraft] = useState<ReturnDraft | null>(null);
+
+  // ── Confirm return full-page view (Task 4u — Step 3 of 4) ──
+  // When set, the OrderHistory page switches to the ConfirmReturnPage for this
+  // specific order. Set by handleReturnMethodContinue when the user clicks
+  // Continue on Step 2 (ReturnMethodPage). The returnMethodData carries the
+  // Step 2 selections (returnMethod + pickupDate + pickupTimeSlot + address +
+  // instructions) so Step 3 can display them in the review card and submit
+  // the combined payload to /api/support-tickets when the user clicks
+  // "Confirm return". Clearing this state returns the user to Step 2.
+  const [confirmReturnTargetOrder, setConfirmReturnTargetOrder] = useState<Order | null>(null);
+  const [returnMethodData, setReturnMethodData] = useState<ReturnMethodData | null>(null);
+
+  // ── Return summary full-page view (Task 4v — Step 4 of 4) ──
+  // When set, the OrderHistory page switches to the ReturnSummaryPage for this
+  // specific order. Set by handleReturnSuccess after the ConfirmReturnPage
+  // successfully POSTs to /api/support-tickets and calls onSuccess. The
+  // returnSummaryAt timestamp is captured at confirmation time so the summary
+  // page can show "Requested on: <date>". Clearing this state returns the
+  // user to the orders list (Done button → handleReturnSummaryDone).
+  const [returnSummaryTargetOrder, setReturnSummaryTargetOrder] = useState<Order | null>(null);
+  const [returnSummaryAt, setReturnSummaryAt] = useState<string | undefined>(undefined);
+
+  // ── Persisted return requests (Task 4x — Return Summary button on orders list) ──
+  // A map of orderId → { draft, methodData, confirmedAt } for every return
+  // request the user has confirmed in this browser. Used to decide whether to
+  // show the "Return Summary" button on a given order card in the orders list.
+  // Persisted to localStorage so the button survives page refreshes.
+  type ReturnRequestEntry = {
+    draft: ReturnDraft;
+    methodData: ReturnMethodData;
+    confirmedAt: string;
+  };
+  const [returnRequestsByOrderId, setReturnRequestsByOrderId] = useState<Record<string, ReturnRequestEntry>>({});
+  const RETURN_REQUESTS_STORAGE_KEY = 'zendrite:return-requests-by-order-id';
+
+  // Load persisted return requests on mount.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RETURN_REQUESTS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, ReturnRequestEntry>;
+        if (parsed && typeof parsed === 'object') {
+          setReturnRequestsByOrderId(parsed);
+        }
+      }
+    } catch {
+      // ignore malformed storage
+    }
+  }, []);
+
+  // Persist return requests whenever the map changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem(RETURN_REQUESTS_STORAGE_KEY, JSON.stringify(returnRequestsByOrderId));
+    } catch {
+      // storage might be full or disabled — ignore
+    }
+  }, [returnRequestsByOrderId]);
+
   const [returnDialogOpen, setReturnDialogOpen] = useState(false);
   const [returnOrderId, setReturnOrderId] = useState<string | null>(null);
   const [returnOrderNumber, setReturnOrderNumber] = useState<string>('');
@@ -187,26 +282,168 @@ export function OrderHistory() {
     setSearchEmail(email);
   };
 
-  const handleCancelOrder = async () => {
-    if (!cancelOrderId) return;
-    setCancelLoading(true);
-    try {
-      const res = await fetch(`/api/orders/${cancelOrderId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', ...authH(authToken) },
-        body: JSON.stringify({ reason: cancelReason, email: searchEmail }),
-      });
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ['orders', searchEmail] });
-      }
-    } catch {
-      // ignore
-    } finally {
-      setCancelLoading(false);
-      setCancelDialogOpen(false);
-      setCancelReason('');
-      setCancelOrderId(null);
+  const handleCancelOrderSuccess = (cancelled?: Order) => {
+    queryClient.invalidateQueries({ queryKey: ['orders', searchEmail] });
+    setCancelTargetOrder(null);
+    if (cancelled) {
+      // Stash the cancelled order + timestamp so the CancelConfirmationPage
+      // can take over the OrderHistory render slot.
+      setCancelledOrder(cancelled);
+      setCancelledAt(new Date().toISOString());
     }
+  };
+
+  // ── CancelConfirmationPage action handlers (Task 4q) ──
+  const handleConfirmViewOrderDetails = () => {
+    setCancelledOrder(null);
+    setCancelledAt(undefined);
+  };
+  const handleConfirmContinueShopping = () => {
+    setCancelledOrder(null);
+    setCancelledAt(undefined);
+    setView('home');
+  };
+  const handleConfirmGoToHelp = () => {
+    setCancelledOrder(null);
+    setCancelledAt(undefined);
+    setView('contact');
+  };
+
+  // ── ReturnOrderPage action handlers (Task 4r) ──
+  // After the support ticket is successfully created, route the user to the
+  // contact/support page so they can see their ticket and continue the
+  // conversation there. Also invalidate the orders query in case we later
+  // add an "in-return-process" status to the order row.
+  // Task 4v: handleReturnSuccess — instead of routing to 'contact' (the old
+  // behavior from Task 4r/4s/4u), we now route to Step 4 (ReturnSummaryPage).
+  // We keep the returnTargetOrder / returnDraft / returnMethodData set so the
+  // summary page can render the same data the user just confirmed. We also
+  // stash the confirmation timestamp so the summary page can show
+  // "Requested on: <date>". The orders query is still invalidated so that
+  // when the user eventually clicks Done and returns to the orders list, the
+  // list reflects any backend-side "return requested" status update.
+  const handleReturnSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ['orders', searchEmail] });
+    const confirmedAt = new Date().toISOString();
+    setReturnSummaryAt(confirmedAt);
+    const targetOrder = (confirmReturnTargetOrder ?? returnMethodTargetOrder ?? returnTargetOrder) as Order | null;
+    setReturnSummaryTargetOrder(targetOrder);
+    // Task 4x: persist the return request so the "Return Summary" button
+    // shows on the orders list for this order going forward. Keyed by order.id
+    // so the user can re-open the summary from the orders list at any time.
+    if (targetOrder && returnDraft && returnMethodData) {
+      setReturnRequestsByOrderId((prev) => ({
+        ...prev,
+        [targetOrder.id]: { draft: returnDraft, methodData: returnMethodData, confirmedAt },
+      }));
+    }
+    // Keep returnTargetOrder / returnMethodTargetOrder / returnDraft /
+    // returnMethodData / confirmReturnTargetOrder set so the summary page can
+    // render them. They'll be cleared when the user clicks Done.
+  };
+  // Task 4x: handleViewReturnSummary — called when the user clicks the
+  // "Return Summary" button on an order card in the orders list. Restores
+  // the stashed draft + methodData + confirmedAt for that order and routes
+  // the user to the ReturnSummaryPage (Step 4).
+  const handleViewReturnSummary = (order: Order) => {
+    const entry = returnRequestsByOrderId[order.id];
+    if (!entry) return;
+    setReturnDraft(entry.draft);
+    setReturnMethodData(entry.methodData);
+    setReturnSummaryAt(entry.confirmedAt);
+    setReturnSummaryTargetOrder(order);
+  };
+  // Task 4v: handleReturnSummaryDone — clears the active return-flow state
+  // and routes back to the orders list (the default OrderHistory render).
+  // Task 4x: the persisted returnRequestsByOrderId map is KEPT so the
+  // "Return Summary" button continues to show on the order card after the
+  // user exits the summary view.
+  const handleReturnSummaryDone = () => {
+    setReturnSummaryTargetOrder(null);
+    setReturnSummaryAt(undefined);
+    setConfirmReturnTargetOrder(null);
+    setReturnMethodData(null);
+    setReturnMethodTargetOrder(null);
+    setReturnDraft(null);
+    setReturnTargetOrder(null);
+  };
+  // Task 4v: handleReturnSummaryBack — same as Done (the "Back to orders"
+  // breadcrumb on the summary page should also exit the flow).
+  const handleReturnSummaryBack = () => {
+    handleReturnSummaryDone();
+  };
+  const handleReturnGoToHelp = () => {
+    setReturnTargetOrder(null);
+    setReturnMethodTargetOrder(null);
+    setReturnDraft(null);
+    setConfirmReturnTargetOrder(null);
+    setReturnMethodData(null);
+    setReturnSummaryTargetOrder(null);
+    setReturnSummaryAt(undefined);
+    setView('contact');
+  };
+
+  // ── ReturnMethodPage action handlers (Task 4s) ──
+  // handleReturnContinue: called when the user clicks Continue on Step 1
+  // (ReturnOrderPage). Stashes the draft + sets returnMethodTargetOrder so
+  // OrderHistory renders Step 2 (ReturnMethodPage). returnTargetOrder is
+  // kept set so the parent knows which order this return is for.
+  const handleReturnContinue = (draft: ReturnDraft) => {
+    setReturnDraft(draft);
+    setReturnMethodTargetOrder(returnTargetOrder);
+  };
+  // handleReturnMethodBack: called when the user clicks Back on Step 2. Clears
+  // returnMethodTargetOrder so Step 1 re-renders. returnDraft is kept so Step 1
+  // can re-initialize its state from it (preserving the user's selections).
+  const handleReturnMethodBack = () => {
+    setReturnMethodTargetOrder(null);
+  };
+  // Task 4u: handleReturnMethodContinue — called when the user clicks Continue
+  // on Step 2 (ReturnMethodPage). Stashes the methodData + sets
+  // confirmReturnTargetOrder so OrderHistory renders Step 3 (ConfirmReturnPage).
+  // returnTargetOrder + returnMethodTargetOrder + returnDraft are kept set so
+  // the parent knows which order this return is for + the user can go Back to
+  // Step 2 / Step 1 from Step 3's Edit links.
+  const handleReturnMethodContinue = (methodData: ReturnMethodData) => {
+    setReturnMethodData(methodData);
+    setConfirmReturnTargetOrder(returnMethodTargetOrder);
+  };
+  // Task 4u: handleConfirmReturnBack — called when the user clicks Back on
+  // Step 3. Clears confirmReturnTargetOrder so Step 2 re-renders.
+  // returnMethodData is kept so Step 2 can re-initialize its state from it
+  // (preserving the user's selections) in a future iteration.
+  const handleConfirmReturnBack = () => {
+    setConfirmReturnTargetOrder(null);
+  };
+  // Task 4u: handleConfirmReturnEditItems — called when the user clicks "Edit"
+  // on Section 1 or 2 (Items / Reason) of Step 3. Routes back to Step 1.
+  const handleConfirmReturnEditItems = () => {
+    setConfirmReturnTargetOrder(null);
+    setReturnMethodTargetOrder(null);
+  };
+  // Task 4u: handleConfirmReturnEditMethod — called when the user clicks "Edit"
+  // on Section 3, 4 (date/time), or 5 (refund) of Step 3. Routes back to Step 2.
+  const handleConfirmReturnEditMethod = () => {
+    setConfirmReturnTargetOrder(null);
+  };
+  // Task 4t: called when the user clicks "Change address" on Step 2's Pickup
+  // address card. Clears all return-flow state and routes to the user dashboard
+  // where the user can edit their saved addresses. (order-history.tsx is the
+  // standalone public lookup page — it has no sidebar of its own, so we hand
+  // off to the full dashboard view. If the user isn't authenticated, the
+  // dashboard's auth gate will prompt them to log in.)
+  // Task 4u: also clears Step 3 state (confirmReturnTargetOrder + returnMethodData)
+  // so the user doesn't come back to a stale confirm page after editing their
+  // address.
+  const handleReturnChangeAddress = () => {
+    setReturnTargetOrder(null);
+    setReturnMethodTargetOrder(null);
+    setReturnDraft(null);
+    setConfirmReturnTargetOrder(null);
+    setReturnMethodData(null);
+    setReturnSummaryTargetOrder(null);
+    setReturnSummaryAt(undefined);
+    setView('user-dashboard');
   };
 
   const handleReturnOrder = async () => {
@@ -217,10 +454,13 @@ export function OrderHistory() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authH(authToken) },
         body: JSON.stringify({
-          subject: `Return request for order #${returnOrderNumber}`,
+          // Task 4v fix: /api/support-tickets expects {title, description,
+          // category, priority} — NOT {subject, message, category}.
+          // Valid category is 'returns' (plural).
+          title: `Return request for order #${returnOrderNumber}`,
           priority: 'medium',
-          category: 'return',
-          message: `I would like to return order #${returnOrderNumber}.\n\nReason: ${returnReason || 'Not specified'}`,
+          category: 'returns',
+          description: `I would like to return order #${returnOrderNumber}.\n\nReason: ${returnReason || 'Not specified'}`,
           metadata: { orderId: returnOrderId, orderNumber: returnOrderNumber, type: 'return_request' },
         }),
       });
@@ -362,9 +602,11 @@ export function OrderHistory() {
 
   const handleBuyAgain = (order: Order) => {
     const firstItem = order.items?.[0];
-    if (!firstItem) return;
+    // NOTE: `firstItem.productId` only — `firstItem.id` is the order-item UUID,
+    // NOT a product ID, so falling back to it would corrupt the cart.
+    if (!firstItem || !firstItem.productId) return;
     addItem({
-      productId: firstItem.productId || firstItem.id,
+      productId: firstItem.productId,
       name: firstItem.name,
       price: firstItem.price,
       image: firstItem.image || '',
@@ -374,14 +616,19 @@ export function OrderHistory() {
 
   const handleViewItem = (order: Order) => {
     const firstItem = order.items?.[0];
-    if (!firstItem) return;
-    selectProduct(firstItem.productId || firstItem.id);
+    // NOTE: We intentionally use `firstItem.productId` only — `firstItem.id` is the
+    // order-item UUID, NOT a product ID. Falling back to it would send the user
+    // to a non-existent product page ("Product not found").
+    if (!firstItem || !firstItem.productId) return;
+    selectProduct(firstItem.productId);
   };
 
+  // ── Open return page (Task 4r — full-page view, replaces the old dialog) ──
+  // Sets the returnTargetOrder state, which causes OrderHistory to render the
+  // ReturnOrderPage component instead of the orders list. The page handles its
+  // own item-selection + reason + comments + file upload UI.
   const openReturnDialog = (order: Order) => {
-    setReturnOrderId(order.id);
-    setReturnOrderNumber(order.orderNumber ?? order.id.slice(-8).toUpperCase());
-    setReturnDialogOpen(true);
+    setReturnTargetOrder(order);
   };
 
   const getStatusHeadline = (status: string, estimatedDelivery?: string, deliveredAt?: string) => {
@@ -412,6 +659,85 @@ export function OrderHistory() {
       animate={{ opacity: 1 }}
       className={`py-8 ${t.textPrimary}`}
     >
+      {/* ── Cancel confirmation page (highest priority — Task 4q) ── */}
+      {/* Shown after the user successfully cancels an order from the CancelOrderPage. */}
+      {cancelledOrder ? (
+        <CancelConfirmationPage
+          order={cancelledOrder}
+          theme={t}
+          cancelledAt={cancelledAt}
+          onViewOrderDetails={handleConfirmViewOrderDetails}
+          onContinueShopping={handleConfirmContinueShopping}
+          onGoToHelp={handleConfirmGoToHelp}
+        />
+      ) : cancelTargetOrder ? (
+        <CancelOrderPage
+          order={cancelTargetOrder}
+          theme={t}
+          email={searchEmail}
+          token={authToken}
+          onBack={() => setCancelTargetOrder(null)}
+          onSuccess={handleCancelOrderSuccess}
+        />
+      ) : returnSummaryTargetOrder && returnDraft && returnMethodData ? (
+        <ReturnSummaryPage
+          order={returnSummaryTargetOrder}
+          theme={t}
+          draft={returnDraft}
+          methodData={returnMethodData}
+          confirmedAt={returnSummaryAt}
+          email={searchEmail}
+          token={authToken}
+          onBack={handleReturnSummaryBack}
+          onDone={handleReturnSummaryDone}
+          onGoToHelp={handleReturnGoToHelp}
+          onEditAddress={handleReturnChangeAddress}
+        />
+      ) : confirmReturnTargetOrder && returnDraft && returnMethodData ? (
+        <ConfirmReturnPage
+          order={confirmReturnTargetOrder}
+          theme={t}
+          draft={returnDraft}
+          methodData={returnMethodData}
+          email={searchEmail}
+          token={authToken}
+          onBack={handleConfirmReturnBack}
+          onSuccess={handleReturnSuccess}
+          onEditItems={handleConfirmReturnEditItems}
+          onEditMethod={handleConfirmReturnEditMethod}
+          onEditAddress={handleReturnChangeAddress}
+          onGoToHelp={handleReturnGoToHelp}
+        />
+      ) : returnMethodTargetOrder && returnDraft ? (
+        <ReturnMethodPage
+          order={returnMethodTargetOrder}
+          theme={t}
+          draft={returnDraft}
+          email={searchEmail}
+          token={authToken}
+          onBack={handleReturnMethodBack}
+          onSuccess={handleReturnSuccess}
+          onGoToHelp={handleReturnGoToHelp}
+          onChangeAddress={handleReturnChangeAddress}
+          onContinue={handleReturnMethodContinue}
+        />
+      ) : returnTargetOrder ? (
+        <ReturnOrderPage
+          order={returnTargetOrder}
+          theme={t}
+          email={searchEmail}
+          token={authToken}
+          onBack={() => {
+            setReturnTargetOrder(null);
+            setReturnDraft(null);
+          }}
+          onSuccess={handleReturnSuccess}
+          onGoToHelp={handleReturnGoToHelp}
+          onContinue={handleReturnContinue}
+          initialDraft={returnDraft ?? undefined}
+        />
+      ) : (
+        <>
       <Button
         variant="ghost"
         onClick={() => setView('home')}
@@ -475,6 +801,23 @@ export function OrderHistory() {
             const cancellable = order.status === 'pending' || order.status === 'processing';
             const returnable = order.status === 'delivered';
             const invoiceLoading = invoiceLoadingId === order.id;
+            // Task 4x: show the "Return Summary" button only if the user has
+            // previously confirmed a return request for this order (persisted
+            // in localStorage via returnRequestsByOrderId).
+            const hasReturnRequest = !!returnRequestsByOrderId[order.id];
+            // Task 4y: the effective status shown on the badge. If the user has
+            // confirmed a return request for this order, show "Return" instead
+            // of the backend status (e.g. "delivered").
+            const effectiveStatus = hasReturnRequest ? 'return' : order.status;
+            // Task 4y: disable the "Return Order" button once a return has
+            // already been requested — the user should use "Return Summary"
+            // to view/edit the existing request instead of starting a new one.
+            const canRequestReturn = returnable && !hasReturnRequest;
+            // Task 4y: format the "Return requested on" date from the stashed
+            // confirmedAt timestamp for the sub-headline under the product name.
+            const returnRequestedDate = hasReturnRequest
+              ? fmtDate(returnRequestsByOrderId[order.id].confirmedAt)
+              : '';
 
             return (
               <div
@@ -493,9 +836,8 @@ export function OrderHistory() {
                   </div>
                   <div>
                     <p className={`text-[10px] font-semibold uppercase tracking-wider ${t.textMuted}`}>Ship To</p>
-                    <p className={`mt-1 inline-flex items-center gap-1 text-sm font-medium ${t.accentText}`}>
+                    <p className={`mt-1 text-sm font-medium ${t.accentText}`}>
                       {shipToName}
-                      <ChevronDown className={`h-3 w-3 ${t.textMuted}`} />
                     </p>
                   </div>
                   <div className="sm:text-right">
@@ -583,7 +925,11 @@ export function OrderHistory() {
                           <span className={`ml-1 ${t.textMuted}`}>&middot; +{(order.items?.length ?? 0) - 1} more item{(order.items?.length ?? 0) > 2 ? 's' : ''}</span>
                         )}
                       </button>
-                      {returnable ? (
+                      {hasReturnRequest ? (
+                        <p className={`mt-1.5 text-xs ${t.textMuted}`}>
+                          Return requested on {returnRequestedDate}
+                        </p>
+                      ) : returnable ? (
                         <p className={`mt-1.5 text-xs ${t.textMuted}`}>
                           Return window open until {fmtDate(order.estimatedDelivery || order.createdAt)}
                         </p>
@@ -619,8 +965,9 @@ export function OrderHistory() {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => selectProduct(item.productId || item.id)}
-                                className={`inline-flex items-center gap-1 text-[11px] font-medium ${t.accentText} hover:underline`}
+                                onClick={() => item.productId && selectProduct(item.productId)}
+                                disabled={!item.productId}
+                                className={`inline-flex items-center gap-1 text-[11px] font-medium ${t.accentText} hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline`}
                               >
                                 <Eye className="h-3 w-3" />
                                 View
@@ -678,7 +1025,7 @@ export function OrderHistory() {
                   <div className="flex shrink-0 flex-col gap-2 md:w-44">
                     <button
                       type="button"
-                      onClick={() => { setCancelOrderId(order.id); setCancelDialogOpen(true) }}
+                      onClick={() => setCancelTargetOrder(order)}
                       disabled={!cancellable}
                       className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
                         cancellable
@@ -694,17 +1041,36 @@ export function OrderHistory() {
                     <button
                       type="button"
                       onClick={() => openReturnDialog(order)}
-                      disabled={!returnable}
+                      disabled={!canRequestReturn}
                       className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
-                        returnable
+                        canRequestReturn
                           ? `${t.cardBorder} ${t.textSecondary} hover:bg-amber-50 dark:hover:bg-amber-900/20`
                           : `${t.cardBorder} cursor-not-allowed ${t.textMuted} opacity-50`
                       }`}
-                      title={returnable ? 'Request a return for this order' : 'Returns are available only for delivered orders'}
+                      title={hasReturnRequest ? 'A return has already been requested for this order — click Return Summary to view it' : returnable ? 'Request a return for this order' : 'Returns are available only for delivered orders'}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       Return Order
                     </button>
+                    {/* Task 4x: Return Summary button — only shown if the user
+                        has previously confirmed a return request for this order.
+                        Clicking it re-opens the ReturnSummaryPage (Step 4)
+                        with the stashed draft + methodData + confirmedAt. */}
+                    {hasReturnRequest && (
+                      <button
+                        type="button"
+                        onClick={() => handleViewReturnSummary(order)}
+                        className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
+                          t.isDark
+                            ? 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10'
+                            : 'border-emerald-700/60 text-emerald-800 hover:bg-emerald-50'
+                        }`}
+                        title="View the return summary for this order"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Return Summary
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -724,13 +1090,13 @@ export function OrderHistory() {
                     className={`inline-flex items-center gap-1.5 rounded-full border ${t.isDark ? 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10' : 'border-amber-700/60 text-amber-800 hover:bg-amber-50'} px-4 py-2 text-xs font-semibold transition-all`}
                   >
                     <Eye className="h-3.5 w-3.5" />
-                    View your item
+                    View this item
                   </button>
                   <Badge
                     variant="outline"
-                    className={`ml-auto capitalize ${statusColor(order.status, t.isDark)}`}
+                    className={`ml-auto capitalize ${statusColor(effectiveStatus, t.isDark)}`}
                   >
-                    {order.status}
+                    {effectiveStatus}
                   </Badge>
                 </div>
               </div>
@@ -739,86 +1105,15 @@ export function OrderHistory() {
         </div>
       )}
 
-      {/* Cancel Order Dialog */}
-      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
-        <DialogContent className={`${t.cardBorder} ${t.cardBg} sm:max-w-md`}>
-          <DialogHeader>
-            <DialogTitle className={t.textPrimary}>Cancel Order</DialogTitle>
-            <DialogDescription className={t.textMuted}>
-              Are you sure you want to cancel this order? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div>
-              <Label htmlFor="oh-cancel-reason" className={`text-sm ${t.textSecondary}`}>Reason for cancellation</Label>
-              <Input
-                id="oh-cancel-reason"
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="Tell us why you're cancelling"
-                className={`mt-1 ${t.cardBorder} ${t.cardBg} ${t.textPrimary}`}
-              />
-            </div>
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => { setCancelDialogOpen(false); setCancelReason(''); setCancelOrderId(null) }}
-                className={`flex-1 ${t.cardBorder} ${t.textSecondary}`}
-              >
-                Keep Order
-              </Button>
-              <Button
-                onClick={handleCancelOrder}
-                disabled={cancelLoading}
-                className="flex-1 bg-red-600 text-white hover:bg-red-500"
-              >
-                {cancelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancel Order'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Return Order Dialog */}
-      <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
-        <DialogContent className={`${t.cardBorder} ${t.cardBg} sm:max-w-md`}>
-          <DialogHeader>
-            <DialogTitle className={t.textPrimary}>Return Order</DialogTitle>
-            <DialogDescription className={t.textMuted}>
-              Tell us why you'd like to return order #{returnOrderNumber}. Our support team will follow up shortly.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div>
-              <Label htmlFor="oh-return-reason" className={`text-sm ${t.textSecondary}`}>Reason for return</Label>
-              <textarea
-                id="oh-return-reason"
-                value={returnReason}
-                onChange={(e) => setReturnReason(e.target.value)}
-                placeholder="e.g. Wrong size, damaged in transit, changed my mind..."
-                rows={4}
-                className={`mt-1 w-full rounded-md border ${t.isDark ? 'border-amber-500/20 bg-stone-900/50' : 'border-amber-200 bg-white'} px-3 py-2 text-sm ${t.textPrimary} focus:outline-none focus:ring-2 focus:ring-amber-500/30`}
-              />
-            </div>
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => { setReturnDialogOpen(false); setReturnReason(''); setReturnOrderId(null); setReturnOrderNumber('') }}
-                className={`flex-1 ${t.cardBorder} ${t.textSecondary}`}
-              >
-                Keep Order
-              </Button>
-              <Button
-                onClick={handleReturnOrder}
-                disabled={returnLoading}
-                className="flex-1 luxury-accent-gradient-bg text-stone-950 font-semibold hover:opacity-90"
-              >
-                {returnLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit Return Request'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* ── Return Order Dialog removed (Task 4r) ── */}
+      {/* The Return flow now opens the full-page ReturnOrderPage component
+          instead of this small modal dialog. The dialog markup, the
+          returnDialogOpen / returnOrderId / returnOrderNumber / returnReason
+          state, and the handleReturnOrder async function are kept only as
+          dead state — they will be cleaned up in a later refactor if needed.
+          The Dialog element below is intentionally not rendered. */}
+        </>
+      )}
     </motion.div>
   );
 }

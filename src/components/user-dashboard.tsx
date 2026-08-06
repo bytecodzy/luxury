@@ -54,7 +54,7 @@
  *   • View ticket dialog with messages
  */
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { useStore } from '@/lib/store'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
@@ -77,6 +77,13 @@ import {
   Download, RefreshCw, Eye,
 } from 'lucide-react'
 import jsPDF from 'jspdf'
+import { CancelOrderPage } from '@/components/cancel-order-page'
+import { CancelConfirmationPage } from '@/components/cancel-confirmation-page'
+import { ReturnOrderPage, type ReturnDraft } from '@/components/return-order-page'
+import { ReturnMethodPage, type ReturnMethodData } from '@/components/return-method-page'
+import { ConfirmReturnPage } from '@/components/confirm-return-page'
+import { ReturnSummaryPage } from '@/components/return-summary-page'
+import { TrackOrderPage } from '@/components/track-order-page'
 
 /* ─── helpers ─── */
 const authH = (t: string | null): Record<string, string> => t ? { Authorization: `Bearer ${t}` } : {}
@@ -88,6 +95,7 @@ const statusColor = (s: string, isDark: boolean) => {
     shipped: 'bg-purple-100 text-purple-700 border-purple-200',
     delivered: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     cancelled: 'bg-red-100 text-red-700 border-red-200',
+    return: 'bg-orange-100 text-orange-700 border-orange-200',
     open: 'bg-amber-100 text-amber-700 border-amber-200',
     in_progress: 'bg-blue-100 text-blue-700 border-blue-200',
     resolved: 'bg-emerald-100 text-emerald-700 border-emerald-200',
@@ -99,6 +107,7 @@ const statusColor = (s: string, isDark: boolean) => {
     shipped: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
     delivered: 'bg-emerald-600/20 text-emerald-400 border-emerald-600/30',
     cancelled: 'bg-red-600/20 text-red-400 border-red-600/30',
+    return: 'bg-orange-600/20 text-orange-400 border-orange-600/30',
     open: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
     in_progress: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
     resolved: 'bg-emerald-600/20 text-emerald-400 border-emerald-600/30',
@@ -126,7 +135,7 @@ type NavKey =
   | 'wishlist'             // Profile → Wishlist (external: setView('wishlist'))
   | 'orders'               // Orders overview (defaults to order history)
   | 'order-history'        // Orders → Order History
-  | 'order-tracking'       // Orders → Order Tracking (external: setView('track-order'))
+  | 'order-tracking'       // Orders → Order Tracking (internal: TrackOrdersView — Task 4z)
   | 'coupons'              // renamed from "My Gift Cards"
   | 'notifications'
   | 'faq'                  // renamed from "Help & Support" (external: setView('faq'))
@@ -138,7 +147,7 @@ interface NavLeaf {
   icon: React.ComponentType<{ className?: string }>
   badge?: number
   // When set, clicking this leaf calls setView(externalView) instead of
-  // switching the internal activeNav. Used for wishlist / faq / track-order.
+  // switching the internal activeNav. Used for wishlist / faq.
   externalView?: string
 }
 
@@ -235,7 +244,7 @@ export function UserDashboard() {
   //     └─ Wishlist          → setView('wishlist')
   //   Orders (expandable)
   //     ├─ Order History     → MyOrdersView
-  //     └─ Order Tracking    → setView('track-order')
+  //     └─ Order Tracking    → TrackOrdersView (internal dashboard view — Task 4z)
   //   Coupons                → GiftCardsView (renamed from "My Gift Cards")
   //   Notifications          → NotificationsView
   //   FAQ's                  → setView('faq') (renamed from "Help & Support")
@@ -259,7 +268,7 @@ export function UserDashboard() {
       icon: ShoppingBag,
       children: [
         { key: 'order-history', label: 'Order History', icon: ClipboardList },
-        { key: 'order-tracking', label: 'Order Tracking', icon: Truck, externalView: 'track-order' },
+        { key: 'order-tracking', label: 'Order Tracking', icon: Truck },
       ],
     },
     { key: 'coupons', label: 'Coupons', icon: Ticket },
@@ -286,7 +295,7 @@ export function UserDashboard() {
     const parent = navItems.find(n => n.key === key)
     const leaf = parent?.children?.find(c => c.key === key)
 
-    // External-view leaf (wishlist / faq / track-order): navigate via setView
+    // External-view leaf (wishlist / faq): navigate via setView
     // and DON'T change activeNav (so the dashboard internal state stays put).
     if (leaf?.externalView) {
       setView(leaf.externalView as any)
@@ -385,9 +394,30 @@ export function UserDashboard() {
               selectProduct={selectProduct}
               addItem={addItem}
               userName={authUser.name}
+              onNavigateToAddresses={() => {
+                // Task 4t: when the user clicks "Change address" on the ReturnMethodPage,
+                // exit the return flow and jump to the Profile → Address section so
+                // they can edit the address that will be used for pickup.
+                setActiveNav('addresses')
+                setExpandedParents({ profile: true })
+                if (typeof window !== 'undefined') {
+                  window.scrollTo({ top: 0, behavior: 'smooth' })
+                }
+              }}
             />
           )}
-          {/* Orders → Order Tracking is external (setView('track-order')) — no internal view */}
+          {/* Orders → Order Tracking (Task 4z — internal dashboard view) */}
+          {activeNav === 'order-tracking' && (
+            <TrackOrdersView
+              token={authToken}
+              email={authUser.email}
+              theme={t}
+              setView={setView}
+              selectProduct={selectProduct}
+              addItem={addItem}
+              userName={authUser.name}
+            />
+          )}
 
           {/* Coupons (renamed from My Gift Cards) */}
           {activeNav === 'coupons' && <GiftCardsView theme={t} />}
@@ -1006,7 +1036,7 @@ function WishlistPreviewSection({ token, selectProduct, setView, theme }: { toke
 /* ─────────────────────────────────────────────────────────────── */
 
 function MyOrdersView({
-  token, email, theme, setView, selectProduct, addItem, userName,
+  token, email, theme, setView, selectProduct, addItem, userName, onNavigateToAddresses,
 }: {
   token: string | null
   email: string
@@ -1015,6 +1045,10 @@ function MyOrdersView({
   selectProduct: (id: string) => void
   addItem: (item: { productId: string; name: string; price: number; image: string }) => void
   userName: string
+  // Task 4t: called when the user clicks "Change address" on the ReturnMethodPage.
+  // Parent (UserDashboard) switches activeNav to 'addresses' so the user lands on
+  // the Saved Address section without leaving the dashboard.
+  onNavigateToAddresses: () => void
 }) {
   const t = theme
   const { data, isLoading } = useQuery({
@@ -1026,10 +1060,97 @@ function MyOrdersView({
     },
   })
 
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
-  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null)
-  const [cancelReason, setCancelReason] = useState('')
-  const [cancelLoading, setCancelLoading] = useState(false)
+  // ── Cancel order full-page view (Task 4p) ──
+  // When set, the MyOrdersView switches from the orders list to the dedicated
+  // CancelOrderPage for this specific order. Replaces the old small modal dialog.
+  const [cancelTargetOrder, setCancelTargetOrder] = useState<any | null>(null)
+
+  // ── Cancel confirmation full-page view (Task 4q) ──
+  // When set, the MyOrdersView switches to the CancelConfirmationPage showing
+  // the user a "Your item has been cancelled" success message. Set after the
+  // DELETE succeeds (from handleCancelOrderSuccess). Cleared when the user
+  // chooses to view order details or continue shopping.
+  const [cancelledOrder, setCancelledOrder] = useState<any | null>(null)
+  const [cancelledAt, setCancelledAt] = useState<string | undefined>(undefined)
+
+  // ── Return order full-page view (Task 4r) ──
+  // When set, the MyOrdersView switches from the orders list to the dedicated
+  // ReturnOrderPage for this specific order. Replaces the old small modal dialog.
+  // The page handles its own item-selection + reason + comments + file upload
+  // state. onSuccess is called after the support-ticket POST succeeds, which
+  // then routes the user to the contact/support page so they can see their
+  // ticket and continue the conversation there.
+  const [returnTargetOrder, setReturnTargetOrder] = useState<any | null>(null)
+
+  // ── Return method full-page view (Task 4s — Step 2 of 4) ──
+  // When set, the MyOrdersView switches to the ReturnMethodPage for this
+  // specific order. Set by handleReturnContinue when the user clicks Continue
+  // on Step 1 (ReturnOrderPage). The draft carries the Step 1 selections
+  // (selectedItemIds + reason + comments + files) so Step 2 can include them
+  // in the final API submission. Clearing this state returns the user to Step 1.
+  const [returnMethodTargetOrder, setReturnMethodTargetOrder] = useState<any | null>(null)
+  const [returnDraft, setReturnDraft] = useState<ReturnDraft | null>(null)
+
+  // ── Confirm return full-page view (Task 4u — Step 3 of 4) ──
+  // When set, the MyOrdersView switches to the ConfirmReturnPage for this
+  // specific order. Set by handleReturnMethodContinue when the user clicks
+  // Continue on Step 2 (ReturnMethodPage). The returnMethodData carries the
+  // Step 2 selections (returnMethod + pickupDate + pickupTimeSlot + address +
+  // instructions) so Step 3 can display them in the review card and submit
+  // the combined payload to /api/support-tickets when the user clicks
+  // "Confirm return". Clearing this state returns the user to Step 2.
+  const [confirmReturnTargetOrder, setConfirmReturnTargetOrder] = useState<any | null>(null)
+  const [returnMethodData, setReturnMethodData] = useState<ReturnMethodData | null>(null)
+
+  // ── Return summary full-page view (Task 4v — Step 4 of 4) ──
+  // When set, the MyOrdersView switches to the ReturnSummaryPage for this
+  // specific order. Set by handleReturnSuccess after the ConfirmReturnPage
+  // successfully POSTs to /api/support-tickets and calls onSuccess. The
+  // returnSummaryAt timestamp is captured at confirmation time so the summary
+  // page can show "Requested on: <date>". Clearing this state returns the
+  // user to the orders list (Done button → handleReturnSummaryDone).
+  const [returnSummaryTargetOrder, setReturnSummaryTargetOrder] = useState<any | null>(null)
+  const [returnSummaryAt, setReturnSummaryAt] = useState<string | undefined>(undefined)
+
+  // ── Persisted return requests (Task 4x — Return Summary button on orders list) ──
+  // A map of orderId → { draft, methodData, confirmedAt } for every return
+  // request the user has confirmed in this browser. Used to decide whether to
+  // show the "Return Summary" button on a given order card in the orders list.
+  // Persisted to localStorage so the button survives page refreshes.
+  // NOTE: keyed by order.id (string). The value mirrors exactly what
+  // ReturnSummaryPage needs to render (draft + methodData + confirmedAt).
+  type ReturnRequestEntry = {
+    draft: ReturnDraft
+    methodData: ReturnMethodData
+    confirmedAt: string
+  }
+  const [returnRequestsByOrderId, setReturnRequestsByOrderId] = useState<Record<string, ReturnRequestEntry>>({})
+  const RETURN_REQUESTS_STORAGE_KEY = 'zendrite:return-requests-by-order-id'
+
+  // Load persisted return requests on mount.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RETURN_REQUESTS_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, ReturnRequestEntry>
+        if (parsed && typeof parsed === 'object') {
+          setReturnRequestsByOrderId(parsed)
+        }
+      }
+    } catch {
+      // ignore malformed storage
+    }
+  }, [])
+
+  // Persist return requests whenever the map changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem(RETURN_REQUESTS_STORAGE_KEY, JSON.stringify(returnRequestsByOrderId))
+    } catch {
+      // storage might be full or disabled — ignore
+    }
+  }, [returnRequestsByOrderId])
+
   const [returnDialogOpen, setReturnDialogOpen] = useState(false)
   const [returnOrderId, setReturnOrderId] = useState<string | null>(null)
   const [returnOrderNumber, setReturnOrderNumber] = useState<string>('')
@@ -1042,28 +1163,188 @@ function MyOrdersView({
   const orders = Array.isArray(data?.orders) ? data.orders : []
 
   // ── Cancel order (DELETE /api/orders/[id]) ──
-  const handleCancelOrder = async () => {
-    if (!cancelOrderId) return
-    setCancelLoading(true)
-    try {
-      const res = await fetch(`/api/orders/${cancelOrderId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', ...authH(token) },
-        body: JSON.stringify({ reason: cancelReason, email }),
-      })
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: ['user-orders-list', email] })
-        queryClient.invalidateQueries({ queryKey: ['user-orders-stats', email] })
-        queryClient.invalidateQueries({ queryKey: ['user-orders-recent', email] })
-      }
-    } catch {
-      // ignore
-    } finally {
-      setCancelLoading(false)
-      setCancelDialogOpen(false)
-      setCancelReason('')
-      setCancelOrderId(null)
+  // Now invoked from the CancelOrderPage. onSuccess receives the cancelled
+  // order (Task 4q) so we can show the CancelConfirmationPage instead of
+  // snapping back to the orders list. We also invalidate the orders queries
+  // here so that when the user eventually returns to the list (from the
+  // confirmation page's "View order details" or "Continue shopping" action),
+  // the list shows the order's new "cancelled" status.
+  const handleCancelOrderSuccess = (cancelled?: any) => {
+    queryClient.invalidateQueries({ queryKey: ['user-orders-list', email] })
+    queryClient.invalidateQueries({ queryKey: ['user-orders-stats', email] })
+    queryClient.invalidateQueries({ queryKey: ['user-orders-recent', email] })
+    setCancelTargetOrder(null)
+    if (cancelled) {
+      // Stash the cancelled order + timestamp and let the CancelConfirmationPage
+      // take over the MyOrdersView's render slot.
+      setCancelledOrder(cancelled)
+      setCancelledAt(new Date().toISOString())
     }
+  }
+
+  // ── CancelConfirmationPage action handlers (Task 4q) ──
+  // View order details → return to the orders list (queries are already
+  // invalidated above so the cancelled order will show its new status).
+  const handleConfirmViewOrderDetails = () => {
+    setCancelledOrder(null)
+    setCancelledAt(undefined)
+  }
+  // Continue shopping → leave the dashboard entirely and go to the home view.
+  const handleConfirmContinueShopping = () => {
+    setCancelledOrder(null)
+    setCancelledAt(undefined)
+    setView('home')
+  }
+  // Go to Help Centre → route to the contact/support view.
+  const handleConfirmGoToHelp = () => {
+    setCancelledOrder(null)
+    setCancelledAt(undefined)
+    setView('contact')
+  }
+
+  // ── ReturnOrderPage success handler (Task 4r) ──
+  // After the support ticket is successfully created, route the user to the
+  // contact/support page so they can see their ticket and continue the
+  // conversation there. Also invalidate the orders queries in case we later
+  // add an "in-return-process" status to the order row.
+  // Task 4v: handleReturnSuccess — instead of routing to 'contact' (the old
+  // behavior from Task 4r/4s/4u), we now route to Step 4 (ReturnSummaryPage).
+  // We keep the returnTargetOrder / returnDraft / returnMethodData set so the
+  // summary page can render the same data the user just confirmed. We also
+  // stash the confirmation timestamp so the summary page can show
+  // "Requested on: <date>". The orders queries are still invalidated so that
+  // when the user eventually clicks Done and returns to the orders list, the
+  // list reflects any backend-side "return requested" status update.
+  const handleReturnSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ['user-orders-list', email] })
+    queryClient.invalidateQueries({ queryKey: ['user-orders-stats', email] })
+    queryClient.invalidateQueries({ queryKey: ['user-orders-recent', email] })
+    const confirmedAt = new Date().toISOString()
+    setReturnSummaryAt(confirmedAt)
+    const targetOrder = confirmReturnTargetOrder ?? returnMethodTargetOrder ?? returnTargetOrder
+    setReturnSummaryTargetOrder(targetOrder)
+    // Task 4x: persist the return request so the "Return Summary" button
+    // shows on the orders list for this order going forward. Keyed by order.id
+    // so the user can re-open the summary from the orders list at any time.
+    if (targetOrder && returnDraft && returnMethodData) {
+      setReturnRequestsByOrderId((prev) => ({
+        ...prev,
+        [targetOrder.id]: { draft: returnDraft, methodData: returnMethodData, confirmedAt },
+      }))
+    }
+    // Keep returnTargetOrder / returnMethodTargetOrder / returnDraft /
+    // returnMethodData / confirmReturnTargetOrder set so the summary page can
+    // render them. They'll be cleared when the user clicks Done.
+  }
+
+  // Task 4x: handleViewReturnSummary — called when the user clicks the
+  // "Return Summary" button on an order card in the orders list. Restores
+  // the stashed draft + methodData + confirmedAt for that order and routes
+  // the user to the ReturnSummaryPage (Step 4).
+  const handleViewReturnSummary = (order: any) => {
+    const entry = returnRequestsByOrderId[order.id]
+    if (!entry) return
+    setReturnDraft(entry.draft)
+    setReturnMethodData(entry.methodData)
+    setReturnSummaryAt(entry.confirmedAt)
+    setReturnSummaryTargetOrder(order)
+  }
+  // Task 4v: handleReturnSummaryDone — clears the active return-flow state
+  // and routes back to the orders list (the default MyOrdersView render).
+  // Task 4x: the persisted returnRequestsByOrderId map is KEPT so the
+  // "Return Summary" button continues to show on the order card after the
+  // user exits the summary view. The map is only cleared by an explicit
+  // "clear" action (not yet wired in the UI).
+  const handleReturnSummaryDone = () => {
+    setReturnSummaryTargetOrder(null)
+    setReturnSummaryAt(undefined)
+    setConfirmReturnTargetOrder(null)
+    setReturnMethodData(null)
+    setReturnMethodTargetOrder(null)
+    setReturnDraft(null)
+    setReturnTargetOrder(null)
+  }
+  // Task 4v: handleReturnSummaryBack — same as Done (the "Back to orders"
+  // breadcrumb on the summary page should also exit the flow).
+  const handleReturnSummaryBack = () => {
+    handleReturnSummaryDone()
+  }
+  // Go to Help Centre from the ReturnOrderPage's sidebar links (same dest as
+  // the cancel-confirmation's help link).
+  const handleReturnGoToHelp = () => {
+    setReturnTargetOrder(null)
+    setReturnMethodTargetOrder(null)
+    setReturnDraft(null)
+    setConfirmReturnTargetOrder(null)
+    setReturnMethodData(null)
+    setReturnSummaryTargetOrder(null)
+    setReturnSummaryAt(undefined)
+    setView('contact')
+  }
+
+  // ── ReturnMethodPage action handlers (Task 4s) ──
+  // handleReturnContinue: called when the user clicks Continue on Step 1
+  // (ReturnOrderPage). Stashes the draft + sets returnMethodTargetOrder so
+  // MyOrdersView renders Step 2 (ReturnMethodPage). returnTargetOrder is
+  // kept set so the parent knows which order this return is for.
+  const handleReturnContinue = (draft: ReturnDraft) => {
+    setReturnDraft(draft)
+    setReturnMethodTargetOrder(returnTargetOrder)
+  }
+  // handleReturnMethodBack: called when the user clicks Back on Step 2. Clears
+  // returnMethodTargetOrder so Step 1 re-renders. returnDraft is kept so Step 1
+  // can re-initialize its state from it (preserving the user's selections).
+  const handleReturnMethodBack = () => {
+    setReturnMethodTargetOrder(null)
+  }
+  // Task 4u: handleReturnMethodContinue — called when the user clicks Continue
+  // on Step 2 (ReturnMethodPage). Stashes the methodData + sets
+  // confirmReturnTargetOrder so MyOrdersView renders Step 3 (ConfirmReturnPage).
+  // returnTargetOrder + returnMethodTargetOrder + returnDraft are kept set so
+  // the parent knows which order this return is for + the user can go Back to
+  // Step 2 / Step 1 from Step 3's Edit links.
+  const handleReturnMethodContinue = (methodData: ReturnMethodData) => {
+    setReturnMethodData(methodData)
+    setConfirmReturnTargetOrder(returnMethodTargetOrder)
+  }
+  // Task 4u: handleConfirmReturnBack — called when the user clicks Back on
+  // Step 3. Clears confirmReturnTargetOrder so Step 2 re-renders.
+  // returnMethodData is kept so Step 2 can re-initialize its state from it
+  // (preserving the user's selections). [NOTE: Step 2's current implementation
+  // re-initializes from defaults, not from returnMethodData — but keeping the
+  // data around means a future iteration can restore Step 2 state the same way
+  // Step 1 restores from returnDraft.]
+  const handleConfirmReturnBack = () => {
+    setConfirmReturnTargetOrder(null)
+  }
+  // Task 4u: handleConfirmReturnEditItems — called when the user clicks "Edit"
+  // on Section 1 or 2 (Items / Reason) of Step 3. Routes back to Step 1.
+  // returnDraft is kept so Step 1 re-initializes with the user's previous
+  // selections (preserving item checkboxes + reason + comments + files).
+  const handleConfirmReturnEditItems = () => {
+    setConfirmReturnTargetOrder(null)
+    setReturnMethodTargetOrder(null)
+  }
+  // Task 4u: handleConfirmReturnEditMethod — called when the user clicks "Edit"
+  // on Section 3, 4 (date/time), or 5 (refund) of Step 3. Routes back to Step 2.
+  const handleConfirmReturnEditMethod = () => {
+    setConfirmReturnTargetOrder(null)
+  }
+  // Task 4t: called when the user clicks "Change address" on Step 2's Pickup
+  // address card. Clears all return-flow state and delegates to the parent's
+  // onNavigateToAddresses, which switches activeNav to 'addresses'.
+  // Task 4u: also clears Step 3 state (confirmReturnTargetOrder + returnMethodData)
+  // so the user doesn't come back to a stale confirm page after editing their
+  // address.
+  const handleReturnChangeAddress = () => {
+    setReturnTargetOrder(null)
+    setReturnMethodTargetOrder(null)
+    setReturnDraft(null)
+    setConfirmReturnTargetOrder(null)
+    setReturnMethodData(null)
+    setReturnSummaryTargetOrder(null)
+    setReturnSummaryAt(undefined)
+    onNavigateToAddresses()
   }
 
   // ── Return order (POST /api/support-tickets with return context) ──
@@ -1077,11 +1358,14 @@ function MyOrdersView({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authH(token) },
         body: JSON.stringify({
-          subject: `Return request for order #${returnOrderNumber}`,
+          // Task 4v fix: /api/support-tickets expects {title, description,
+          // category, priority} — NOT {subject, message, category}.
+          // Valid category is 'returns' (plural).
+          title: `Return request for order #${returnOrderNumber}`,
           priority: 'medium',
-          category: 'return',
+          category: 'returns',
           // First message body — include reason + order reference
-          message: `I would like to return order #${returnOrderNumber}.\n\nReason: ${returnReason || 'Not specified'}`,
+          description: `I would like to return order #${returnOrderNumber}.\n\nReason: ${returnReason || 'Not specified'}`,
           metadata: { orderId: returnOrderId, orderNumber: returnOrderNumber, type: 'return_request' },
         }),
       })
@@ -1230,11 +1514,13 @@ function MyOrdersView({
   }, [token])
 
   // ── Buy Again — add the first item to cart + go to checkout ──
+  // NOTE: `firstItem.productId` only — `firstItem.id` is the order-item UUID,
+  // NOT a product ID, so falling back to it would corrupt the cart.
   const handleBuyAgain = (order: any) => {
     const firstItem = order.items?.[0]
-    if (!firstItem) return
+    if (!firstItem || !firstItem.productId) return
     addItem({
-      productId: firstItem.productId || firstItem.id,
+      productId: firstItem.productId,
       name: firstItem.name,
       price: firstItem.price,
       image: firstItem.image || '',
@@ -1242,18 +1528,22 @@ function MyOrdersView({
     setView('checkout')
   }
 
-  // ── View Item — open the product detail page ──
+  // ── View Item — open the product detail page for the first item in the order ──
+  // NOTE: We intentionally use `firstItem.productId` only — `firstItem.id` is the
+  // order-item UUID, NOT a product ID, so falling back to it would send the user
+  // to a non-existent product page ("Product not found").
   const handleViewItem = (order: any) => {
     const firstItem = order.items?.[0]
-    if (!firstItem) return
-    selectProduct(firstItem.productId || firstItem.id)
+    if (!firstItem || !firstItem.productId) return
+    selectProduct(firstItem.productId)
   }
 
-  // ── Open return dialog ──
+  // ── Open return page (Task 4r — full-page view, replaces the old dialog) ──
+  // Sets the returnTargetOrder state, which causes MyOrdersView to render the
+  // ReturnOrderPage component instead of the orders list. The page handles its
+  // own item-selection + reason + comments + file upload UI.
   const openReturnDialog = (order: any) => {
-    setReturnOrderId(order.id)
-    setReturnOrderNumber(order.orderNumber ?? order.id.slice(-8).toUpperCase())
-    setReturnDialogOpen(true)
+    setReturnTargetOrder(order)
   }
 
   // ── Status label helper ──
@@ -1289,6 +1579,85 @@ function MyOrdersView({
 
   return (
     <div className="space-y-4">
+      {/* ── Cancel confirmation page (highest priority — Task 4q) ── */}
+      {/* Shown after the user successfully cancels an order from the CancelOrderPage. */}
+      {cancelledOrder ? (
+        <CancelConfirmationPage
+          order={cancelledOrder}
+          theme={t}
+          cancelledAt={cancelledAt}
+          onViewOrderDetails={handleConfirmViewOrderDetails}
+          onContinueShopping={handleConfirmContinueShopping}
+          onGoToHelp={handleConfirmGoToHelp}
+        />
+      ) : cancelTargetOrder ? (
+        <CancelOrderPage
+          order={cancelTargetOrder}
+          theme={t}
+          email={email}
+          token={token}
+          onBack={() => setCancelTargetOrder(null)}
+          onSuccess={handleCancelOrderSuccess}
+        />
+      ) : returnSummaryTargetOrder && returnDraft && returnMethodData ? (
+        <ReturnSummaryPage
+          order={returnSummaryTargetOrder}
+          theme={t}
+          draft={returnDraft}
+          methodData={returnMethodData}
+          confirmedAt={returnSummaryAt}
+          email={email}
+          token={token}
+          onBack={handleReturnSummaryBack}
+          onDone={handleReturnSummaryDone}
+          onGoToHelp={handleReturnGoToHelp}
+          onEditAddress={handleReturnChangeAddress}
+        />
+      ) : confirmReturnTargetOrder && returnDraft && returnMethodData ? (
+        <ConfirmReturnPage
+          order={confirmReturnTargetOrder}
+          theme={t}
+          draft={returnDraft}
+          methodData={returnMethodData}
+          email={email}
+          token={token}
+          onBack={handleConfirmReturnBack}
+          onSuccess={handleReturnSuccess}
+          onEditItems={handleConfirmReturnEditItems}
+          onEditMethod={handleConfirmReturnEditMethod}
+          onEditAddress={handleReturnChangeAddress}
+          onGoToHelp={handleReturnGoToHelp}
+        />
+      ) : returnMethodTargetOrder && returnDraft ? (
+        <ReturnMethodPage
+          order={returnMethodTargetOrder}
+          theme={t}
+          draft={returnDraft}
+          email={email}
+          token={token}
+          onBack={handleReturnMethodBack}
+          onSuccess={handleReturnSuccess}
+          onGoToHelp={handleReturnGoToHelp}
+          onChangeAddress={handleReturnChangeAddress}
+          onContinue={handleReturnMethodContinue}
+        />
+      ) : returnTargetOrder ? (
+        <ReturnOrderPage
+          order={returnTargetOrder}
+          theme={t}
+          email={email}
+          token={token}
+          onBack={() => {
+            setReturnTargetOrder(null)
+            setReturnDraft(null)
+          }}
+          onSuccess={handleReturnSuccess}
+          onGoToHelp={handleReturnGoToHelp}
+          onContinue={handleReturnContinue}
+          initialDraft={returnDraft ?? undefined}
+        />
+      ) : (
+        <>
       <PageHeader title="My Orders" subtitle="Track and manage all your orders in one place" icon={ShoppingBag} theme={t} />
 
       {isLoading ? (
@@ -1321,6 +1690,23 @@ function MyOrdersView({
             const cancellable = order.status === 'pending' || order.status === 'processing'
             const returnable = order.status === 'delivered'
             const invoiceLoading = invoiceLoadingId === order.id
+            // Task 4x: show the "Return Summary" button only if the user has
+            // previously confirmed a return request for this order (persisted
+            // in localStorage via returnRequestsByOrderId).
+            const hasReturnRequest = !!returnRequestsByOrderId[order.id]
+            // Task 4y: the effective status shown on the badge. If the user has
+            // confirmed a return request for this order, show "Return" instead
+            // of the backend status (e.g. "delivered").
+            const effectiveStatus = hasReturnRequest ? 'return' : order.status
+            // Task 4y: disable the "Return Order" button once a return has
+            // already been requested — the user should use "Return Summary"
+            // to view/edit the existing request instead of starting a new one.
+            const canRequestReturn = returnable && !hasReturnRequest
+            // Task 4y: format the "Return requested on" date from the stashed
+            // confirmedAt timestamp for the sub-headline under the product name.
+            const returnRequestedDate = hasReturnRequest
+              ? fmtDate(returnRequestsByOrderId[order.id].confirmedAt)
+              : ''
 
             return (
               <div
@@ -1339,9 +1725,8 @@ function MyOrdersView({
                   </div>
                   <div>
                     <p className={`text-[10px] font-semibold uppercase tracking-wider ${t.textMuted}`}>Ship To</p>
-                    <p className={`mt-1 inline-flex items-center gap-1 text-sm font-medium ${t.accentText}`}>
+                    <p className={`mt-1 text-sm font-medium ${t.accentText}`}>
                       {userName || 'Customer'}
-                      <ChevronDown className={`h-3 w-3 ${t.textMuted}`} />
                     </p>
                   </div>
                   <div className="sm:text-right">
@@ -1401,7 +1786,7 @@ function MyOrdersView({
                     <div className="mt-3">
                       <button
                         type="button"
-                        onClick={handleViewItem}
+                        onClick={() => handleViewItem(order)}
                         className={`block text-left text-sm leading-relaxed ${t.accentText} hover:underline`}
                       >
                         {firstItem?.name ?? 'Order item'}
@@ -1409,7 +1794,11 @@ function MyOrdersView({
                           <span className={`ml-1 ${t.textMuted}`}>&middot; +{(order.items?.length ?? 0) - 1} more item{(order.items?.length ?? 0) > 2 ? 's' : ''}</span>
                         )}
                       </button>
-                      {returnable ? (
+                      {hasReturnRequest ? (
+                        <p className={`mt-1.5 text-xs ${t.textMuted}`}>
+                          Return requested on {returnRequestedDate}
+                        </p>
+                      ) : returnable ? (
                         <p className={`mt-1.5 text-xs ${t.textMuted}`}>
                           Return window open until {fmtDate(order.estimatedDelivery || order.createdAt)}
                         </p>
@@ -1445,8 +1834,9 @@ function MyOrdersView({
                               </div>
                               <button
                                 type="button"
-                                onClick={() => selectProduct(item.productId || item.id)}
-                                className={`inline-flex items-center gap-1 text-[11px] font-medium ${t.accentText} hover:underline`}
+                                onClick={() => item.productId && selectProduct(item.productId)}
+                                disabled={!item.productId}
+                                className={`inline-flex items-center gap-1 text-[11px] font-medium ${t.accentText} hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline`}
                               >
                                 <Eye className="h-3 w-3" />
                                 View
@@ -1463,7 +1853,7 @@ function MyOrdersView({
                     {/* Cancel Order (replaces "Track package") */}
                     <button
                       type="button"
-                      onClick={() => { setCancelOrderId(order.id); setCancelDialogOpen(true) }}
+                      onClick={() => setCancelTargetOrder(order)}
                       disabled={!cancellable}
                       className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
                         cancellable
@@ -1480,17 +1870,36 @@ function MyOrdersView({
                     <button
                       type="button"
                       onClick={() => openReturnDialog(order)}
-                      disabled={!returnable}
+                      disabled={!canRequestReturn}
                       className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
-                        returnable
+                        canRequestReturn
                           ? `${t.cardBorder} ${t.textSecondary} hover:bg-amber-50 dark:hover:bg-amber-900/20`
                           : `${t.cardBorder} cursor-not-allowed ${t.textMuted} opacity-50`
                       }`}
-                      title={returnable ? 'Request a return for this order' : 'Returns are available only for delivered orders'}
+                      title={hasReturnRequest ? 'A return has already been requested for this order — click Return Summary to view it' : returnable ? 'Request a return for this order' : 'Returns are available only for delivered orders'}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       Return Order
                     </button>
+                    {/* Task 4x: Return Summary button — only shown if the user
+                        has previously confirmed a return request for this order.
+                        Clicking it re-opens the ReturnSummaryPage (Step 4)
+                        with the stashed draft + methodData + confirmedAt. */}
+                    {hasReturnRequest && (
+                      <button
+                        type="button"
+                        onClick={() => handleViewReturnSummary(order)}
+                        className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
+                          t.isDark
+                            ? 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10'
+                            : 'border-emerald-700/60 text-emerald-800 hover:bg-emerald-50'
+                        }`}
+                        title="View the return summary for this order"
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        Return Summary
+                      </button>
+                    )}
                     {/* "Leave delivery feedback" button intentionally removed per user spec */}
                   </div>
                 </div>
@@ -1507,18 +1916,18 @@ function MyOrdersView({
                   </button>
                   <button
                     type="button"
-                    onClick={handleViewItem}
+                    onClick={() => handleViewItem(order)}
                     className={`inline-flex items-center gap-1.5 rounded-full border ${t.isDark ? 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10' : 'border-amber-700/60 text-amber-800 hover:bg-amber-50'} px-4 py-2 text-xs font-semibold transition-all`}
                   >
                     <Eye className="h-3.5 w-3.5" />
-                    View your item
+                    View this item
                   </button>
                   {/* Order status badge — small confirmation of current state */}
                   <Badge
                     variant="outline"
-                    className={`ml-auto capitalize ${statusColor(order.status, t.isDark)}`}
+                    className={`ml-auto capitalize ${statusColor(effectiveStatus, t.isDark)}`}
                   >
-                    {order.status}
+                    {effectiveStatus}
                   </Badge>
                 </div>
               </div>
@@ -1527,84 +1936,631 @@ function MyOrdersView({
         </div>
       )}
 
-      {/* ── Cancel Order Dialog ── */}
-      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
-        <DialogContent className={`${t.cardBorder} ${t.cardBg} sm:max-w-md`}>
-          <DialogHeader>
-            <DialogTitle className={t.textPrimary}>Cancel Order</DialogTitle>
-            <DialogDescription className={t.textMuted}>Are you sure you want to cancel this order? This action cannot be undone.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div>
-              <Label htmlFor="cancel-reason" className={`text-sm ${t.textSecondary}`}>Reason for cancellation</Label>
-              <Input
-                id="cancel-reason"
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="Tell us why you're cancelling"
-                className={`mt-1 ${t.cardBorder} ${t.cardBg} ${t.textPrimary}`}
-              />
-            </div>
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => { setCancelDialogOpen(false); setCancelReason(''); setCancelOrderId(null) }}
-                className={`flex-1 ${t.cardBorder} ${t.textSecondary}`}
-              >
-                Keep Order
-              </Button>
-              <Button
-                onClick={handleCancelOrder}
-                disabled={cancelLoading}
-                className="flex-1 bg-red-600 text-white hover:bg-red-500"
-              >
-                {cancelLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Cancel Order'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* ── Return Order Dialog removed (Task 4r) ── */}
+      {/* The Return flow now opens the full-page ReturnOrderPage component
+          instead of this small modal dialog. The dialog markup, the
+          returnDialogOpen / returnOrderId / returnOrderNumber / returnReason
+          state, and the handleReturnOrder async function are kept only as
+          dead state — they will be cleaned up in a later refactor if needed.
+          The Dialog element below is intentionally not rendered. */}
+        </>
+      )}
+    </div>
+  )
+}
 
-      {/* ── Return Order Dialog ── */}
-      <Dialog open={returnDialogOpen} onOpenChange={setReturnDialogOpen}>
-        <DialogContent className={`${t.cardBorder} ${t.cardBg} sm:max-w-md`}>
-          <DialogHeader>
-            <DialogTitle className={t.textPrimary}>Return Order</DialogTitle>
-            <DialogDescription className={t.textMuted}>
-              Tell us why you'd like to return order #{returnOrderNumber}. Our support team will follow up shortly.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div>
-              <Label htmlFor="return-reason" className={`text-sm ${t.textSecondary}`}>Reason for return</Label>
-              <textarea
-                id="return-reason"
-                value={returnReason}
-                onChange={(e) => setReturnReason(e.target.value)}
-                placeholder="e.g. Wrong size, damaged in transit, changed my mind..."
-                rows={4}
-                className={`mt-1 w-full rounded-md border ${t.isDark ? 'border-amber-500/20 bg-stone-900/50' : 'border-amber-200 bg-white'} px-3 py-2 text-sm ${t.textPrimary} focus:outline-none focus:ring-2 focus:ring-amber-500/30`}
-              />
+/* ─────────────────────────────────────────────────────────────── */
+/* ── ORDER TRACKING VIEW (Task 4z)                               ── */
+/* ─────────────────────────────────────────────────────────────── */
+/* Displays the user's active orders (pending / processing / shipped)
+ * plus any orders that have a confirmed return request (even if the
+ * backend status is "delivered"). Delivered orders WITHOUT a return
+ * request are hidden — once delivered, the order "disappears" from
+ * tracking per the user spec.
+ *
+ * The card layout mirrors MyOrdersView exactly, EXCEPT the right-side
+ * action column has a single "Track Order" button (no Cancel / Return /
+ * Return Summary). Clicking "Track Order" expands an inline shipment
+ * timeline (stepper) showing the order's progress through the standard
+ * e-commerce stages: Order Placed → Processing → Shipped → Out for
+ * Delivery → Delivered, with a "Return Requested" step appended when
+ * a return has been confirmed. */
+
+function TrackOrdersView({
+  token, email, theme, setView, selectProduct, addItem, userName,
+}: {
+  token: string | null
+  email: string
+  theme: Theme
+  setView: (v: any) => void
+  selectProduct: (id: string) => void
+  addItem: (item: { productId: string; name: string; price: number; image: string }) => void
+  userName: string
+}) {
+  const t = theme
+  const { data, isLoading } = useQuery({
+    queryKey: ['user-orders-tracking', email],
+    queryFn: async () => {
+      const res = await fetch(`/api/orders?email=${encodeURIComponent(email)}`, { headers: authH(token) })
+      if (!res.ok) throw new Error('Failed')
+      return res.json()
+    },
+  })
+
+  // Persisted return requests (mirror of MyOrdersView — Task 4x/4y).
+  // Read-only here: we only need to know WHICH orders have a confirmed
+  // return request so we can (a) include them in the tracking list even
+  // if delivered, and (b) append a "Return Requested" step to their
+  // tracking timeline.
+  type ReturnRequestEntry = {
+    draft: ReturnDraft
+    methodData: ReturnMethodData
+    confirmedAt: string
+  }
+  const [returnRequestsByOrderId, setReturnRequestsByOrderId] = useState<Record<string, ReturnRequestEntry>>({})
+  const RETURN_REQUESTS_STORAGE_KEY = 'zendrite:return-requests-by-order-id'
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RETURN_REQUESTS_STORAGE_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, ReturnRequestEntry>
+        if (parsed && typeof parsed === 'object') {
+          setReturnRequestsByOrderId(parsed)
+        }
+      }
+    } catch {
+      // ignore malformed storage
+    }
+  }, [])
+
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
+  const [trackingExpandedId, setTrackingExpandedId] = useState<string | null>(null)
+  const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null)
+  // Task 4aa: when set, the dashboard renders the dedicated TrackOrderPage
+  // for this specific order (replaces the inline timeline accordion that
+  // Task 4z wired to the "Track Order" button).
+  const [trackTargetOrder, setTrackTargetOrder] = useState<any | null>(null)
+
+  const allOrders = Array.isArray(data?.orders) ? data.orders : []
+
+  // ── Filter (Task 4z core logic) ──
+  // Show: pending / processing / shipped (in-progress) + any order with a
+  // confirmed return request (even if delivered — the return is in-progress).
+  // Hide: delivered orders WITHOUT a return request, and all cancelled orders.
+  const orders = allOrders.filter((order: any) => {
+    const hasReturnRequest = !!returnRequestsByOrderId[order.id]
+    if (order.status === 'cancelled') return false
+    if (order.status === 'delivered' && !hasReturnRequest) return false
+    return true
+  })
+
+  // ── Download invoice as PDF (mirror of MyOrdersView) ──
+  const handleDownloadInvoice = useCallback(async (order: any) => {
+    setInvoiceLoadingId(order.id)
+    try {
+      const res = await fetch(`/api/orders/${order.id}/invoice`, { headers: authH(token) })
+      const invoiceData = await res.json().catch(() => null)
+
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' })
+      const pageWidth = doc.internal.pageSize.getWidth()
+      const margin = 40
+
+      doc.setFillColor(20, 16, 14)
+      doc.rect(0, 0, pageWidth, 80, 'F')
+      doc.setTextColor(219, 175, 54)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(20)
+      doc.text('3 BOXES LUXURY', margin, 35)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.setTextColor(245, 230, 163)
+      doc.text('Where luxury meets personalization', margin, 52)
+      doc.setFontSize(12)
+      doc.setTextColor(219, 175, 54)
+      doc.text('INVOICE', pageWidth - margin, 35, { align: 'right' })
+
+      let y = 110
+      doc.setTextColor(40, 40, 40)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      const displayOrderNumber = invoiceData?.order?.orderNumber || order.orderNumber || order.id.slice(-8).toUpperCase()
+      doc.text(`Order ${displayOrderNumber}`, margin, y)
+
+      y += 20
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.setTextColor(100, 100, 100)
+      doc.text(`Order Date: ${fmtDate(order.createdAt)}`, margin, y)
+      if (order.estimatedDelivery) {
+        doc.text(`Estimated Delivery: ${fmtDate(order.estimatedDelivery)}`, margin, y + 14)
+        y += 14
+      }
+      doc.text(`Status: ${order.status}`, margin, y + 14)
+      if (invoiceData?.invoice?.invoiceNumber) {
+        doc.text(`Invoice #: ${invoiceData.invoice.invoiceNumber}`, margin, y + 28)
+        y += 14
+      }
+      y += 30
+
+      doc.setDrawColor(212, 164, 55)
+      doc.setLineWidth(0.5)
+      doc.line(margin, y, pageWidth - margin, y)
+      y += 16
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.setTextColor(40, 40, 40)
+      doc.text('Item', margin, y)
+      doc.text('Qty', pageWidth - 200, y, { align: 'right' })
+      doc.text('Price', pageWidth - 130, y, { align: 'right' })
+      doc.text('Total', pageWidth - margin, y, { align: 'right' })
+      y += 8
+      doc.line(margin, y, pageWidth - margin, y)
+      y += 16
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.setTextColor(60, 60, 60)
+      const items = (order.items ?? []).length > 0 ? order.items : []
+      for (const item of items) {
+        const itemTotal = (item.price || 0) * (item.quantity || 1)
+        const name = (item.name || '').length > 60 ? (item.name || '').slice(0, 57) + '...' : (item.name || '')
+        doc.text(name, margin, y)
+        doc.text(String(item.quantity || 1), pageWidth - 200, y, { align: 'right' })
+        doc.text(fmt(item.price || 0), pageWidth - 130, y, { align: 'right' })
+        doc.text(fmt(itemTotal), pageWidth - margin, y, { align: 'right' })
+        y += 16
+        if (y > 720) { doc.addPage(); y = 60 }
+      }
+
+      y += 10
+      doc.line(margin, y, pageWidth - margin, y)
+      y += 16
+      const drawTotal = (label: string, value: string, bold = false) => {
+        doc.setFont('helvetica', bold ? 'bold' : 'normal')
+        doc.setTextColor(bold ? 40 : 100, bold ? 40 : 100, bold ? 40 : 100)
+        doc.text(label, pageWidth - 200, y)
+        doc.text(value, pageWidth - margin, y, { align: 'right' })
+        y += 16
+      }
+      drawTotal('Subtotal', fmt(order.subtotal))
+      drawTotal('Shipping', fmt(order.shipping))
+      drawTotal('Tax', fmt(order.tax))
+      if (order.discount && order.discount > 0) {
+        drawTotal('Discount', `- ${fmt(order.discount)}`)
+      }
+      y += 4
+      doc.setDrawColor(212, 164, 55)
+      doc.setLineWidth(1)
+      doc.line(pageWidth - 200, y, pageWidth - margin, y)
+      y += 16
+      drawTotal('Total', fmt(order.total), true)
+
+      const pageHeight = doc.internal.pageSize.getHeight()
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(8)
+      doc.setTextColor(150, 150, 150)
+      doc.text(
+        'Thank you for your purchase. This invoice was generated electronically and is valid without signature.',
+        margin, pageHeight - 30
+      )
+
+      doc.save(`Invoice-${displayOrderNumber}.pdf`)
+    } catch (err) {
+      console.error('Invoice generation failed:', err)
+      alert('Sorry, we could not generate the invoice. Please try again.')
+    } finally {
+      setInvoiceLoadingId(null)
+    }
+  }, [token])
+
+  // ── Buy Again — add the first item to cart + go to checkout ──
+  const handleBuyAgain = (order: any) => {
+    const firstItem = order.items?.[0]
+    if (!firstItem || !firstItem.productId) return
+    addItem({
+      productId: firstItem.productId,
+      name: firstItem.name,
+      price: firstItem.price,
+      image: firstItem.image || '',
+    })
+    setView('checkout')
+  }
+
+  // ── View Item — open the product detail page for the first item ──
+  const handleViewItem = (order: any) => {
+    const firstItem = order.items?.[0]
+    if (!firstItem || !firstItem.productId) return
+    selectProduct(firstItem.productId)
+  }
+
+  // ── Status label helpers (mirror of MyOrdersView) ──
+  const getStatusHeadline = (status: string, estimatedDelivery?: string, deliveredAt?: string) => {
+    if (status === 'delivered') {
+      return deliveredAt
+        ? `Delivered ${fmtDate(deliveredAt)}`
+        : 'Delivered'
+    }
+    if (status === 'shipped' && estimatedDelivery) {
+      return `Arriving ${fmtDate(estimatedDelivery)}`
+    }
+    if (status === 'processing') {
+      return 'Processing your order'
+    }
+    if (status === 'pending') {
+      return 'Order received'
+    }
+    if (status === 'cancelled') {
+      return 'Cancelled'
+    }
+    return status.charAt(0).toUpperCase() + status.slice(1)
+  }
+
+  const getStatusSubtitle = (status: string, estimatedDelivery?: string) => {
+    if (status === 'delivered') return 'Package was delivered successfully'
+    if (status === 'shipped') return estimatedDelivery ? `Expected delivery ${fmtDate(estimatedDelivery)}` : 'Package is on the way'
+    if (status === 'processing') return 'We are preparing your order for shipment'
+    if (status === 'pending') return 'Awaiting confirmation'
+    if (status === 'cancelled') return 'Order has been cancelled'
+    return ''
+  }
+
+  // ── Tracking timeline steps ──
+  // Returns an ordered list of shipment stages with completed/current flags
+  // so the stepper UI can render checkmarks, spinners, and empty circles.
+  // When the order has a confirmed return request, a "Return Requested" step
+  // is appended (marked as current — the return is in-progress).
+  const getTrackingSteps = (order: any, hasReturnRequest: boolean, returnRequestedDate: string) => {
+    const status = order.status
+    const steps = [
+      {
+        key: 'placed',
+        label: 'Order Placed',
+        date: fmtDate(order.createdAt),
+        completed: true,
+        current: false,
+      },
+      {
+        key: 'processing',
+        label: 'Processing',
+        date: 'We are preparing your order for shipment',
+        completed: ['processing', 'shipped', 'delivered'].includes(status),
+        current: status === 'processing' || status === 'pending',
+      },
+      {
+        key: 'shipped',
+        label: 'Shipped',
+        date: status === 'shipped' && order.trackingNumber
+          ? `Tracking: ${order.trackingNumber}`
+          : 'Package handed to courier',
+        completed: ['shipped', 'delivered'].includes(status),
+        current: status === 'shipped',
+      },
+      {
+        key: 'out_for_delivery',
+        label: 'Out for Delivery',
+        date: 'Courier is on the way to your address',
+        completed: status === 'delivered',
+        current: false,
+      },
+      {
+        key: 'delivered',
+        label: 'Delivered',
+        date: order.deliveredAt
+          ? `Package delivered on ${fmtDate(order.deliveredAt)}`
+          : 'Package delivered',
+        completed: status === 'delivered' && !hasReturnRequest,
+        current: status === 'delivered' && !hasReturnRequest,
+      },
+    ]
+    if (hasReturnRequest) {
+      steps.push({
+        key: 'return_requested',
+        label: 'Return Requested',
+        date: returnRequestedDate
+          ? `Return requested on ${returnRequestedDate}`
+          : 'Return request submitted',
+        completed: true,
+        current: true,
+      })
+    }
+    return steps
+  }
+
+  // ── Help navigation (Task 4aa) ──
+  // Mirrors handleReturnGoToHelp: clears the in-flight tracking page state
+  // and routes the user to the contact/support page. Reuses the same
+  // setView('contact') navigation the cancel/return flows use.
+  const handleTrackGoToHelp = () => {
+    setTrackTargetOrder(null)
+    setView('contact')
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Task 4aa: when the user clicks "Track Order" on a specific order,
+          render the dedicated TrackOrderPage instead of the list. */}
+      {trackTargetOrder ? (
+        <TrackOrderPage
+          order={trackTargetOrder}
+          theme={t}
+          email={email}
+          token={token}
+          userName={userName}
+          onBack={() => setTrackTargetOrder(null)}
+          onBuyAgain={handleBuyAgain}
+          onViewItem={handleViewItem}
+          onGoToHelp={handleTrackGoToHelp}
+          hasReturnRequest={!!returnRequestsByOrderId[trackTargetOrder.id]}
+          returnRequestedDate={
+            returnRequestsByOrderId[trackTargetOrder.id]
+              ? fmtDate(returnRequestsByOrderId[trackTargetOrder.id].confirmedAt)
+              : ''
+          }
+        />
+      ) : (
+      <>
+      <PageHeader title="Order Tracking" subtitle="Track your active and return-requested orders" icon={Truck} theme={t} />
+
+      {isLoading ? (
+        <Card className={`${t.cardBorder} ${t.cardBg} shadow-sm ${t.shadowColor}`}>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-amber-500" />
             </div>
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => { setReturnDialogOpen(false); setReturnReason(''); setReturnOrderId(null); setReturnOrderNumber('') }}
-                className={`flex-1 ${t.cardBorder} ${t.textSecondary}`}
+          </CardContent>
+        </Card>
+      ) : orders.length === 0 ? (
+        <Card className={`${t.cardBorder} ${t.cardBg} shadow-sm ${t.shadowColor}`}>
+          <CardContent className="p-4">
+            <EmptyState
+              icon={Truck}
+              title="No orders to track"
+              subtitle="Your active and return-requested orders will appear here once placed."
+              theme={t}
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {orders.map((order: any) => {
+            const firstItem = order.items?.[0]
+            const hasMultipleItems = (order.items?.length ?? 0) > 1
+            const isExpanded = expandedOrderId === order.id
+            const isTrackingExpanded = trackingExpandedId === order.id
+            const statusHeadline = getStatusHeadline(order.status, order.estimatedDelivery, order.deliveredAt)
+            const statusSubtitle = getStatusSubtitle(order.status, order.estimatedDelivery)
+            const invoiceLoading = invoiceLoadingId === order.id
+            const hasReturnRequest = !!returnRequestsByOrderId[order.id]
+            const effectiveStatus = hasReturnRequest ? 'return' : order.status
+            const returnRequestedDate = hasReturnRequest
+              ? fmtDate(returnRequestsByOrderId[order.id].confirmedAt)
+              : ''
+            const trackingSteps = getTrackingSteps(order, hasReturnRequest, returnRequestedDate)
+
+            return (
+              <div
+                key={order.id}
+                className={`overflow-hidden rounded-xl border ${t.cardBorder} ${t.cardBg} shadow-sm ${t.shadowColor}`}
               >
-                Keep Order
-              </Button>
-              <Button
-                onClick={handleReturnOrder}
-                disabled={returnLoading}
-                className="flex-1 luxury-accent-gradient-bg text-stone-950 font-semibold hover:opacity-90"
-              >
-                {returnLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit Return Request'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+                {/* ── Header row (4 columns: Order Placed | Total | Ship To | Order #) ── */}
+                <div className={`grid grid-cols-2 gap-4 px-5 py-4 sm:grid-cols-4 sm:gap-6 ${t.isDark ? 'bg-stone-900/40' : 'bg-amber-50/40'}`}>
+                  <div>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wider ${t.textMuted}`}>Order Placed</p>
+                    <p className={`mt-1 text-sm font-medium ${t.textPrimary}`}>{fmtDate(order.createdAt)}</p>
+                  </div>
+                  <div>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wider ${t.textMuted}`}>Total</p>
+                    <p className={`mt-1 text-sm font-medium ${t.textPrimary}`}>{fmt(order.total)}</p>
+                  </div>
+                  <div>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wider ${t.textMuted}`}>Ship To</p>
+                    <p className={`mt-1 text-sm font-medium ${t.accentText}`}>
+                      {userName || 'Customer'}
+                    </p>
+                  </div>
+                  <div className="sm:text-right">
+                    <p className={`text-[10px] font-semibold uppercase tracking-wider ${t.textMuted}`}>Order #</p>
+                    <p className={`mt-1 font-mono text-sm font-medium ${t.textPrimary}`}>
+                      {order.orderNumber ?? order.id.slice(-8).toUpperCase()}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 sm:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                        className={`text-xs font-medium ${t.accentText} hover:underline`}
+                      >
+                        View order details
+                      </button>
+                      <span className={t.textMuted}>|</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadInvoice(order)}
+                        disabled={invoiceLoading}
+                        className={`inline-flex items-center gap-1 text-xs font-medium ${t.accentText} hover:underline disabled:opacity-50`}
+                      >
+                        {invoiceLoading ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Download className="h-3 w-3" />
+                        )}
+                        Invoice
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Divider ── */}
+                <div className={`border-t ${t.hairline}`} />
+
+                {/* ── Main content row: image | status + product | action button ── */}
+                <div className="flex flex-col gap-4 p-5 md:flex-row md:items-start">
+                  {/* Product image */}
+                  <div className={`flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg border ${t.cardBorder} bg-stone-100 dark:bg-stone-800`}>
+                    {firstItem?.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={firstItem.image} alt={firstItem.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <Package className={`h-8 w-8 ${t.textMuted}`} />
+                    )}
+                  </div>
+
+                  {/* Status + product info */}
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-base font-bold ${t.textPrimary}`} style={{ fontFamily: 'var(--font-lora), Lora, serif' }}>
+                      {statusHeadline}
+                    </p>
+                    {statusSubtitle && (
+                      <p className={`mt-0.5 text-sm ${t.textSecondary}`}>{statusSubtitle}</p>
+                    )}
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => handleViewItem(order)}
+                        className={`block text-left text-sm leading-relaxed ${t.accentText} hover:underline`}
+                      >
+                        {firstItem?.name ?? 'Order item'}
+                        {hasMultipleItems && (
+                          <span className={`ml-1 ${t.textMuted}`}>&middot; +{(order.items?.length ?? 0) - 1} more item{(order.items?.length ?? 0) > 2 ? 's' : ''}</span>
+                        )}
+                      </button>
+                      {hasReturnRequest ? (
+                        <p className={`mt-1.5 text-xs ${t.textMuted}`}>
+                          Return requested on {returnRequestedDate}
+                        </p>
+                      ) : (
+                        <p className={`mt-1.5 text-xs ${t.textMuted}`}>
+                          {order.trackingNumber ? `Tracking: ${order.trackingNumber}` : 'Tracking will be available once shipped'}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Expanded items list (when "View order details" is clicked) */}
+                    {isExpanded && hasMultipleItems && (
+                      <div className={`mt-4 rounded-lg border ${t.cardBorder} ${t.cardBgSoft} p-3`}>
+                        <p className={`mb-2 text-xs font-semibold uppercase tracking-wider ${t.textMuted}`}>
+                          All items in this order
+                        </p>
+                        <ul className="space-y-2">
+                          {(order.items ?? []).map((item: any, idx: number) => (
+                            <li key={item.id ?? idx} className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-stone-100 dark:bg-stone-800">
+                                {item.image ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
+                                ) : (
+                                  <Package className={`h-4 w-4 ${t.textMuted}`} />
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className={`truncate text-xs font-medium ${t.textPrimary}`}>{item.name}</p>
+                                <p className={`text-[11px] ${t.textMuted}`}>Qty {item.quantity} &middot; {fmt(item.price)}</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => item.productId && selectProduct(item.productId)}
+                                disabled={!item.productId}
+                                className={`inline-flex items-center gap-1 text-[11px] font-medium ${t.accentText} hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline`}
+                              >
+                                <Eye className="h-3 w-3" />
+                                View
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action button column — only ONE button: Track Order (Task 4z) */}
+                  <div className="flex shrink-0 flex-col gap-2 md:w-44">
+                    <button
+                      type="button"
+                      onClick={() => setTrackTargetOrder(order)}
+                      className="inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500 px-4 py-2 text-xs font-bold text-stone-950 shadow-sm transition-all hover:from-amber-400 hover:via-amber-500 hover:to-amber-600 hover:shadow-md"
+                      title="Open the dedicated tracking page for this order"
+                    >
+                      <Truck className="h-3.5 w-3.5" />
+                      Track Order
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Tracking timeline (collapsible — shown when Track Order is clicked) ── */}
+                {isTrackingExpanded && (
+                  <div className={`border-t ${t.hairline} px-5 py-4 ${t.isDark ? 'bg-stone-900/30' : 'bg-amber-50/30'}`}>
+                    <p className={`mb-3 text-xs font-semibold uppercase tracking-wider ${t.textMuted}`}>
+                      Shipment Progress
+                    </p>
+                    <ol className="space-y-1">
+                      {trackingSteps.map((step, idx) => {
+                        const isLast = idx === trackingSteps.length - 1
+                        return (
+                          <li key={step.key} className="flex gap-3">
+                            <div className="flex flex-col items-center">
+                              {step.completed ? (
+                                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-600/20">
+                                  <Check className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
+                                </div>
+                              ) : step.current ? (
+                                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-600/20">
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-700 dark:text-amber-400" />
+                                </div>
+                              ) : (
+                                <div className={`flex h-6 w-6 items-center justify-center rounded-full border-2 ${t.isDark ? 'border-stone-600' : 'border-stone-300'} ${t.textMuted}`} />
+                              )}
+                              {!isLast && (
+                                <div className={`mt-0.5 h-8 w-0.5 ${step.completed ? (t.isDark ? 'bg-emerald-600/40' : 'bg-emerald-300') : (t.isDark ? 'bg-stone-700' : 'bg-stone-200')}`} />
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1 pb-2">
+                              <p className={`text-sm font-semibold ${step.completed || step.current ? t.textPrimary : t.textMuted}`}>
+                                {step.label}
+                              </p>
+                              {step.date && (
+                                <p className={`text-xs ${t.textMuted}`}>{step.date}</p>
+                              )}
+                            </div>
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  </div>
+                )}
+
+                {/* ── Bottom action row: Buy Again + View Item + status badge ── */}
+                <div className={`flex flex-wrap items-center gap-2 border-t ${t.hairline} px-5 py-3`}>
+                  <button
+                    type="button"
+                    onClick={() => handleBuyAgain(order)}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-300 via-amber-400 to-amber-500 px-4 py-2 text-xs font-bold text-stone-950 shadow-sm transition-all hover:from-amber-400 hover:via-amber-500 hover:to-amber-600 hover:shadow-md"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Buy it again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleViewItem(order)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border ${t.isDark ? 'border-amber-500/40 text-amber-200 hover:bg-amber-500/10' : 'border-amber-700/60 text-amber-800 hover:bg-amber-50'} px-4 py-2 text-xs font-semibold transition-all`}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    View this item
+                  </button>
+                  {/* Order status badge — small confirmation of current state */}
+                  <Badge
+                    variant="outline"
+                    className={`ml-auto capitalize ${statusColor(effectiveStatus, t.isDark)}`}
+                  >
+                    {effectiveStatus}
+                  </Badge>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+      </>
+      )}
     </div>
   )
 }
